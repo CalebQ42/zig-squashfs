@@ -1,4 +1,5 @@
-const std = @import("std");
+const math = @import("std").math;
+const InodeRef = @import("inode.zig").InodeRef;
 
 pub const SuperblockError = error{
     InvalidMagic,
@@ -31,7 +32,7 @@ pub const Superblock = packed struct {
     id_count: u16,
     ver_maj: u16,
     ver_min: u16,
-    root_inode: @import("inode.zig").InodeRef,
+    root_inode: InodeRef,
     size: u64,
     id_table: u64,
     xattr_table: u64,
@@ -43,7 +44,7 @@ pub const Superblock = packed struct {
     pub fn valid(self: Superblock) SuperblockError!void {
         if (self.magic != 0x73717368) {
             return SuperblockError.InvalidMagic;
-        } else if (self.block_log != std.math.log2(self.block_size)) {
+        } else if (self.block_log != math.log2(self.block_size)) {
             return SuperblockError.InvalidLog;
         } else if (self.ver_maj != 4 or self.ver_min != 0) {
             return SuperblockError.InvalidVersion;

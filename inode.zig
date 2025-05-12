@@ -4,7 +4,7 @@ pub const InodeRef = packed struct {
     offset: u16,
 };
 
-const InodeType = enum(u16) {
+pub const InodeType = enum(u16) {
     dir = 1,
     file,
     symlink,
@@ -30,21 +30,60 @@ pub const InodeHeader = packed struct {
     inode_num: u32,
 };
 
-const itypes = @import("inode_types.zig");
-
-const InodeData = union(enum) {
-    dir: itypes.DirInode,
-    file: itypes.FileInode,
-    symlink: itypes.SymlinkInode,
-    block_device: itypes.DeviceInode,
-    char_device: itypes.DeviceInode,
-    fifo: itypes.FifoInode,
-    socket: itypes.FifoInode,
-    ext_dir: itypes.ExtDirInode,
-    ext_file: itypes.ExtFileInode,
-    ext_symlink: itypes.ExtSymlinkInode,
-    ext_block_device: itypes.ExtDeviceInode,
-    ext_char_device: itypes.ExtDeviceInode,
-    ext_fifo: itypes.ExtFifoInode,
-    ext_socket: itypes.ExtFifoInode,
+pub const InodeData = union(enum) {
+    dir: dir.DirInode,
+    file: file.FileInode,
+    symlink: sym.SymlinkInode,
+    block_device: misc.DeviceInode,
+    char_device: misc.DeviceInode,
+    fifo: misc.IPCInode,
+    socket: misc.IPCInode,
+    ext_dir: dir.ExtDirInode,
+    ext_file: file.ExtFileInode,
+    ext_symlink: sym.ExtSymlinkInode,
+    ext_block_device: misc.ExtDeviceInode,
+    ext_char_device: misc.ExtDeviceInode,
+    ext_fifo: misc.IPCInode,
+    ext_socket: misc.IPCInode,
 };
+
+const dir = @import("inode_types/dir.zig");
+const file = @import("inode_types/file.zig");
+const sym = @import("inode_types/sym.zig");
+const misc = @import("inode_types/misc.zig");
+
+const Inode = struct {
+    header: InodeHeader,
+    data: InodeData,
+};
+
+const io = @import("std").io;
+
+pub fn readInode(rdr: io.AnyReader, block_size: u64) !Inode {
+    const hdr = try rdr.readStruct(InodeHeader);
+    const data: InodeData = undefined;
+    switch (hdr.inode_type) {
+        .dir => data = .{
+            .dir = dir.readDirInode(rdr),
+        },
+        .ext_dir => data = .{
+            .ext_dir = try dir.readExtDirInode(rdr),
+        },
+        .file => data = .{
+            .file = try file.readFileInode(rdr, block_size),
+        },
+        .ext_file => data = .{
+            .ext_file = try file.readExtFileInode(rdr, block_size),
+        },
+        .symlink => data = .{
+            .block_device = try misc.readSymlinkInode(rdr),
+        },
+        .ext_symlink => data = .{
+            .ext_symlink = try sym.readExtSymlinkInode(rdr),
+        },
+    }
+    return Inode{
+        .header = hdr,
+        .data = data,
+    };
+}
