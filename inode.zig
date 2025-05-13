@@ -1,3 +1,5 @@
+const std = @import("std");
+
 pub const InodeRef = packed struct {
     _: u16,
     block_start: u32,
@@ -52,14 +54,14 @@ const file = @import("inode_types/file.zig");
 const sym = @import("inode_types/sym.zig");
 const misc = @import("inode_types/misc.zig");
 
-const Inode = struct {
+pub const Inode = struct {
     header: InodeHeader,
     data: InodeData,
 };
 
 const io = @import("std").io;
 
-pub fn readInode(rdr: io.AnyReader, block_size: u64) !Inode {
+pub fn readInode(rdr: io.AnyReader, block_size: u64, alloc: std.heap.Allocator) !Inode {
     const hdr = try rdr.readStruct(InodeHeader);
     const data: InodeData = undefined;
     switch (hdr.inode_type) {
@@ -67,19 +69,19 @@ pub fn readInode(rdr: io.AnyReader, block_size: u64) !Inode {
             .dir = dir.readDirInode(rdr),
         },
         .ext_dir => data = .{
-            .ext_dir = try dir.readExtDirInode(rdr),
+            .ext_dir = try dir.readExtDirInode(rdr, alloc),
         },
         .file => data = .{
-            .file = try file.readFileInode(rdr, block_size),
+            .file = try file.readFileInode(rdr, block_size, alloc),
         },
         .ext_file => data = .{
-            .ext_file = try file.readExtFileInode(rdr, block_size),
+            .ext_file = try file.readExtFileInode(rdr, block_size, alloc),
         },
         .symlink => data = .{
-            .block_device = try misc.readSymlinkInode(rdr),
+            .block_device = try misc.readSymlinkInode(rdr, alloc),
         },
         .ext_symlink => data = .{
-            .ext_symlink = try sym.readExtSymlinkInode(rdr),
+            .ext_symlink = try sym.readExtSymlinkInode(rdr, alloc),
         },
     }
     return Inode{

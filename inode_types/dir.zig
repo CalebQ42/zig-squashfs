@@ -20,17 +20,15 @@ pub const DirIndex = struct {
     name: []const u8,
 };
 
-fn readDirIndex(rdr: io.AnyReader) !DirIndex {
+fn readDirIndex(rdr: io.AnyReader, alloc: std.heap.Allocator) !DirIndex {
     const out = DirIndex{
         .dir_header_offset = try rdr.readInt(u32, std.builtin.Endian.little),
         .dir_table_offset = try rdr.readInt(u32, std.builtin.Endian.little),
         .name_size = try rdr.readInt(u32, std.builtin.Endian.little),
         .name = undefined,
     };
-    const buf = try std.heap.page_allocator.alloc(u8, out.name_size);
-    defer std.heap.page_allocator.free(buf);
-    try rdr.read(buf);
-    out.name = buf[0..];
+    out.name = try alloc.alloc(u8, out.name_size);
+    try rdr.read(out.name);
     return out;
 }
 
@@ -45,7 +43,7 @@ pub const ExtDirInode = struct {
     indexes: []const DirIndex,
 };
 
-pub fn readExtDirInode(rdr: io.AnyReader) !ExtDirInode {
+pub fn readExtDirInode(rdr: io.AnyReader, alloc: std.heap.Allocator) !ExtDirInode {
     const out = ExtDirInode{
         .hard_links = rdr.readInt(u32, std.builtin.Endian.little),
         .dir_table_size = rdr.readInt(u32, std.builtin.Endian.little),
@@ -56,10 +54,12 @@ pub fn readExtDirInode(rdr: io.AnyReader) !ExtDirInode {
         .xattr_index = rdr.readInt(u32, std.builtin.Endian.little),
         .indexes = undefined,
     };
-    out.indexes = []const DirIndex{undefined} ** out.dir_index_count;
+    const tmp = std.ArrayList(DirIndex).init(alloc);
+    try tmp.resize(out.dir_index_count);
     const i: u16 = 0;
     while (i < out.dir_index_count) : (i += 1) {
-        out.indexes[i] = try readDirIndex(rdr);
+        tmp.items[i] = try readDirIndex(rdr, alloc);
     }
+    out.indexes = tmp.items;
     return out;
 }

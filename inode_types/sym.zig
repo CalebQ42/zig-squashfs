@@ -7,13 +7,14 @@ pub const SymlinkInode = struct {
     path: []const u8,
 };
 
-pub fn readSymlinkInode(rdr: io.AnyReader) !SymlinkInode {
+pub fn readSymlinkInode(rdr: io.AnyReader, alloc: std.heap.Allocator) !SymlinkInode {
     const out = SymlinkInode{
         .hard_links = try rdr.readInt(u32, std.builtin.Endian.little),
         .target_size = try rdr.readInt(u32, std.builtin.Endian.little),
         .path = undefined,
     };
-    out.path = (try rdr.readBoundedBytes(out.target_size + 1)).constSlice();
+    out.path = try alloc.alloc(u8, out.target_size + 1);
+    try rdr.read(out.path);
     return out;
 }
 
@@ -24,14 +25,15 @@ pub const ExtSymlinkInode = struct {
     xattr_index: u32,
 };
 
-pub fn readExtSymlinkInode(rdr: io.AnyReader) !SymlinkInode {
+pub fn readExtSymlinkInode(rdr: io.AnyReader, alloc: std.heap.Allocator) !SymlinkInode {
     const out = ExtSymlinkInode{
         .hard_links = try rdr.readInt(u32, std.builtin.Endian.little),
         .target_size = try rdr.readInt(u32, std.builtin.Endian.little),
         .path = undefined,
         .xattr_index = undefined,
     };
-    out.path = (try rdr.readBoundedBytes(out.target_size + 1)).constSlice();
+    out.path = try alloc.alloc(u8, out.target_size + 1);
+    try rdr.read(out.path);
     out.xattr_index = try rdr.readInt(u32, std.builtin.Endian.little);
     return out;
 }
