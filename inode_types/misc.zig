@@ -1,3 +1,5 @@
+const io = @import("std").io;
+
 pub const DeviceInode = packed struct {
     hard_links: u32,
     device: u32,

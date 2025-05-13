@@ -7,6 +7,15 @@ pub const SuperblockError = error{
     InvalidVersion,
 };
 
+pub const CompressionType = enum(u16) {
+    gzip = 1,
+    lzma,
+    lzo,
+    xz,
+    lz4,
+    zstd,
+};
+
 pub const Superblock = packed struct {
     magic: u32,
     count: u32,

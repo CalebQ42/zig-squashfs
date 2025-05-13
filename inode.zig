@@ -63,29 +63,51 @@ const io = @import("std").io;
 
 pub fn readInode(rdr: io.AnyReader, block_size: u64, alloc: std.heap.Allocator) !Inode {
     const hdr = try rdr.readStruct(InodeHeader);
-    const data: InodeData = undefined;
-    switch (hdr.inode_type) {
-        .dir => data = .{
-            .dir = dir.readDirInode(rdr),
-        },
-        .ext_dir => data = .{
-            .ext_dir = try dir.readExtDirInode(rdr, alloc),
-        },
-        .file => data = .{
-            .file = try file.readFileInode(rdr, block_size, alloc),
-        },
-        .ext_file => data = .{
-            .ext_file = try file.readExtFileInode(rdr, block_size, alloc),
-        },
-        .symlink => data = .{
-            .block_device = try misc.readSymlinkInode(rdr, alloc),
-        },
-        .ext_symlink => data = .{
-            .ext_symlink = try sym.readExtSymlinkInode(rdr, alloc),
-        },
-    }
     return Inode{
         .header = hdr,
-        .data = data,
+        .data = switch (hdr.inode_type) {
+            .dir => .{
+                .dir = dir.readDirInode(rdr),
+            },
+            .ext_dir => .{
+                .ext_dir = try dir.readExtDirInode(rdr, alloc),
+            },
+            .file => .{
+                .file = try file.readFileInode(rdr, block_size, alloc),
+            },
+            .ext_file => .{
+                .ext_file = try file.readExtFileInode(rdr, block_size, alloc),
+            },
+            .symlink => .{
+                .block_device = try misc.readSymlinkInode(rdr, alloc),
+            },
+            .ext_symlink => .{
+                .ext_symlink = try sym.readExtSymlinkInode(rdr, alloc),
+            },
+            .block_device => .{
+                .block_device = try rdr.readStruct(misc.DeviceInode),
+            },
+            .ext_block_device => .{
+                .ext_block_device = try rdr.readStruct(misc.ExtDeviceInode),
+            },
+            .char_device => .{
+                .char_device = try rdr.readStruct(misc.DeviceInode),
+            },
+            .ext_char_device => .{
+                .ext_char_device = try rdr.readStruct(misc.ExtDeviceInode),
+            },
+            .fifo => .{
+                .fifo = try rdr.readStruct(misc.IPCInode),
+            },
+            .ext_fifo => .{
+                .ext_fifo = try rdr.readStruct(misc.ExtIPCInode),
+            },
+            .socket => .{
+                .socket = try rdr.readStruct(misc.IPCInode),
+            },
+            .ext_socket => .{
+                .ext_socket = try rdr.readStruct(misc.ExtIPCInode),
+            },
+        },
     };
 }

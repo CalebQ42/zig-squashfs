@@ -19,7 +19,7 @@ pub const Reader = struct {
 pub fn newReader(filename: []const u8) !Reader {
     const file = try std.fs.cwd().openFile(filename, .{});
     errdefer file.close();
-    const alloc = std.heap.GeneralPurposeAllocator(.{});
+    const alloc = std.heap.GeneralPurposeAllocator(.{}).init();
     errdefer alloc.deinit();
     const super = try file.reader().readStruct(Superblock);
     try super.valid();
