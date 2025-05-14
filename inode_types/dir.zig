@@ -17,18 +17,18 @@ pub const DirIndex = struct {
     dir_header_offset: u32,
     dir_table_offset: u32,
     name_size: u32,
-    name: []const u8,
+    name: []u8,
 };
 
-fn readDirIndex(rdr: io.AnyReader, alloc: std.heap.Allocator) !DirIndex {
-    const out = DirIndex{
+fn readDirIndex(rdr: io.AnyReader, alloc: std.mem.Allocator) !DirIndex {
+    var out = DirIndex{
         .dir_header_offset = try rdr.readInt(u32, std.builtin.Endian.little),
         .dir_table_offset = try rdr.readInt(u32, std.builtin.Endian.little),
         .name_size = try rdr.readInt(u32, std.builtin.Endian.little),
         .name = undefined,
     };
     out.name = try alloc.alloc(u8, out.name_size);
-    try rdr.read(out.name);
+    _ = try rdr.readAll(out.name);
     return out;
 }
 
@@ -40,23 +40,23 @@ pub const ExtDirInode = struct {
     dir_index_count: u16,
     dir_block_offset: u16,
     xattr_index: u32,
-    indexes: []const DirIndex,
+    indexes: []DirIndex,
 };
 
-pub fn readExtDirInode(rdr: io.AnyReader, alloc: std.heap.Allocator) !ExtDirInode {
-    const out = ExtDirInode{
-        .hard_links = rdr.readInt(u32, std.builtin.Endian.little),
-        .dir_table_size = rdr.readInt(u32, std.builtin.Endian.little),
-        .dir_block_start = rdr.readInt(u32, std.builtin.Endian.little),
-        .parent_inode_num = rdr.readInt(u32, std.builtin.Endian.little),
-        .dir_index_count = rdr.readInt(u16, std.builtin.Endian.little),
-        .dir_block_offset = rdr.readInt(u16, std.builtin.Endian.little),
-        .xattr_index = rdr.readInt(u32, std.builtin.Endian.little),
+pub fn readExtDirInode(rdr: io.AnyReader, alloc: std.mem.Allocator) !ExtDirInode {
+    var out = ExtDirInode{
+        .hard_links = try rdr.readInt(u32, std.builtin.Endian.little),
+        .dir_table_size = try rdr.readInt(u32, std.builtin.Endian.little),
+        .dir_block_start = try rdr.readInt(u32, std.builtin.Endian.little),
+        .parent_inode_num = try rdr.readInt(u32, std.builtin.Endian.little),
+        .dir_index_count = try rdr.readInt(u16, std.builtin.Endian.little),
+        .dir_block_offset = try rdr.readInt(u16, std.builtin.Endian.little),
+        .xattr_index = try rdr.readInt(u32, std.builtin.Endian.little),
         .indexes = undefined,
     };
-    const tmp = std.ArrayList(DirIndex).init(alloc);
+    var tmp = std.ArrayList(DirIndex).init(alloc);
     try tmp.resize(out.dir_index_count);
-    const i: u16 = 0;
+    var i: u16 = 0;
     while (i < out.dir_index_count) : (i += 1) {
         tmp.items[i] = try readDirIndex(rdr, alloc);
     }

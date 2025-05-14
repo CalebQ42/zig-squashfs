@@ -8,8 +8,8 @@ pub const FileInode = struct {
     block_sizes: []const u32,
 };
 
-pub fn readFileInode(rdr: std.io.AnyReader, block_size: u32, alloc: std.heap.Allocator) !FileInode {
-    const out = FileInode{
+pub fn readFileInode(rdr: std.io.AnyReader, block_size: u32, alloc: std.mem.Allocator) !FileInode {
+    var out = FileInode{
         .start = try rdr.readInt(u32, std.builtin.Endian.little),
         .frag_index = try rdr.readInt(u32, std.builtin.Endian.little),
         .frag_block_offset = try rdr.readInt(u32, std.builtin.Endian.little),
@@ -21,7 +21,7 @@ pub fn readFileInode(rdr: std.io.AnyReader, block_size: u32, alloc: std.heap.All
         block_num += 1;
     }
     out.block_sizes = try alloc.alloc(u32, block_num);
-    try rdr.read(std.mem.asBytes(&out.block_sizes));
+    _ = try rdr.readAll(std.mem.asBytes(&out.block_sizes));
     return out;
 }
 
@@ -36,8 +36,8 @@ pub const ExtFileInode = struct {
     block_sizes: []const u32,
 };
 
-pub fn readExtFileInode(rdr: std.io.AnyReader, block_size: u32, alloc: std.heap.Allocator) !ExtFileInode {
-    const out = ExtFileInode{
+pub fn readExtFileInode(rdr: std.io.AnyReader, block_size: u32, alloc: std.mem.Allocator) !ExtFileInode {
+    var out = ExtFileInode{
         .start = try rdr.readInt(u64, std.builtin.Endian.little),
         .size = try rdr.readInt(u64, std.builtin.Endian.little),
         .sparse = try rdr.readInt(u64, std.builtin.Endian.little),
@@ -52,6 +52,6 @@ pub fn readExtFileInode(rdr: std.io.AnyReader, block_size: u32, alloc: std.heap.
         block_num += 1;
     }
     out.block_sizes = try alloc.alloc(u32, block_num);
-    try rdr.read(std.mem.asBytes(&out.block_sizes));
+    _ = try rdr.readAll(std.mem.asBytes(&out.block_sizes));
     return out;
 }

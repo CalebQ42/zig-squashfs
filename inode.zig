@@ -45,8 +45,8 @@ pub const InodeData = union(enum) {
     ext_symlink: sym.ExtSymlinkInode,
     ext_block_device: misc.ExtDeviceInode,
     ext_char_device: misc.ExtDeviceInode,
-    ext_fifo: misc.IPCInode,
-    ext_socket: misc.IPCInode,
+    ext_fifo: misc.ExtIPCInode,
+    ext_socket: misc.ExtIPCInode,
 };
 
 const dir = @import("inode_types/dir.zig");
@@ -61,13 +61,13 @@ pub const Inode = struct {
 
 const io = @import("std").io;
 
-pub fn readInode(rdr: io.AnyReader, block_size: u64, alloc: std.heap.Allocator) !Inode {
+pub fn readInode(rdr: io.AnyReader, block_size: u32, alloc: std.mem.Allocator) !Inode {
     const hdr = try rdr.readStruct(InodeHeader);
     return Inode{
         .header = hdr,
         .data = switch (hdr.inode_type) {
             .dir => .{
-                .dir = dir.readDirInode(rdr),
+                .dir = try dir.readDirInode(rdr),
             },
             .ext_dir => .{
                 .ext_dir = try dir.readExtDirInode(rdr, alloc),
@@ -79,7 +79,7 @@ pub fn readInode(rdr: io.AnyReader, block_size: u64, alloc: std.heap.Allocator) 
                 .ext_file = try file.readExtFileInode(rdr, block_size, alloc),
             },
             .symlink => .{
-                .block_device = try misc.readSymlinkInode(rdr, alloc),
+                .symlink = try sym.readSymlinkInode(rdr, alloc),
             },
             .ext_symlink => .{
                 .ext_symlink = try sym.readExtSymlinkInode(rdr, alloc),

@@ -5,6 +5,6 @@ const squashfs = @import("squashfs.zig");
 const testFileName = "testing/LinuxPATest.sfs";
 
 test "open test file" {
-    const reader = try squashfs.newReader(testFileName);
+    var reader = try squashfs.newReader(testFileName);
     defer reader.close();
 }

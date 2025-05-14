@@ -2,30 +2,35 @@ const std = @import("std");
 const fs = std.fs;
 
 const Superblock = @import("superblock.zig").Superblock;
-const Inode = @import("inode.zig").Inode;
+const inode = @import("inode.zig");
+const MetadataReader = @import("metadata_reader.zig").MetadataReader;
 
 pub const Reader = struct {
     super: Superblock,
     rdr: fs.File,
-    root: Inode,
+    root: inode.Inode,
     alloc: std.heap.GeneralPurposeAllocator(.{}),
 
-    pub fn close(self: Reader) void {
+    pub fn close(self: *Reader) void {
         self.rdr.close();
-        self.alloc.deinit();
+        _ = self.alloc.deinit();
     }
 };
 
 pub fn newReader(filename: []const u8) !Reader {
     const file = try std.fs.cwd().openFile(filename, .{});
     errdefer file.close();
-    const alloc = std.heap.GeneralPurposeAllocator(.{}).init();
-    errdefer alloc.deinit();
+    var alloc: std.heap.GeneralPurposeAllocator(.{}) = .init;
+    errdefer _ = alloc.deinit();
     const super = try file.reader().readStruct(Superblock);
     try super.valid();
+    try file.seekTo(super.inode_table + super.root_inode.block_start);
+    var root_reader: MetadataReader = try .init(super.comp, file.reader().any(), alloc.allocator());
+    const root_inode = try inode.readInode(root_reader.any(), super.block_size, alloc.allocator());
     return Reader{
         .super = super,
         .rdr = file,
+        .root = root_inode,
         .alloc = alloc,
     };
 }

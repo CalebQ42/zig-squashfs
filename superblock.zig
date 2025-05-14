@@ -1,19 +1,11 @@
 const math = @import("std").math;
 const InodeRef = @import("inode.zig").InodeRef;
+const CompressionType = @import("decompress.zig").CompressionType;
 
 pub const SuperblockError = error{
     InvalidMagic,
     InvalidLog,
     InvalidVersion,
-};
-
-pub const CompressionType = enum(u16) {
-    gzip = 1,
-    lzma,
-    lzo,
-    xz,
-    lz4,
-    zstd,
 };
 
 pub const Superblock = packed struct {
@@ -22,7 +14,7 @@ pub const Superblock = packed struct {
     mod_time: u32,
     block_size: u32,
     frags: u32,
-    comp: u16,
+    comp: CompressionType,
     block_log: u16,
     flags: packed struct {
         inode_uncomp: bool,
