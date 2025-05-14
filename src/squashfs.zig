@@ -5,6 +5,7 @@ const Superblock = @import("superblock.zig").Superblock;
 const inode = @import("inode.zig");
 const MetadataReader = @import("metadata_reader.zig").MetadataReader;
 const File = @import("file.zig").File;
+const FileOffsetReader = @import("file_offset_reader.zig").FileOffsetReader;
 
 pub const Reader = struct {
     super: Superblock,
@@ -25,15 +26,24 @@ pub fn newReader(filename: []const u8) !Reader {
     errdefer _ = alloc.deinit();
     const super = try file.reader().readStruct(Superblock);
     try super.valid();
-    try file.seekTo(super.inode_table + super.root_inode.block_start);
-    var root_reader: MetadataReader = try .init(super.comp, file.reader().any(), alloc.allocator());
+    var offset_rdr: FileOffsetReader = .init(file, super.inode_table + super.root_inode.block_start);
+    var root_reader: MetadataReader = try .init(
+        super.comp,
+        offset_rdr.any(),
+        alloc.allocator(),
+    );
     defer root_reader.deinit();
     try root_reader.skip(super.root_inode.offset);
-    const root_inode = try inode.readInode(root_reader.any(), super.block_size, alloc.allocator());
-    return Reader{
+    var out: Reader = undefined;
+    out = Reader{
         .super = super,
         .rdr = file,
-        .root = root_inode,
+        .root = .{
+            .inode = try inode.readInode(root_reader.any(), super.block_size, alloc.allocator()),
+            .name = "",
+            .rdr = &out,
+        },
         .alloc = alloc,
     };
+    return out;
 }
