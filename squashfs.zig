@@ -23,7 +23,6 @@ pub fn newReader(filename: []const u8) !Reader {
     errdefer alloc.deinit();
     const super = try file.reader().readStruct(Superblock);
     try super.valid();
-
     return Reader{
         .super = super,
         .rdr = file,
