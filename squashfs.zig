@@ -9,23 +9,25 @@ pub const Reader = struct {
     super: Superblock,
     rdr: fs.File,
     root: inode.Inode,
-    alloc: std.heap.GeneralPurposeAllocator(.{}),
+    alloc: std.heap.ArenaAllocator,
 
-    pub fn close(self: *Reader) void {
+    pub fn deinit(self: *Reader) void {
         self.rdr.close();
-        _ = self.alloc.deinit();
+        self.alloc.deinit();
     }
 };
 
 pub fn newReader(filename: []const u8) !Reader {
     const file = try std.fs.cwd().openFile(filename, .{});
     errdefer file.close();
-    var alloc: std.heap.GeneralPurposeAllocator(.{}) = .init;
+    var alloc: std.heap.ArenaAllocator = .init(std.heap.page_allocator);
     errdefer _ = alloc.deinit();
     const super = try file.reader().readStruct(Superblock);
     try super.valid();
     try file.seekTo(super.inode_table + super.root_inode.block_start);
     var root_reader: MetadataReader = try .init(super.comp, file.reader().any(), alloc.allocator());
+    defer root_reader.deinit();
+    try root_reader.skip(super.root_inode.offset);
     const root_inode = try inode.readInode(root_reader.any(), super.block_size, alloc.allocator());
     return Reader{
         .super = super,

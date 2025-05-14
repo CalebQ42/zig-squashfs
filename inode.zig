@@ -1,9 +1,9 @@
 const std = @import("std");
 
 pub const InodeRef = packed struct {
-    _: u16,
-    block_start: u32,
     offset: u16,
+    block_start: u32,
+    _: u16,
 };
 
 pub const InodeType = enum(u16) {
@@ -67,10 +67,10 @@ pub fn readInode(rdr: io.AnyReader, block_size: u32, alloc: std.mem.Allocator) !
         .header = hdr,
         .data = switch (hdr.inode_type) {
             .dir => .{
-                .dir = try dir.readDirInode(rdr),
+                .dir = try .init(rdr),
             },
             .ext_dir => .{
-                .ext_dir = try dir.readExtDirInode(rdr, alloc),
+                .ext_dir = try .init(rdr, alloc),
             },
             .file => .{
                 .file = try file.readFileInode(rdr, block_size, alloc),

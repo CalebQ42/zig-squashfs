@@ -4,8 +4,8 @@ const io = std.io;
 const CompressionType = @import("decompress.zig").CompressionType;
 
 const MetadataHeader = packed struct {
-    not_compressed: bool,
     size: u15,
+    not_compressed: bool,
 };
 
 pub const MetadataReader = struct {
@@ -14,6 +14,7 @@ pub const MetadataReader = struct {
     decomp: CompressionType,
     curBlock: []u8,
     curOffset: u16,
+    free: bool = false,
 
     pub fn init(decomp: CompressionType, rdr: io.AnyReader, alloc: std.mem.Allocator) !MetadataReader {
         var out: MetadataReader = .{
@@ -26,11 +27,24 @@ pub const MetadataReader = struct {
         try out.readNextBlock();
         return out;
     }
+    pub fn deinit(self: *MetadataReader) void {
+        self.alloc.free(self.curBlock);
+    }
     pub fn any(self: *MetadataReader) io.AnyReader {
         return .{
             .context = @ptrCast(self),
             .readFn = readOpaque,
         };
+    }
+    pub fn skip(self: *MetadataReader, offset: u16) !void {
+        var to_skip = offset;
+        var cur_left = self.curBlock.len - self.curOffset;
+        while (to_skip > cur_left) {
+            to_skip -= @intCast(cur_left);
+            try self.readNextBlock();
+            cur_left = self.curBlock.len;
+        }
+        self.curOffset = to_skip;
     }
 
     fn readNextBlock(self: *MetadataReader) !void {
@@ -52,12 +66,10 @@ pub const MetadataReader = struct {
         var cur_read: usize = 0;
         var to_read: usize = 0;
         while (cur_read < bytes.len) {
-            std.debug.print("hello there!, {}\n", .{cur_read});
             if (self.curOffset + 1 == self.curBlock.len) {
                 try self.readNextBlock();
             }
             to_read = @min(bytes.len - cur_read, self.curBlock.len - self.curOffset);
-            std.debug.print("{} {} {}\n", .{ cur_read, to_read, self.curOffset });
             std.mem.copyForwards(u8, bytes[cur_read..], self.curBlock[self.curOffset .. self.curOffset + to_read]);
             self.curOffset += @truncate(to_read);
             cur_read += to_read;
