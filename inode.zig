@@ -73,16 +73,16 @@ pub fn readInode(rdr: io.AnyReader, block_size: u32, alloc: std.mem.Allocator) !
                 .ext_dir = try .init(rdr, alloc),
             },
             .file => .{
-                .file = try file.readFileInode(rdr, block_size, alloc),
+                .file = try .init(rdr, block_size, alloc),
             },
             .ext_file => .{
-                .ext_file = try file.readExtFileInode(rdr, block_size, alloc),
+                .ext_file = try .init(rdr, block_size, alloc),
             },
             .symlink => .{
-                .symlink = try sym.readSymlinkInode(rdr, alloc),
+                .symlink = try .init(rdr, alloc),
             },
             .ext_symlink => .{
-                .ext_symlink = try sym.readExtSymlinkInode(rdr, alloc),
+                .ext_symlink = try .init(rdr, alloc),
             },
             .block_device => .{
                 .block_device = try rdr.readStruct(misc.DeviceInode),

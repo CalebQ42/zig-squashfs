@@ -8,5 +8,4 @@ const testFileName = "testing/LinuxPATest.sfs";
 test "open test file" {
     var reader = try squashfs.newReader(testFileName);
     defer reader.deinit();
-    print("{}\n", .{reader.root});
 }

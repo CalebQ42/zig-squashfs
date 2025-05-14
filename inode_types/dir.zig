@@ -53,13 +53,11 @@ pub const ExtDirInode = struct {
             .xattr_index = try rdr.readInt(u32, std.builtin.Endian.little),
             .indexes = undefined,
         };
-        var tmp = std.ArrayList(DirIndex).init(alloc);
-        try tmp.resize(out.dir_index_count);
+        out.indexes = try alloc.alloc(DirIndex, out.dir_index_count);
         var i: u16 = 0;
         while (i < out.dir_index_count) : (i += 1) {
-            tmp.items[i] = try .init(rdr, alloc);
+            out.indexes[i] = try .init(rdr, alloc);
         }
-        out.indexes = tmp.items;
         return out;
     }
 };

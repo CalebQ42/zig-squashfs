@@ -4,23 +4,24 @@ const fs = std.fs;
 const Superblock = @import("superblock.zig").Superblock;
 const inode = @import("inode.zig");
 const MetadataReader = @import("metadata_reader.zig").MetadataReader;
+const File = @import("file.zig").File;
 
 pub const Reader = struct {
     super: Superblock,
     rdr: fs.File,
-    root: inode.Inode,
-    alloc: std.heap.ArenaAllocator,
+    root: File,
+    alloc: std.heap.GeneralPurposeAllocator(.{}),
 
     pub fn deinit(self: *Reader) void {
         self.rdr.close();
-        self.alloc.deinit();
+        // _ = self.alloc.deinit();
     }
 };
 
 pub fn newReader(filename: []const u8) !Reader {
     const file = try std.fs.cwd().openFile(filename, .{});
     errdefer file.close();
-    var alloc: std.heap.ArenaAllocator = .init(std.heap.page_allocator);
+    var alloc: std.heap.GeneralPurposeAllocator(.{}) = .init;
     errdefer _ = alloc.deinit();
     const super = try file.reader().readStruct(Superblock);
     try super.valid();
