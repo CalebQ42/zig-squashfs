@@ -3,7 +3,7 @@ const io = std.io;
 
 const CompressionType = @import("decompress.zig").CompressionType;
 
-const MetadataHeader = packed struct {
+pub const MetadataHeader = packed struct {
     size: u15,
     not_compressed: bool,
 };

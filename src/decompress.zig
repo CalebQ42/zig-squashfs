@@ -14,7 +14,7 @@ pub const CompressionType = enum(u16) {
     lz4,
     zstd,
 
-    pub fn Decompress(self: CompressionType, alloc: std.mem.Allocator, rdr: std.io.AnyReader) ![]u8 {
+    pub fn decompress(self: CompressionType, alloc: std.mem.Allocator, rdr: std.io.AnyReader) ![]u8 {
         var out = std.ArrayList(u8).init(alloc);
         defer out.deinit();
         switch (self) {

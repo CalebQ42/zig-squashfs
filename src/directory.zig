@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const CompressionType = @import("decompress.zig").CompressionType;
+
 const DirHeader = packed struct {
     count: u32,
     inode_block_start: u32,
@@ -43,3 +45,33 @@ pub const DirEntry = struct {
     }
 };
 
+const MetadataHeader = @import("metadata_reader.zig").MetadataHeader;
+
+pub fn readDirEntries(alloc: std.mem.Allocator, comp: CompressionType, rdr: std.io.AnyReader, size: u32) ![]DirEntry {
+    var total_size: u32 = 3;
+    var meta_hdr: MetadataHeader = undefined;
+    var dir_hdr: DirHeader = undefined;
+    var buf: []u8 = undefined;
+    var buf_rdr: std.io.FixedBufferStream(u8) = undefined;
+    var i = 0;
+    var entries: std.ArrayList(DirEntry) = .init(alloc);
+    defer alloc.free(buf);
+    while (total_size < size) {
+        meta_hdr = try rdr.readStruct(MetadataHeader);
+        if (meta_hdr.not_compressed) {
+            buf = try alloc.realloc(buf, meta_hdr.size);
+            _ = try rdr.readAll(rdr);
+        } else {
+            alloc.free(buf);
+            buf = try comp.Decompress(alloc, std.io.limitedReader(rdr, meta_hdr.size));
+        }
+        buf_rdr = std.io.fixedBufferStream(buf);
+        dir_hdr = try buf_rdr.reader().readStruct(DirHeader);
+        total_size += 12;
+        i = 0;
+        while (i < dir_hdr.count) : (i += 1) {
+            entries.append(try .init(try .init(buf_rdr, alloc), dir_hdr));
+        }
+    }
+    return try entries.toOwnedSlice();
+}
