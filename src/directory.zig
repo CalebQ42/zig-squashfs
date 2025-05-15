@@ -15,8 +15,8 @@ const RawDirEntry = struct {
     name_size: u16,
     name: []u8,
 
-    fn init(rdr: std.io.AnyReader, alloc: std.mem.Allocator) !DirEntry {
-        var out: DirEntry = .{
+    fn init(rdr: std.io.AnyReader, alloc: std.mem.Allocator) !RawDirEntry {
+        var out: RawDirEntry = .{
             .inode_offset = try rdr.readInt(u16, std.builtin.Endian.little),
             .inode_num_difference = try rdr.readInt(i16, std.builtin.Endian.little),
             .inode_type = try rdr.readInt(u16, std.builtin.Endian.little),
@@ -39,7 +39,7 @@ pub const DirEntry = struct {
         return .{
             .inode_offset = raw.inode_offset,
             .inode_block_start = hdr.inode_block_start,
-            .inode_num = hdr.inode_num - raw.inode_num_difference,
+            .inode_num = hdr.inode_num + @as(u32, @intCast(raw.inode_num_difference)),
             .name = raw.name,
         };
     }
@@ -52,25 +52,29 @@ pub fn readDirEntries(alloc: std.mem.Allocator, comp: CompressionType, rdr: std.
     var meta_hdr: MetadataHeader = undefined;
     var dir_hdr: DirHeader = undefined;
     var buf: []u8 = undefined;
-    var buf_rdr: std.io.FixedBufferStream(u8) = undefined;
-    var i = 0;
-    var entries: std.ArrayList(DirEntry) = .init(alloc);
     defer alloc.free(buf);
+    var buf_rdr: std.io.FixedBufferStream([]u8) = undefined;
+    var i: u32 = 0;
+    var entries: std.ArrayList(DirEntry) = .init(alloc);
+    var raw: RawDirEntry = undefined;
     while (total_size < size) {
         meta_hdr = try rdr.readStruct(MetadataHeader);
         if (meta_hdr.not_compressed) {
             buf = try alloc.realloc(buf, meta_hdr.size);
-            _ = try rdr.readAll(rdr);
+            _ = try rdr.readAll(buf);
         } else {
             alloc.free(buf);
-            buf = try comp.Decompress(alloc, std.io.limitedReader(rdr, meta_hdr.size));
+            var limit = std.io.limitedReader(rdr, meta_hdr.size);
+            buf = try comp.decompress(alloc, limit.reader().any());
         }
         buf_rdr = std.io.fixedBufferStream(buf);
         dir_hdr = try buf_rdr.reader().readStruct(DirHeader);
         total_size += 12;
         i = 0;
         while (i < dir_hdr.count) : (i += 1) {
-            entries.append(try .init(try .init(buf_rdr, alloc), dir_hdr));
+            raw = try .init(buf_rdr.reader().any(), alloc);
+            total_size += @sizeOf(RawDirEntry);
+            try entries.append(.init(raw, dir_hdr));
         }
     }
     return try entries.toOwnedSlice();

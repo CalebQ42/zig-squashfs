@@ -1,10 +1,10 @@
 const std = @import("std");
 
 pub const FileOffsetReader = struct {
-    file: std.fs.File,
+    file: *std.fs.File,
     offset: u64,
 
-    pub fn init(file: std.fs.File, initial_offset: u64) FileOffsetReader {
+    pub fn init(file: *std.fs.File, initial_offset: u64) FileOffsetReader {
         return .{
             .file = file,
             .offset = initial_offset,

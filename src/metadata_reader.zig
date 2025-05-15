@@ -14,7 +14,6 @@ pub const MetadataReader = struct {
     decomp: CompressionType,
     curBlock: []u8,
     curOffset: u16,
-    free: bool = false,
 
     pub fn init(decomp: CompressionType, rdr: io.AnyReader, alloc: std.mem.Allocator) !MetadataReader {
         var out: MetadataReader = .{
@@ -58,7 +57,7 @@ pub const MetadataReader = struct {
             _ = try self.rdr.readAll(self.curBlock);
         } else {
             var limit_rdr = std.io.limitedReader(self.rdr, hdr.size);
-            self.curBlock = try self.decomp.Decompress(self.alloc, limit_rdr.reader().any());
+            self.curBlock = try self.decomp.decompress(self.alloc, limit_rdr.reader().any());
         }
     }
 
