@@ -1,45 +1,44 @@
 const std = @import("std");
-const compress = std.compress;
+const io = std.io;
 
 const DecompressError = error{
-    LzoNotSupported,
-    Lz4NotSupported,
+    LzoUnsupported,
+    Lz4Unsupported,
 };
 
-pub const CompressionType = enum(u16) {
-    gzip = 1,
+pub const DecompressType = enum(u16) {
+    zlib = 1,
     lzma,
     lzo,
     xz,
     lz4,
     zstd,
 
-    pub fn decompress(self: CompressionType, alloc: std.mem.Allocator, rdr: std.io.AnyReader) ![]u8 {
-        var out = std.ArrayList(u8).init(alloc);
-        defer out.deinit();
+    pub fn decompress(self: DecompressType, alloc: std.mem.Allocator, in: io.AnyReader) !std.ArrayList(u8) {
+        const out: std.ArrayList(u8) = .init(alloc);
         switch (self) {
-            .gzip => try compress.zlib.decompress(rdr, out.writer()),
+            .zlib => try std.compress.zlib.decompress(in, out),
             .lzma => {
-                var decomp = try compress.lzma.decompress(alloc, rdr);
+                const decomp = try std.compress.lzma.decompress(alloc, in);
                 defer decomp.deinit();
-                try decomp.reader().readAllArrayList(&out, 1024 * 1024);
+                try decomp.reader().readAllArrayList(&out, 1048576);
             },
-            .lzo => return DecompressError.LzoNotSupported,
+            .lzo => return DecompressError.LzoUnsupported,
             .xz => {
-                var decomp = try compress.xz.decompress(alloc, rdr);
+                const decomp = try std.compress.xz.decompress(alloc, in);
                 defer decomp.deinit();
-                try decomp.reader().readAllArrayList(&out, 1024 * 1024);
+                try decomp.reader().readAllArrayList(&out, 1048576);
             },
-            .lz4 => return DecompressError.Lz4NotSupported,
+            .lz4 => return DecompressError.Lz4Unsupported,
             .zstd => {
-                const buf = try alloc.alloc(u8, compress.zstd.DecompressorOptions.default_window_buffer_len);
+                const buf = try alloc.alloc(u8, std.compress.zstd.DecompressorOptions.default_window_buffer_len);
                 defer alloc.free(buf);
-                var decomp = compress.zstd.decompressor(rdr, .{
+                const decomp = std.compress.zstd.decompressor(in, .{
                     .window_buffer = buf,
                 });
-                try decomp.reader().readAllArrayList(&out, 1024 * 1024);
+                try decomp.reader().readAllArrayList(&out, 1048576);
             },
         }
-        return try out.toOwnedSlice();
+        return out;
     }
 };

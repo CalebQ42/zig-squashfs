@@ -1,52 +1,37 @@
 const math = @import("std").math;
-const InodeRef = @import("inode.zig").InodeRef;
-const CompressionType = @import("decompress.zig").CompressionType;
 
-pub const SuperblockError = error{
+const SuperblockError = error{
     InvalidMagic,
-    InvalidLog,
+    InvalidBlockLog,
     InvalidVersion,
 };
 
 pub const Superblock = packed struct {
     magic: u32,
-    count: u32,
+    inode_count: u32,
     mod_time: u32,
     block_size: u32,
-    frags: u32,
-    comp: CompressionType,
+    frag_count: u32,
+    decomp: @import("decompress.zig").DecompressType,
     block_log: u16,
-    flags: packed struct {
-        inode_uncomp: bool,
-        data_uncomp: bool,
-        _unused: bool,
-        frag_uncomp: bool,
-        frag_always: bool,
-        data_dedupe: bool,
-        export_table: bool,
-        xattr_uncomp: bool,
-        no_xattr: bool,
-        comp_options: bool,
-        id_uncomp: bool,
-        _padding: u5,
-    },
+    flags: u16,
     id_count: u16,
     ver_maj: u16,
     ver_min: u16,
-    root_inode: InodeRef,
+    root_ref: @import("inode/inode.zig").InodeRef,
     size: u64,
-    id_table: u64,
-    xattr_table: u64,
-    inode_table: u64,
-    dir_table: u64,
-    frag_table: u64,
-    export_table: u64,
+    id_table_start: u64,
+    xattr_table_start: u64,
+    inode_table_start: u64,
+    dir_table_start: u64,
+    frag_table_start: u64,
+    export_table_start: u64,
 
-    pub fn valid(self: Superblock) SuperblockError!void {
+    pub fn validate(self: Superblock) SuperblockError!void {
         if (self.magic != 0x73717368) {
             return SuperblockError.InvalidMagic;
         } else if (self.block_log != math.log2(self.block_size)) {
-            return SuperblockError.InvalidLog;
+            return SuperblockError.InvalidBlockLog;
         } else if (self.ver_maj != 4 or self.ver_min != 0) {
             return SuperblockError.InvalidVersion;
         }

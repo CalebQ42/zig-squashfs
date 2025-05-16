@@ -1,3 +1,3 @@
-pub const Reader = @import("squashfs.zig").Reader;
+pub const Reader = @import("reader.zig").Reader;
 
 pub const File = @import("file.zig").File;

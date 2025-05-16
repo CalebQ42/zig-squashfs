@@ -1,0 +1,70 @@
+const std = @import("std");
+const io = std.io;
+
+const DecompressType = @import("../decompress.zig").DecompressType;
+
+const MetadataHeader = packed struct {
+    size: u15,
+    not_compressed: bool,
+};
+
+pub const MetadataReader = struct {
+    alloc: std.mem.Allocator,
+    reader: io.AnyReader,
+    block: []u8,
+    decomp: DecompressType,
+    offset: u32,
+
+    pub fn init(alloc: std.mem.Allocator, rdr: io.AnyReader, decomp: DecompressType) !MetadataReader {
+        var out: MetadataReader = .{
+            .alloc = alloc,
+            .reader = rdr,
+            .block = &[0]u8{},
+            .decomp = decomp,
+            .offset = 0,
+        };
+        try out.readNextBlock();
+        return out;
+    }
+    pub fn deinit(self: *MetadataReader) void {
+        self.alloc.free(self.block);
+    }
+
+    fn readNextBlock(self: *MetadataReader) !void {
+        self.offset = 0;
+        if (self.block.len > 0) self.alloc.free(self.block);
+        const hdr = try self.reader.readStruct(MetadataHeader);
+        if (hdr.not_compressed) {
+            self.block = try self.alloc.alloc(u8, hdr.size);
+            _ = try self.reader.readAll(self.block);
+        } else {
+            const limit = std.io.limitedReader(self.reader, hdr.size);
+            const dat = try self.decomp.decompress(self.alloc, limit.reader().any());
+            self.block = dat.toOwnedSlice();
+        }
+    }
+
+    pub fn any(self: *MetadataReader) io.AnyReader {
+        return .{
+            .context = @ptrCast(self),
+            .readFn = readOpaque,
+        };
+    }
+
+    pub fn read(self: *MetadataReader, bytes: []u8) !usize {
+        var cur_read: usize = 0;
+        var to_read: usize = 0;
+        while (cur_read < bytes.len) {
+            if (self.offset >= self.block.len) try self.readNextBlock();
+            to_read = @min(bytes.len - cur_read, self.block.len - self.offset);
+            std.mem.copyForwards(u8, bytes[cur_read..], self.block[self.offset .. @as(usize, self.offset) + to_read]);
+            self.offset += @truncate(to_read);
+            cur_read += to_read;
+        }
+        return cur_read;
+    }
+    fn readOpaque(context: *const anyopaque, bytes: []u8) !usize {
+        var rdr: *MetadataReader = @constCast(@ptrCast(@alignCast(context)));
+        return rdr.read(bytes);
+    }
+};
