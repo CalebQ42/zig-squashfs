@@ -4,7 +4,14 @@ const io = std.io;
 pub const InodeRef = packed struct {
     offset: u16,
     block_start: u32,
-    _: u16,
+    _: u16 = 0,
+
+    pub fn init(block_start: u32, offset: u16) InodeRef {
+        return .{
+            .offset = offset,
+            .block_start = block_start,
+        };
+    }
 };
 
 pub const InodeType = enum(u16) {

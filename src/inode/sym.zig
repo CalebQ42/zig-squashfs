@@ -7,8 +7,8 @@ pub const SymInode = struct {
     target: []const u8,
 
     pub fn init(alloc: std.mem.Allocator, rdr: io.AnyReader) !SymInode {
-        const fixed_buf = [_]u8{0} ** 8;
-        _ = try rdr.readAll(&fixed_buf);
+        var fixed_buf = [_]u8{0} ** 8;
+        _ = try rdr.readAll(@ptrCast(&fixed_buf));
         const size = std.mem.bytesToValue(u32, fixed_buf[4..]);
         const target = try alloc.alloc(u8, size);
         _ = try rdr.readAll(target);
@@ -30,7 +30,7 @@ pub const ExtSymInode = struct {
     xattr_idx: u32,
 
     pub fn init(alloc: std.mem.Allocator, rdr: io.AnyReader) !ExtSymInode {
-        const fixed_buf = [_]u8{0} ** 8;
+        var fixed_buf = [_]u8{0} ** 8;
         _ = try rdr.readAll(&fixed_buf);
         const size = std.mem.bytesToValue(u32, fixed_buf[4..]);
         const target = try alloc.alloc(u8, size);
@@ -39,7 +39,7 @@ pub const ExtSymInode = struct {
             .hard_links = std.mem.bytesToValue(u32, fixed_buf[0..4]),
             .size = size,
             .target = target,
-            .xattr_idx = rdr.readInt(u32, std.builtin.Endian.little),
+            .xattr_idx = try rdr.readInt(u32, std.builtin.Endian.little),
         };
     }
     pub fn deinit(self: ExtSymInode, alloc: std.mem.Allocator) void {

@@ -30,6 +30,17 @@ pub const MetadataReader = struct {
         self.alloc.free(self.block);
     }
 
+    pub fn skip(self: *MetadataReader, offset: u16) !void {
+        var cur_skip: u32 = 0;
+        var to_skip: u32 = 0;
+        while (cur_skip < offset) {
+            if (self.offset >= self.block.len) try self.readNextBlock();
+            to_skip = @min(offset - cur_skip, self.block.len - self.offset);
+            cur_skip += to_skip;
+            self.offset += to_skip;
+        }
+    }
+
     fn readNextBlock(self: *MetadataReader) !void {
         self.offset = 0;
         if (self.block.len > 0) self.alloc.free(self.block);
@@ -38,9 +49,9 @@ pub const MetadataReader = struct {
             self.block = try self.alloc.alloc(u8, hdr.size);
             _ = try self.reader.readAll(self.block);
         } else {
-            const limit = std.io.limitedReader(self.reader, hdr.size);
-            const dat = try self.decomp.decompress(self.alloc, limit.reader().any());
-            self.block = dat.toOwnedSlice();
+            var limit = std.io.limitedReader(self.reader, hdr.size);
+            var dat = try self.decomp.decompress(self.alloc, limit.reader().any());
+            self.block = try dat.toOwnedSlice();
         }
     }
 

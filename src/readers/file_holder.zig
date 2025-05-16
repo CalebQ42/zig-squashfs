@@ -7,7 +7,7 @@ pub const FileHolder = struct {
     offset: u64,
 
     pub fn init(path: []const u8, offset: u64) !FileHolder {
-        const fil = try fs.cwd().openFile(path, .{});
+        const fil = try fs.cwd().openFile(path, .{ .mode = .read_write });
         return .{
             .file = fil,
             .offset = offset,
@@ -17,7 +17,7 @@ pub const FileHolder = struct {
         self.file.close();
     }
 
-    pub fn anyAt(self: FileHolder, offset: u64) io.AnyReader {
+    pub fn anyAt(self: *FileHolder, offset: u64) io.AnyReader {
         var offsetRdr = FileOffsetReader{
             .file = self.file,
             .offset = self.offset + offset,
@@ -31,7 +31,8 @@ const FileOffsetReader = struct {
     offset: u64,
 
     fn read(self: *FileOffsetReader, bytes: []u8) !usize {
-        const red = try self.file.pread(bytes, self.offset);
+        std.debug.print("yo {}\n", .{self.file.open()});
+        const red = try self.file.preadAll(bytes, self.offset);
         self.offset += red;
         return red;
     }

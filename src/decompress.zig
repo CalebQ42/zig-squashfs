@@ -1,5 +1,6 @@
 const std = @import("std");
 const io = std.io;
+const compress = std.compress;
 
 const DecompressError = error{
     LzoUnsupported,
@@ -14,29 +15,29 @@ pub const DecompressType = enum(u16) {
     lz4,
     zstd,
 
-    pub fn decompress(self: DecompressType, alloc: std.mem.Allocator, in: io.AnyReader) !std.ArrayList(u8) {
-        const out: std.ArrayList(u8) = .init(alloc);
+    pub fn decompress(self: DecompressType, alloc: std.mem.Allocator, rdr: io.AnyReader) !std.ArrayList(u8) {
+        var out = std.ArrayList(u8).init(alloc);
         switch (self) {
-            .zlib => try std.compress.zlib.decompress(in, out),
+            .zlib => try compress.zlib.decompress(rdr, out.writer()),
             .lzma => {
-                const decomp = try std.compress.lzma.decompress(alloc, in);
+                var decomp = try compress.lzma.decompress(alloc, rdr);
                 defer decomp.deinit();
-                try decomp.reader().readAllArrayList(&out, 1048576);
+                try decomp.reader().readAllArrayList(&out, 1024 * 1024);
             },
             .lzo => return DecompressError.LzoUnsupported,
             .xz => {
-                const decomp = try std.compress.xz.decompress(alloc, in);
+                var decomp = try compress.xz.decompress(alloc, rdr);
                 defer decomp.deinit();
-                try decomp.reader().readAllArrayList(&out, 1048576);
+                try decomp.reader().readAllArrayList(&out, 1024 * 1024);
             },
             .lz4 => return DecompressError.Lz4Unsupported,
             .zstd => {
-                const buf = try alloc.alloc(u8, std.compress.zstd.DecompressorOptions.default_window_buffer_len);
+                const buf = try alloc.alloc(u8, compress.zstd.DecompressorOptions.default_window_buffer_len);
                 defer alloc.free(buf);
-                const decomp = std.compress.zstd.decompressor(in, .{
+                var decomp = compress.zstd.decompressor(rdr, .{
                     .window_buffer = buf,
                 });
-                try decomp.reader().readAllArrayList(&out, 1048576);
+                try decomp.reader().readAllArrayList(&out, 1024 * 1024);
             },
         }
         return out;

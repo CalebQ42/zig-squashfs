@@ -1,7 +1,11 @@
 const std = @import("std");
 const io = std.io;
 
-pub const BlockSize = packed struct { size: u23, not_compressed: bool, _: u8 };
+pub const BlockSize = packed struct {
+    size: u23,
+    not_compressed: bool,
+    _: u8,
+};
 
 pub const FileInode = struct {
     data_start: u32,
@@ -11,8 +15,8 @@ pub const FileInode = struct {
     blocks: []const BlockSize,
 
     pub fn init(alloc: std.mem.Allocator, rdr: io.AnyReader, block_size: u32) !FileInode {
-        const fixed_buf = [_]u8{0} ** 16;
-        _ = try rdr.readAll(&fixed_buf);
+        var fixed_buf = [_]u8{0} ** 16;
+        _ = try rdr.readAll(@ptrCast(&fixed_buf));
         const frag_idx = std.mem.bytesToValue(u32, fixed_buf[4..8]);
         const size = std.mem.bytesToValue(u32, fixed_buf[12..16]);
         var block_num = size / block_size;
@@ -20,7 +24,7 @@ pub const FileInode = struct {
             block_num += 1;
         }
         const blocks = try alloc.alloc(BlockSize, block_num);
-        _ = try rdr.readAll(std.mem.asBytes(blocks));
+        _ = try rdr.readAll(@ptrCast(blocks));
         return .{
             .data_start = std.mem.bytesToValue(u32, fixed_buf[0..4]),
             .frag_idx = frag_idx,
@@ -45,7 +49,7 @@ pub const ExtFileInode = struct {
     blocks: []const BlockSize,
 
     pub fn init(alloc: std.mem.Allocator, rdr: io.AnyReader, block_size: u32) !ExtFileInode {
-        const fixed_buf = [_]u8{0} ** 40;
+        var fixed_buf = [_]u8{0} ** 40;
         _ = try rdr.readAll(&fixed_buf);
         const size = std.mem.bytesToValue(u64, fixed_buf[8..16]);
         const frag_idx = std.mem.bytesToValue(u32, fixed_buf[28..32]);
@@ -54,7 +58,7 @@ pub const ExtFileInode = struct {
             block_num += 1;
         }
         const blocks = try alloc.alloc(BlockSize, block_num);
-        _ = try rdr.readAll(std.mem.asBytes(blocks));
+        _ = try rdr.readAll(@ptrCast(blocks));
         return .{
             .data_start = std.mem.bytesToValue(u64, fixed_buf[0..8]),
             .size = size,
