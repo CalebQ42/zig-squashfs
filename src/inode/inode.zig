@@ -1,3 +1,6 @@
+const std = @import("std");
+const io = std.io;
+
 pub const InodeRef = packed struct {
     offset: u16,
     block_start: u32,
@@ -21,6 +24,28 @@ pub const InodeType = enum(u16) {
     ext_sock,
 };
 
+const dir = @import("dir.zig");
+const file = @import("file.zig");
+const sym = @import("sym.zig");
+const misc = @import("misc.zig");
+
+pub const InodeData = union(enum) {
+    dir: dir.DirInode,
+    file: file.FileInode,
+    sym: sym.SymInode,
+    block: misc.DeviceInode,
+    char: misc.DeviceInode,
+    fifo: misc.IPCInode,
+    sock: misc.IPCInode,
+    ext_dir: dir.ExtDirInode,
+    ext_file: file.ExtFileInode,
+    ext_sym: sym.ExtSymInode,
+    ext_block: misc.ExtDeviceInode,
+    ext_char: misc.ExtDeviceInode,
+    ext_fifo: misc.ExtIPCInode,
+    ext_sock: misc.ExtIPCInode,
+};
+
 pub const InodeHeader = packed struct {
     inode_type: InodeType,
     perm: u16,
@@ -32,5 +57,7 @@ pub const InodeHeader = packed struct {
 
 pub const Inode = struct {
     header: InodeHeader,
-    data: void, //TODO
+    data: InodeData, //TODO
+
+    pub fn init(rdr: io.AnyReader) !Inode {}
 };
