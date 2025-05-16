@@ -14,8 +14,11 @@ pub const DirInode = packed struct {
 };
 
 const DirIndex = struct {
-
-}
+    offset: u32,
+    block_start: u32,
+    name_size: u32,
+    name: []const u8,
+};
 
 pub const ExtDirInode = packed struct {
     hard_links: u32,
