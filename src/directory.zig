@@ -48,13 +48,19 @@ pub fn readDirectory(alloc: std.mem.Allocator, rdr: io.AnyReader, size: u64) !st
     var out: std.StringHashMap(DirEntry) = .init(alloc);
     errdefer out.deinit();
     var red_size: u64 = 3;
-    var hdr: DirHeader = try rdr.readStruct(DirHeader);
-    while (red_size < size) : (hdr = try rdr.readStruct(DirHeader)) {
+    var hdr: DirHeader align(4) = undefined;
+    // rdr.readStruct reads 16 bytes, due to alignment. get around this by manually reading the memory and decoding
+    var hdr_tmp: [12]u8 = [_]u8{0} ** 12;
+    while (red_size < size) {
+        _ = try rdr.readAll(&hdr_tmp);
+        hdr = std.mem.bytesToValue(DirHeader, &hdr_tmp);
+        red_size += 12;
         var i: u32 = 0;
+        try out.ensureUnusedCapacity(hdr.count + 1);
         while (i <= hdr.count) : (i += 1) {
             var tmp: DirEntry = try .init(alloc, hdr, rdr);
             errdefer tmp.deinit(alloc);
-            try out.put(tmp.name, tmp);
+            out.putAssumeCapacity(tmp.name, tmp);
             red_size += 8 + tmp.name.len;
         }
     }

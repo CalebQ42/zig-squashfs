@@ -38,12 +38,11 @@ pub const File = struct {
     }
 
     fn realOpen(self: *File, reader: *Reader, path: []const u8, first: bool) !File {
-        const clean_path: []const u8 = std.mem.trimLeft(u8, path, "/");
+        const clean_path: []const u8 = std.mem.trim(u8, path, "/");
         if (clean_path.len == 0) {
             return self.*;
         }
         if (!first) {
-            defer reader.alloc.free(path);
             defer self.deinit(reader.alloc);
         }
         switch (self.inode.header.inode_type) {
@@ -95,6 +94,7 @@ pub const File = struct {
             reader.super.decomp,
         );
         defer meta_rdr.deinit();
+        try meta_rdr.skip(offset);
         self.dirEntries = try directory.readDirectory(reader.alloc, meta_rdr.any(), size);
         self.hasEntries = true;
     }

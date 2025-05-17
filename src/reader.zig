@@ -61,5 +61,5 @@ test "reader" {
     var fil = try rdr.root.open(&rdr, test_file_path);
     defer fil.deinit(rdr.alloc);
 
-    std.debug.print("{}\n", .{fil});
+    std.debug.print("{s}\n", .{fil.name});
 }
