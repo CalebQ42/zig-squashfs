@@ -7,9 +7,8 @@ pub const FileHolder = struct {
     offset: u64,
 
     pub fn init(path: []const u8, offset: u64) !FileHolder {
-        const fil = try fs.cwd().openFile(path, .{ .mode = .read_write });
         return .{
-            .file = fil,
+            .file = try fs.cwd().openFile(path, .{ .mode = .read_write }),
             .offset = offset,
         };
     }
@@ -17,26 +16,27 @@ pub const FileHolder = struct {
         self.file.close();
     }
 
-    pub fn anyAt(self: *FileHolder, offset: u64) io.AnyReader {
-        var offsetRdr = FileOffsetReader{
-            .file = self.file,
+    pub fn reader(self: *FileHolder) fs.File.Reader {
+        return self.file.reader();
+    }
+    pub fn readerAt(self: *FileHolder, offset: u64) FileOffsetReader {
+        return .{
+            .file = &self.file,
             .offset = self.offset + offset,
         };
-        return offsetRdr.any();
     }
 };
 
 const FileOffsetReader = struct {
-    file: fs.File,
+    file: *fs.File,
     offset: u64,
 
-    fn read(self: *FileOffsetReader, bytes: []u8) !usize {
-        std.debug.print("yo {}\n", .{self.file.open()});
+    pub fn read(self: *FileOffsetReader, bytes: []u8) !usize {
         const red = try self.file.preadAll(bytes, self.offset);
         self.offset += red;
         return red;
     }
-    fn any(self: *FileOffsetReader) io.AnyReader {
+    pub fn any(self: *FileOffsetReader) io.AnyReader {
         return .{
             .context = @ptrCast(self),
             .readFn = readOpaque,
