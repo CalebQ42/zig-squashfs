@@ -17,6 +17,7 @@ pub const DecompressType = enum(u16) {
 
     pub fn decompress(self: DecompressType, alloc: std.mem.Allocator, rdr: io.AnyReader) !std.ArrayList(u8) {
         var out = std.ArrayList(u8).init(alloc);
+        errdefer out.deinit();
         switch (self) {
             .zlib => try compress.zlib.decompress(rdr, out.writer()),
             .lzma => {

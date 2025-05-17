@@ -15,7 +15,7 @@ pub const InodeRef = packed struct {
 };
 
 pub const InodeType = enum(u16) {
-    dir,
+    dir = 1,
     file,
     sym,
     block,
