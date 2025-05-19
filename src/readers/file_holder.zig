@@ -2,8 +2,10 @@ const std = @import("std");
 const fs = std.fs;
 const io = std.io;
 
+const File = std.fs.File;
+
 pub const FileHolder = struct {
-    file: fs.File,
+    file: File,
     offset: u64,
 
     pub fn init(path: []const u8, offset: u64) !FileHolder {
@@ -16,7 +18,7 @@ pub const FileHolder = struct {
         self.file.close();
     }
 
-    pub fn reader(self: *FileHolder) fs.File.Reader {
+    pub fn reader(self: *FileHolder) File.Reader {
         return self.file.reader();
     }
     pub fn readerAt(self: *FileHolder, offset: u64) FileOffsetReader {
@@ -28,7 +30,7 @@ pub const FileHolder = struct {
 };
 
 const FileOffsetReader = struct {
-    file: *fs.File,
+    file: *File,
     offset: u64,
 
     pub fn read(self: *FileOffsetReader, bytes: []u8) !usize {

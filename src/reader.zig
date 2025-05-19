@@ -34,10 +34,10 @@ pub const Reader = struct {
 
     fn fileFromRef(self: *Reader, ref: inode.InodeRef, name: []const u8) !File {
         var offset_rdr = self.holder.readerAt(ref.block_start + self.super.inode_table_start);
-        var meta_rdr: MetadataReader = try .init(
+        var meta_rdr: MetadataReader = .init(
             self.alloc,
-            offset_rdr.any(),
             self.super.decomp,
+            offset_rdr.any(),
         );
         defer meta_rdr.deinit();
         try meta_rdr.skip(ref.offset);

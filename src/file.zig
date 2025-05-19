@@ -3,23 +3,25 @@ const io = std.io;
 
 const inode = @import("inode/inode.zig");
 const directory = @import("directory.zig");
+const data = @import("readers/data.zig");
 
 const Reader = @import("reader.zig").Reader;
 const DirEntry = @import("directory.zig").DirEntry;
 const MetadataReader = @import("readers/metadata.zig").MetadataReader;
 
-const FileError = error{
-    NotDirectory,
-    NotNormalFile,
-    NotSymlink,
-    NotFound,
-};
-
 pub const File = struct {
     name: []const u8,
     inode: inode.Inode,
-    dirEntries: std.StringHashMap(DirEntry) = undefined,
-    hasEntries: bool = false,
+    dirEntries: ?std.StringHashMap(DirEntry) = null,
+
+    data_rdr: ?data.DataReader = null,
+
+    pub const FileError = error{
+        NotDirectory,
+        NotNormalFile,
+        NotSymlink,
+        NotFound,
+    };
 
     pub fn deinit(self: *File, alloc: std.mem.Allocator) void {
         self.inode.deinit();
@@ -47,9 +49,7 @@ pub const File = struct {
             .dir, .ext_dir => {},
             else => return FileError.NotDirectory,
         }
-        if (!self.hasEntries) {
-            try self.readDirEntries(reader);
-        }
+        try self.readDirEntries(reader);
         const split_idx = std.mem.indexOf(u8, clean_path, "/") orelse clean_path.len;
         const name = clean_path[0..split_idx];
         const ent = self.dirEntries.get(name);
@@ -69,6 +69,7 @@ pub const File = struct {
     }
 
     fn readDirEntries(self: *File, reader: *Reader) !void {
+        if (self.dirEntries != null) return;
         var block_start: u32 = 0;
         var offset: u16 = 0;
         var size: u32 = 0;
@@ -86,36 +87,48 @@ pub const File = struct {
             else => return FileError.NotDirectory,
         }
         var offset_rdr = reader.holder.readerAt(reader.super.dir_table_start + block_start);
-        var meta_rdr: MetadataReader = try .init(
+        var meta_rdr: MetadataReader = .init(
             reader.alloc,
-            offset_rdr.any(),
             reader.super.decomp,
+            offset_rdr.any(),
         );
         defer meta_rdr.deinit();
         try meta_rdr.skip(offset);
         self.dirEntries = try directory.readDirectory(reader.alloc, meta_rdr.any(), size);
         self.hasEntries = true;
     }
+
+    pub fn read(self: *File, bytes: []u8) !usize {
+        if (self.data_rdr == null) {
+            return FileError.NotNormalFile;
+        }
+        return self.data_rdr.?.read(bytes);
+    }
 };
 
 fn fileFromDirEntry(read: *Reader, ent: DirEntry) !File {
     var offset_rdr = read.holder.readerAt(ent.block_start + read.super.inode_table_start);
-    var meta_rdr: MetadataReader = try .init(
+    var meta_rdr: MetadataReader = .init(
         read.alloc,
-        offset_rdr.any(),
         read.super.decomp,
+        offset_rdr.any(),
     );
     defer meta_rdr.deinit();
     try meta_rdr.skip(ent.offset);
     // Copy name so we can clean-up the DirEntrys without causing issues.
     const name = try read.alloc.alloc(u8, ent.name.len);
     std.mem.copyForwards(u8, name, ent.name);
-    return .{
+    var out: File = .{
         .name = name,
-        .inode = try .init(
+        .inode = .init(
             read.alloc,
             meta_rdr.any(),
             read.super.block_size,
         ),
     };
+    out.data_rdr = switch (out.inode.data) {
+        .file, .ext_file => try .init(&out, read),
+        else => null,
+    };
+    return out;
 }

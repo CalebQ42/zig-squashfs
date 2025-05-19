@@ -10,21 +10,17 @@ const MetadataHeader = packed struct {
 
 pub const MetadataReader = struct {
     alloc: std.mem.Allocator,
-    reader: io.AnyReader,
-    block: []u8,
     decomp: DecompressType,
-    offset: u32,
+    reader: io.AnyReader,
+    block: []u8 = &[0]u8{},
+    offset: u32 = 0,
 
-    pub fn init(alloc: std.mem.Allocator, rdr: io.AnyReader, decomp: DecompressType) !MetadataReader {
-        var out: MetadataReader = .{
+    pub fn init(alloc: std.mem.Allocator, decomp: DecompressType, rdr: io.AnyReader) MetadataReader {
+        return .{
             .alloc = alloc,
-            .reader = rdr,
-            .block = &[0]u8{},
             .decomp = decomp,
-            .offset = 0,
+            .reader = rdr,
         };
-        try out.readNextBlock();
-        return out;
     }
     pub fn deinit(self: *MetadataReader) void {
         self.alloc.free(self.block);
