@@ -42,9 +42,7 @@ pub const File = struct {
         if (clean_path.len == 0) {
             return self.*;
         }
-        if (!first) {
-            defer self.deinit(reader.alloc);
-        }
+        defer if (!first) self.deinit(reader.alloc);
         switch (self.inode.header.inode_type) {
             .dir, .ext_dir => {},
             else => return FileError.NotDirectory,
@@ -109,8 +107,11 @@ fn fileFromDirEntry(read: *Reader, ent: DirEntry) !File {
     );
     defer meta_rdr.deinit();
     try meta_rdr.skip(ent.offset);
+    // Copy name so we can clean-up the DirEntrys without causing issues.
+    const name = try read.alloc.alloc(u8, ent.name.len);
+    std.mem.copyForwards(u8, name, ent.name);
     return .{
-        .name = ent.name,
+        .name = name,
         .inode = try .init(
             read.alloc,
             meta_rdr.any(),
