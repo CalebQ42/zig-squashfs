@@ -3,7 +3,7 @@ const io = std.io;
 
 const InodeType = @import("inode/inode.zig").InodeType;
 
-const DirHeader = packed struct {
+const DirHeader = extern struct {
     count: u32,
     inode_block_start: u32,
     inode_num: u32,
@@ -48,12 +48,9 @@ pub fn readDirectory(alloc: std.mem.Allocator, rdr: io.AnyReader, size: u64) !st
     var out: std.StringHashMap(DirEntry) = .init(alloc);
     errdefer out.deinit();
     var red_size: u64 = 3;
-    var hdr: DirHeader align(4) = undefined;
-    // rdr.readStruct reads 16 bytes, due to alignment. get around this by manually reading the memory and decoding
-    var hdr_tmp: [12]u8 = [_]u8{0} ** 12;
+    var hdr: DirHeader = undefined;
     while (red_size < size) {
-        _ = try rdr.readAll(&hdr_tmp);
-        hdr = std.mem.bytesToValue(DirHeader, &hdr_tmp);
+        hdr = try rdr.readStruct(DirHeader);
         red_size += 12;
         var i: u32 = 0;
         try out.ensureUnusedCapacity(hdr.count + 1);

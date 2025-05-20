@@ -29,7 +29,7 @@ pub const FileHolder = struct {
     }
 };
 
-const FileOffsetReader = struct {
+pub const FileOffsetReader = struct {
     file: *File,
     offset: u64,
 

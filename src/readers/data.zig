@@ -5,6 +5,9 @@ const File = @import("../file.zig").File;
 const Reader = @import("../reader.zig").Reader;
 const BlockSize = @import("../inode/file.zig").BlockSize;
 const DecompressionType = @import("../decompress.zig").DecompressType;
+const FileOffsetReader = @import("../readers/file_holder.zig").FileOffsetReader;
+
+pub const FragEntry = packed struct { start: u64, size: BlockSize, _: u32 };
 
 const DataReaderError = error{
     EOF,
@@ -13,25 +16,25 @@ const DataReaderError = error{
 pub const DataReader = struct {
     alloc: std.mem.Allocator,
     decomp: DecompressionType,
-    rdr: io.AnyReader,
+    rdr: FileOffsetReader,
     block_size: u32,
     sizes: []BlockSize,
-    frag_rdr: ?io.AnyReader,
+    frag_rdr: ?DataReader = null,
 
     next_block_num: u32 = 0,
     cur_bloc: []u8 = undefined,
     cur_offset: u32 = 0,
 
     pub fn init(fil: *File, reader: *Reader) !DataReader {
-        const data_start: u64 = 0;
-        const sizes: []BlockSize = undefined;
-        const size: u64 = 0;
-        const frag_idx: u32 = 0;
-        const frag_offset: u32 = 0;
+        var data_start: u64 = 0;
+        var sizes: []BlockSize = undefined;
+        var size: u64 = 0;
+        var frag_idx: u32 = 0;
+        var frag_offset: u32 = 0;
         switch (fil.inode.data) {
             .file => |f| {
                 sizes = try reader.alloc.alloc(BlockSize, f.blocks.len);
-                std.mem.copyForwards(BlockSize, sizes, f.blocks);
+                @memcpy(sizes, f.blocks);
                 data_start = f.data_start;
                 size = f.size;
                 frag_idx = f.frag_idx;
@@ -39,7 +42,7 @@ pub const DataReader = struct {
             },
             .ext_file => |f| {
                 sizes = try reader.alloc.alloc(BlockSize, f.blocks.len);
-                std.mem.copyForwards(BlockSize, sizes, f.blocks);
+                @memcpy(sizes, f.blocks);
                 data_start = f.data_start;
                 size = f.size;
                 frag_idx = f.frag_idx;
@@ -47,11 +50,37 @@ pub const DataReader = struct {
             },
             else => return File.FileError.NotNormalFile,
         }
-        //TODO: set-up frag_rdr
+        var out: DataReader = .{
+            .alloc = reader.alloc,
+            .decomp = reader.super.decomp,
+            .rdr = reader.holder.readerAt(data_start),
+            .block_size = reader.super.block_size,
+            .sizes = sizes,
+        };
+        errdefer out.deinit();
+        if (frag_idx != 0xFFFFFFFF) {
+            const frag_entry = try reader.frag_table.getValue(frag_idx);
+            out.frag_rdr = try .fromFragEntry(reader, frag_entry);
+            try out.frag_rdr.?.skip(frag_offset);
+        }
+        return out;
+    }
+    fn fromFragEntry(reader: *Reader, ent: FragEntry) !DataReader {
+        const size = try reader.alloc.alloc(BlockSize, 1);
+        size[0] = ent.size;
+        return .{
+            .alloc = reader.alloc,
+            .decomp = reader.super.decomp,
+            .rdr = reader.holder.readerAt(ent.start),
+            .block_size = reader.super.block_size,
+            .sizes = size,
+        };
     }
 
     pub fn deinit(self: *DataReader) void {
+        self.alloc.free(self.sizes);
         if (self.cur_bloc.len > 0) self.alloc.free(self.cur_bloc);
+        if (self.frag_rdr != null) self.frag_rdr.?.deinit();
     }
 
     pub fn skip(self: *DataReader, offset: u32) !void {
@@ -73,11 +102,31 @@ pub const DataReader = struct {
         const siz = self.sizes[self.next_block_num];
         self.next_block_num += 1;
         if (self.next_block_num == self.sizes.len - 1 and self.frag_rdr != null) {
+            try self.sizeBlock(self.sizes % self.block_size);
             _ = try self.frag_rdr.?.readAll(self.cur_bloc);
             return;
         }
-        if (siz.size == 0) {}
-        if (siz.not_compressed) {}
+        if (siz.size == 0) {
+            try self.sizeBlock(self.block_size);
+            @memset(self.cur_bloc, 0);
+            return;
+        }
+        if (siz.not_compressed) {
+            try self.sizeBlock(siz.size);
+            _ = try self.rdr.any().readAll(self.cur_bloc);
+        } else {
+            self.alloc.free(self.cur_bloc);
+            var limit = std.io.limitedReader(self.reader, siz.size);
+            var dat = try self.decomp.decompress(self.alloc, limit.reader().any());
+            self.block = try dat.toOwnedSlice();
+        }
+    }
+
+    fn sizeBlock(self: *DataReader, size: u32) !void {
+        if (!self.alloc.resize(u8, size)) {
+            self.alloc.free(self.cur_bloc);
+            self.cur_bloc = try self.alloc.alloc(u8, size);
+        }
     }
 
     pub fn read(self: *DataReader, bytes: []u8) !usize {

@@ -26,12 +26,12 @@ pub const File = struct {
     pub fn deinit(self: *File, alloc: std.mem.Allocator) void {
         self.inode.deinit();
         alloc.free(self.name);
-        if (self.hasEntries) {
-            var iter = self.dirEntries.iterator();
+        if (self.dirEntries != null) {
+            var iter = self.dirEntries.?.iterator();
             while (iter.next()) |ent| {
                 ent.value_ptr.deinit(alloc);
             }
-            self.dirEntries.deinit();
+            self.dirEntries.?.deinit();
         }
     }
 
@@ -52,7 +52,7 @@ pub const File = struct {
         try self.readDirEntries(reader);
         const split_idx = std.mem.indexOf(u8, clean_path, "/") orelse clean_path.len;
         const name = clean_path[0..split_idx];
-        const ent = self.dirEntries.get(name);
+        const ent = self.dirEntries.?.get(name);
         if (ent == null) {
             return FileError.NotFound;
         }
@@ -95,7 +95,6 @@ pub const File = struct {
         defer meta_rdr.deinit();
         try meta_rdr.skip(offset);
         self.dirEntries = try directory.readDirectory(reader.alloc, meta_rdr.any(), size);
-        self.hasEntries = true;
     }
 
     pub fn read(self: *File, bytes: []u8) !usize {
@@ -117,15 +116,17 @@ fn fileFromDirEntry(read: *Reader, ent: DirEntry) !File {
     try meta_rdr.skip(ent.offset);
     // Copy name so we can clean-up the DirEntrys without causing issues.
     const name = try read.alloc.alloc(u8, ent.name.len);
-    std.mem.copyForwards(u8, name, ent.name);
+    errdefer read.alloc.free(name);
+    @memcpy(name, ent.name);
     var out: File = .{
         .name = name,
-        .inode = .init(
+        .inode = try .init(
             read.alloc,
             meta_rdr.any(),
             read.super.block_size,
         ),
     };
+    errdefer out.deinit(read.alloc);
     out.data_rdr = switch (out.inode.data) {
         .file, .ext_file => try .init(&out, read),
         else => null,

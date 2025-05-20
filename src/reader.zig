@@ -2,17 +2,23 @@ const std = @import("std");
 
 const inode = @import("inode/inode.zig");
 
+const Table = @import("table.zig").Table;
 const FileHolder = @import("readers/file_holder.zig").FileHolder;
 const Superblock = @import("superblock.zig").Superblock;
 const File = @import("file.zig").File;
 const MetadataReader = @import("readers/metadata.zig").MetadataReader;
 const DirEntry = @import("directory.zig").DirEntry;
+const FragEntry = @import("readers/data.zig").FragEntry;
 
 pub const Reader = struct {
     alloc: std.mem.Allocator,
     holder: FileHolder,
     super: Superblock,
     root: File,
+
+    frag_table: Table(FragEntry),
+    export_table: Table(inode.InodeRef),
+    id_table: Table(u32),
 
     pub fn init(alloc: std.mem.Allocator, filepath: []const u8, offset: u64) !Reader {
         var holder: FileHolder = try .init(filepath, offset);
@@ -23,7 +29,25 @@ pub const Reader = struct {
             .holder = holder,
             .super = super,
             .root = undefined,
+            .frag_table = undefined,
+            .export_table = undefined,
+            .id_table = undefined,
         };
+        out.frag_table = .init(
+            &out,
+            super.frag_table_start,
+            super.frag_count,
+        );
+        out.export_table = .init(
+            &out,
+            super.export_table_start,
+            super.inode_count,
+        );
+        out.id_table = .init(
+            &out,
+            super.id_table_start,
+            super.id_count,
+        );
         out.root = try out.fileFromRef(super.root_ref, "");
         return out;
     }
