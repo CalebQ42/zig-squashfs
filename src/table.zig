@@ -14,7 +14,6 @@ pub fn Table(
     return struct {
         alloc: std.mem.Allocator,
         decomp: DecompressType,
-        holder: *FileHolder,
         table: []T = &[0]T{},
         offset: u64,
         item_count: u32,
@@ -23,7 +22,6 @@ pub fn Table(
             return .{
                 .alloc = read.alloc,
                 .decomp = read.super.decomp,
-                .holder = &read.holder,
                 .offset = offset,
                 .item_count = item_count,
             };
@@ -32,17 +30,17 @@ pub fn Table(
             alloc.free(self.table);
         }
 
-        pub fn getValue(self: *Self, i: u64) !T {
+        pub fn getValue(self: *Self, read: *Reader, i: u64) !T {
             if (i >= self.item_count) return TableError.InvalidIndex;
-            if (self.table.len - 1 > i) return self.table[i];
+            if (self.table.len > i) return self.table[i];
             var meta_rdr: MetadataReader = undefined;
             var offset_rdr: FileOffsetReader = undefined;
             var meta_offset: u64 = 0;
             var to_read: u32 = 0;
-            while (self.table.len < i) {
-                _ = try self.holder.file.preadAll(std.mem.sliceAsBytes(&meta_offset), self.offset);
+            while (self.table.len <= i) {
+                _ = try read.holder.file.preadAll(std.mem.sliceAsBytes(&meta_offset), self.offset);
                 self.offset += 8;
-                offset_rdr = self.holder.readerAt(meta_offset);
+                offset_rdr = read.holder.readerAt(meta_offset);
                 meta_rdr = .init(self.alloc, self.decomp, offset_rdr.any());
                 defer meta_rdr.deinit();
                 to_read = @min(self.item_count - self.table.len, comptime blk: {
