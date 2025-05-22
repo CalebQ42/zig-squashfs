@@ -1,5 +1,6 @@
 const std = @import("std");
 const io = std.io;
+const fs = std.fs;
 
 const inode = @import("inode/inode.zig");
 const directory = @import("directory.zig");
@@ -25,21 +26,21 @@ pub const File = struct {
         NotFound,
     };
 
-    fn fromDirEntry(reader: *Reader, ent: DirEntry) !File {
-        var offset_rdr = reader.holder.readerAt(ent.block_start + reader.super.inode_table_start);
+    fn fromDirEntry(rdr: *Reader, ent: DirEntry) !File {
+        var offset_rdr = rdr.holder.readerAt(ent.block_start + rdr.super.inode_table_start);
         var meta_rdr: MetadataReader = .init(
-            reader.alloc,
-            reader.super.decomp,
+            rdr.alloc,
+            rdr.super.decomp,
             offset_rdr.any(),
         );
         defer meta_rdr.deinit();
         try meta_rdr.skip(ent.offset);
         const out: File = .{
-            .name = try reader.alloc.alloc(u8, ent.name.len),
+            .name = try rdr.alloc.alloc(u8, ent.name.len),
             .inode = try .init(
-                reader.alloc,
+                rdr.alloc,
                 meta_rdr.any(),
-                reader.super.block_size,
+                rdr.super.block_size,
             ),
         };
         std.mem.copyForwards(u8, @constCast(out.name), ent.name);
@@ -66,29 +67,30 @@ pub const File = struct {
     }
 
     /// If the File is a directory, tries to return the file at path.
-    pub fn open(self: *File, reader: *Reader, path: []const u8) !File {
-        return self.realOpen(reader, path, true);
+    /// An empty path returns itself.
+    pub fn open(self: *File, rdr: *Reader, path: []const u8) !File {
+        return self.realOpen(rdr, path, true);
     }
 
-    fn realOpen(self: *File, reader: *Reader, path: []const u8, first: bool) !File {
+    fn realOpen(self: *File, rdr: *Reader, path: []const u8, first: bool) !File {
         const clean_path: []const u8 = std.mem.trim(u8, path, "/");
         if (clean_path.len == 0) {
             return self.*;
         }
-        defer if (!first) self.deinit(reader.alloc);
+        defer if (!first) self.deinit(rdr.alloc);
         switch (self.inode.header.inode_type) {
             .dir, .ext_dir => {},
             else => return FileError.NotDirectory,
         }
-        try self.readDirEntries(reader);
+        try self.readDirEntries(rdr);
         const split_idx = std.mem.indexOf(u8, clean_path, "/") orelse clean_path.len;
         const name = clean_path[0..split_idx];
         const ent = self.dirEntries.?.get(name);
         if (ent == null) {
             return FileError.NotFound;
         }
-        var fil = try fromDirEntry(reader, ent.?);
-        return fil.realOpen(reader, clean_path[split_idx..], false);
+        var fil = try fromDirEntry(rdr, ent.?);
+        return fil.realOpen(rdr, clean_path[split_idx..], false);
     }
 
     /// If the File is a symlink, returns the symlink's target path.
@@ -101,25 +103,25 @@ pub const File = struct {
     }
 
     /// If the File is a directory, returns an iterator that iterates over it's children.
-    pub fn iterator(self: *File, reader: *Reader) !FileIterator {
+    pub fn iterator(self: *File, rdr: *Reader) !FileIterator {
         switch (self.inode.header.inode_type) {
             .dir, .ext_dir => {},
             else => return FileError.NotDirectory,
         }
-        try self.readDirEntries(reader);
-        var files = try reader.alloc.alloc(File, self.dirEntries.?.count());
+        try self.readDirEntries(rdr);
+        var files = try rdr.alloc.alloc(File, self.dirEntries.?.count());
         var dirEntryIter = self.dirEntries.?.valueIterator();
         var i: u32 = 0;
         while (dirEntryIter.next()) |ent| : (i += 1) {
-            files[i] = try .fromDirEntry(reader, ent.*);
+            files[i] = try .fromDirEntry(rdr, ent.*);
         }
         return .{
-            .alloc = reader.alloc,
+            .alloc = rdr.alloc,
             .files = files,
         };
     }
 
-    fn readDirEntries(self: *File, reader: *Reader) !void {
+    fn readDirEntries(self: *File, rdr: *Reader) !void {
         if (self.dirEntries != null) return;
         var block_start: u32 = 0;
         var offset: u16 = 0;
@@ -137,15 +139,15 @@ pub const File = struct {
             },
             else => return FileError.NotDirectory,
         }
-        var offset_rdr = reader.holder.readerAt(reader.super.dir_table_start + block_start);
+        var offset_rdr = rdr.holder.readerAt(rdr.super.dir_table_start + block_start);
         var meta_rdr: MetadataReader = .init(
-            reader.alloc,
-            reader.super.decomp,
+            rdr.alloc,
+            rdr.super.decomp,
             offset_rdr.any(),
         );
         defer meta_rdr.deinit();
         try meta_rdr.skip(offset);
-        self.dirEntries = try directory.readDirectory(reader.alloc, meta_rdr.any(), size);
+        self.dirEntries = try directory.readDirectory(rdr.alloc, meta_rdr.any(), size);
     }
 
     /// If the file is a normal file, reads it's data.
@@ -155,6 +157,48 @@ pub const File = struct {
         }
         return self.data_rdr.?.read(bytes);
     }
+
+    pub const FileReader = io.GenericReader(*File, anyerror, read);
+
+    pub fn reader(self: *File) FileReader {
+        return .{
+            .context = self,
+        };
+    }
+
+    /// Extract's the File to the path.
+    // pub fn extract(self: *File, rdr: *Reader, path: []const u8) !void {
+    //     return self.extractReal(rdr, path, true);
+    // }
+
+    // pub fn extractReal(self: *File, rdr: *Reader, path: []const u8, first: bool) !void {
+    //     var real_path = try rdr.alloc.alloc(u8, path.len);
+    //     @memcpy(real_path, path);
+    //     defer rdr.alloc.free(real_path);
+    //     real_path = std.mem.trimRight(u8, real_path, "/");
+    //     switch (self.inode.header.inode_type) {
+    //         .dir, .ext_dir => {},
+    //         .file, .ext_file => {
+    //             if(first){
+    //                 const stat = try fs.cwd().statFile(path);
+    //                 fs.File.Kind.unknown
+    //                 switch(stat.kind){
+    //                     .file => {},
+    //                     .directory => {
+    //                         if(!rdr.alloc.resize(real_path, real_path.len + self.name.len+1)){
+    //                             const len = real_path.len + self.name.len+1;
+    //                             rdr.alloc.free(real_path);
+    //                             real_path = try rdr.alloc.alloc(u8, len)
+    //                         }
+    //                     },
+    //                     else => error{InvalidPath}.InvalidPath,
+    //                 }
+    //             }
+    //         },
+    //         .sym, .ext_sym => {},
+    //         .block, .ext_block, .char, .ext_char => {},
+    //     }
+    // }
 };
 
 const FileIterator = struct {
