@@ -8,6 +8,7 @@ const MetadataReader = @import("readers/metadata.zig").MetadataReader;
 
 const TableError = error{InvalidIndex};
 
+/// A lazily read squashfs table.
 pub fn Table(
     comptime T: type,
 ) type {

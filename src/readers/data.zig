@@ -19,7 +19,7 @@ pub const DataReader = struct {
     rdr: FileOffsetReader,
     block_size: u32,
     sizes: []BlockSize,
-    frag_rdr: ?DataReader = null,
+    frag_data: ?[]u8 = null,
 
     next_block_num: u32 = 0,
     cur_bloc: []u8 = undefined,
@@ -60,8 +60,11 @@ pub const DataReader = struct {
         errdefer out.deinit();
         if (frag_idx != 0xFFFFFFFF) {
             const frag_entry = try reader.frag_table.getValue(frag_idx);
-            out.frag_rdr = try .fromFragEntry(reader, frag_entry);
-            try out.frag_rdr.?.skip(frag_offset);
+            var frag_rdr = try .fromFragEntry(reader, frag_entry);
+            defer frag_rdr.deinit();
+            try frag_rdr.skip(frag_offset);
+            out.frag_data = try reader.alloc.alloc(u8, size % out.block_size);
+            _ = try frag_rdr.any().readAll(out.frag_data);
         }
         return out;
     }
@@ -80,7 +83,7 @@ pub const DataReader = struct {
     pub fn deinit(self: *DataReader) void {
         self.alloc.free(self.sizes);
         if (self.cur_bloc.len > 0) self.alloc.free(self.cur_bloc);
-        if (self.frag_rdr != null) self.frag_rdr.?.deinit();
+        if (self.frag_data != null) self.alloc.free(self.frag_data);
     }
 
     pub fn skip(self: *DataReader, offset: u32) !void {
@@ -101,9 +104,9 @@ pub const DataReader = struct {
         }
         const siz = self.sizes[self.next_block_num];
         self.next_block_num += 1;
-        if (self.next_block_num == self.sizes.len - 1 and self.frag_rdr != null) {
-            try self.sizeBlock(self.sizes % self.block_size);
-            _ = try self.frag_rdr.?.readAll(self.cur_bloc);
+        if (self.next_block_num == self.sizes.len - 1 and self.frag_data != null) {
+            try self.sizeBlock(self.frag_data.len);
+            @memcpy(self.cur_bloc, self.frag_data);
             return;
         }
         if (siz.size == 0) {

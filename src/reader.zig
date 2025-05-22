@@ -10,6 +10,8 @@ const MetadataReader = @import("readers/metadata.zig").MetadataReader;
 const DirEntry = @import("directory.zig").DirEntry;
 const FragEntry = @import("readers/data.zig").FragEntry;
 
+/// A squashfs archive reader. Make sure to call deinit().
+/// For most actions, you'll want to use the Reader.root File.
 pub const Reader = struct {
     alloc: std.mem.Allocator,
     holder: FileHolder,
@@ -76,14 +78,15 @@ pub const Reader = struct {
     }
 };
 
-test "reader" {
+test "root iter" {
     const test_sfs_path = "testing/LinuxPATest.sfs";
-    const test_file_path = "PortableApps/PortableApps.com/Data/PortableAppsMenu.ini";
+    // const test_file_path = "PortableApps/PortableApps.com/Data/PortableAppsMenu.ini";
 
     var rdr: Reader = try .init(std.testing.allocator, test_sfs_path, 0);
     defer rdr.deinit();
-    var fil = try rdr.root.open(&rdr, test_file_path);
-    defer fil.deinit(rdr.alloc);
-
-    std.debug.print("{s}\n", .{fil.name});
+    var rootIter = try rdr.root.iterator(&rdr);
+    defer rootIter.deinit();
+    while (rootIter.next()) |f| {
+        std.debug.print("{s}\n", .{f.name});
+    }
 }
