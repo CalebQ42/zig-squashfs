@@ -23,6 +23,25 @@ pub const File = struct {
         NotFound,
     };
 
+    fn fromDirEntry(read: *Reader, ent: DirEntry) !File {
+        var offset_rdr = read.holder.readerAt(ent.block_start + read.super.inode_table_start);
+        var meta_rdr: MetadataReader = try .init(
+            read.alloc,
+            offset_rdr.any(),
+            read.super.decomp,
+        );
+        defer meta_rdr.deinit();
+        try meta_rdr.skip(ent.offset);
+        return .{
+            .name = ent.name,
+            .inode = try .init(
+                read.alloc,
+                meta_rdr.any(),
+                read.super.block_size,
+            ),
+        };
+    }
+
     pub fn deinit(self: *File, alloc: std.mem.Allocator) void {
         self.inode.deinit();
         alloc.free(self.name);
@@ -56,7 +75,7 @@ pub const File = struct {
         if (ent == null) {
             return FileError.NotFound;
         }
-        var fil = try fileFromDirEntry(reader, ent.?);
+        var fil = try fromDirEntry(reader, ent.?);
         return fil.realOpen(reader, clean_path[split_idx..], false);
     }
 
@@ -66,6 +85,13 @@ pub const File = struct {
             .ext_sym => |s| s.target,
             else => FileError.NotSymlink,
         };
+    }
+
+    pub fn iterator(self: *File, read: *Reader) !FileIterator {
+        switch (self.inode.header.inode_type){
+            .dir, ext_dir => {}
+            else => return FileError.NotDirectory,
+        }
     }
 
     fn readDirEntries(self: *File, reader: *Reader) !void {
@@ -104,32 +130,3 @@ pub const File = struct {
         return self.data_rdr.?.read(bytes);
     }
 };
-
-fn fileFromDirEntry(read: *Reader, ent: DirEntry) !File {
-    var offset_rdr = read.holder.readerAt(ent.block_start + read.super.inode_table_start);
-    var meta_rdr: MetadataReader = .init(
-        read.alloc,
-        read.super.decomp,
-        offset_rdr.any(),
-    );
-    defer meta_rdr.deinit();
-    try meta_rdr.skip(ent.offset);
-    // Copy name so we can clean-up the DirEntrys without causing issues.
-    const name = try read.alloc.alloc(u8, ent.name.len);
-    errdefer read.alloc.free(name);
-    @memcpy(name, ent.name);
-    var out: File = .{
-        .name = name,
-        .inode = try .init(
-            read.alloc,
-            meta_rdr.any(),
-            read.super.block_size,
-        ),
-    };
-    errdefer out.deinit(read.alloc);
-    out.data_rdr = switch (out.inode.data) {
-        .file, .ext_file => try .init(&out, read),
-        else => null,
-    };
-    return out;
-}

@@ -14,6 +14,17 @@ pub fn build(b: *std.Build) void {
         .root_module = lib_mod,
     });
     b.installArtifact(lib);
+    const exe_mod = b.createModule(.{
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const exe = b.addExecutable(.{
+        .linkage = .static,
+        .name = "unsquashfs",
+        .root_module = exe_mod,
+    });
+    b.installArtifact(exe);
     const lib_unit_tests = b.addTest(.{
         .root_module = lib_mod,
     });
