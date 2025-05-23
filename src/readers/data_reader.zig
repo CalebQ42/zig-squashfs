@@ -1,5 +1,6 @@
 const std = @import("std");
 const io = std.io;
+const fs = std.fs;
 
 const File = @import("../file.zig").File;
 const Reader = @import("../reader.zig").Reader;
@@ -68,7 +69,7 @@ pub const DataReader = struct {
         }
         return out;
     }
-    fn fromFragEntry(reader: *Reader, ent: FragEntry) !DataReader {
+    pub fn fromFragEntry(reader: *Reader, ent: FragEntry) !DataReader {
         const size = try reader.alloc.alloc(BlockSize, 1);
         size[0] = ent.size;
         return .{
@@ -143,7 +144,7 @@ pub const DataReader = struct {
                 }
             }
             to_read = @min(bytes.len - cur_read, self.block.len - self.offset);
-            std.mem.copyForwards(u8, bytes[cur_read..], self.block[self.offset .. @as(usize, self.offset) + to_read]);
+            @memcpy(bytes[cur_read..], self.block[self.offset .. @as(usize, self.offset) + to_read]);
             self.offset += @truncate(to_read);
             cur_read += to_read;
         }
@@ -162,5 +163,3 @@ pub const DataReader = struct {
         return self.read(bytes);
     }
 };
-
-pub const DataExtractor = struct {};

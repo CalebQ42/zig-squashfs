@@ -4,10 +4,11 @@ const fs = std.fs;
 
 const inode = @import("inode/inode.zig");
 const directory = @import("directory.zig");
-const data = @import("readers/data.zig");
 
 const Reader = @import("reader.zig").Reader;
 const DirEntry = @import("directory.zig").DirEntry;
+const DataReader = @import("readers/data_reader.zig").DataReader;
+const DataExtractor = @import("readers/data_extractor.zig").DataExtractor;
 const MetadataReader = @import("readers/metadata.zig").MetadataReader;
 
 /// A file or directory inside of a squashfs.
@@ -17,7 +18,7 @@ pub const File = struct {
     inode: inode.Inode,
     dirEntries: ?std.StringHashMap(DirEntry) = null,
 
-    data_rdr: ?data.DataReader = null,
+    data_rdr: ?DataReader = null,
 
     pub const FileError = error{
         NotDirectory,
@@ -43,7 +44,7 @@ pub const File = struct {
                 rdr.super.block_size,
             ),
         };
-        std.mem.copyForwards(u8, @constCast(out.name), ent.name);
+        @memcpy(out.name, ent.name);
         return out;
     }
 
@@ -72,7 +73,7 @@ pub const File = struct {
         return self.realOpen(rdr, path, true);
     }
 
-    fn realOpen(self: *File, rdr: *Reader, path: []const u8, first: bool) !File {
+    fn realOpen(self: *File, rdr: *Reader, path: []const u8, first: bool) (FileError || anyerror)!File {
         const clean_path: []const u8 = std.mem.trim(u8, path, "/");
         if (clean_path.len == 0) {
             return self.*;
@@ -94,7 +95,7 @@ pub const File = struct {
     }
 
     /// If the File is a symlink, returns the symlink's target path.
-    pub fn symPath(self: File) ![]const u8 {
+    pub fn symPath(self: File) (FileError || anyerror)![]const u8 {
         return switch (self.inode.data) {
             .sym => |s| s.target,
             .ext_sym => |s| s.target,
@@ -103,7 +104,7 @@ pub const File = struct {
     }
 
     /// If the File is a directory, returns an iterator that iterates over it's children.
-    pub fn iterator(self: *File, rdr: *Reader) !FileIterator {
+    pub fn iterator(self: *File, rdr: *Reader) (FileError || anyerror)!FileIterator {
         switch (self.inode.header.inode_type) {
             .dir, .ext_dir => {},
             else => return FileError.NotDirectory,
@@ -121,7 +122,7 @@ pub const File = struct {
         };
     }
 
-    fn readDirEntries(self: *File, rdr: *Reader) !void {
+    fn readDirEntries(self: *File, rdr: *Reader) (FileError || anyerror)!void {
         if (self.dirEntries != null) return;
         var block_start: u32 = 0;
         var offset: u16 = 0;
@@ -151,14 +152,14 @@ pub const File = struct {
     }
 
     /// If the file is a normal file, reads it's data.
-    pub fn read(self: *File, bytes: []u8) !usize {
+    pub fn read(self: *File, bytes: []u8) (FileError || anyerror)!usize {
         if (self.data_rdr == null) {
             return FileError.NotNormalFile;
         }
         return self.data_rdr.?.read(bytes);
     }
 
-    pub const FileReader = io.GenericReader(*File, anyerror, read);
+    pub const FileReader = io.GenericReader(*File, (FileError || anyerror), read);
 
     pub fn reader(self: *File) FileReader {
         return .{
@@ -166,39 +167,65 @@ pub const File = struct {
         };
     }
 
-    /// Extract's the File to the path.
-    // pub fn extract(self: *File, rdr: *Reader, path: []const u8) !void {
-    //     return self.extractReal(rdr, path, true);
-    // }
+    /// Returns a struct meant to read the file's complete data at once.
+    pub fn extractor(self: *File, rdr: *Reader) !DataExtractor {
+        return .init(self, rdr);
+    }
 
-    // pub fn extractReal(self: *File, rdr: *Reader, path: []const u8, first: bool) !void {
-    //     var real_path = try rdr.alloc.alloc(u8, path.len);
-    //     @memcpy(real_path, path);
-    //     defer rdr.alloc.free(real_path);
-    //     real_path = std.mem.trimRight(u8, real_path, "/");
-    //     switch (self.inode.header.inode_type) {
-    //         .dir, .ext_dir => {},
-    //         .file, .ext_file => {
-    //             if(first){
-    //                 const stat = try fs.cwd().statFile(path);
-    //                 fs.File.Kind.unknown
-    //                 switch(stat.kind){
-    //                     .file => {},
-    //                     .directory => {
-    //                         if(!rdr.alloc.resize(real_path, real_path.len + self.name.len+1)){
-    //                             const len = real_path.len + self.name.len+1;
-    //                             rdr.alloc.free(real_path);
-    //                             real_path = try rdr.alloc.alloc(u8, len)
-    //                         }
-    //                     },
-    //                     else => error{InvalidPath}.InvalidPath,
-    //                 }
-    //             }
-    //         },
-    //         .sym, .ext_sym => {},
-    //         .block, .ext_block, .char, .ext_char => {},
-    //     }
-    // }
+    pub const ExtractError = error{
+        FileExists,
+    };
+
+    /// Extract's the File to the path.
+    pub fn extract(self: *File, rdr: *Reader, path: []const u8) (ExtractError || anyerror)!void {
+        return self.extractReal(rdr, path, true);
+    }
+
+    pub fn extractReal(self: *File, rdr: *Reader, path: []const u8, first: bool) (ExtractError || anyerror)!void {
+        const real_path = std.mem.trimRight(u8, path, "/");
+        var exists = true;
+        var stat: ?fs.File.Stat = null;
+        if (fs.cwd().statFile(real_path)) |s| {
+            stat = s;
+        } else |err| {
+            if (err == fs.File.OpenError.FileNotFound) {
+                exists = false;
+            } else return err;
+        }
+        switch (self.inode.header.inode_type) {
+            .dir, .ext_dir => {
+                if (!exists) {
+                    try fs.cwd().makeDir(real_path);
+                }
+                var iter = try self.iterator(rdr);
+                defer iter.deinit();
+                while (iter.next()) |f| {
+                    //TODO: Threading
+                    try f.extractReal(rdr, path + "/" + f.name, false);
+                }
+            },
+            .file, .ext_file => {
+                if (exists) {
+                    if (!first) {
+                        return ExtractError.FileExists;
+                    } else {
+                        if (stat.?.kind == .directory) {
+                            real_path += "/" + self.name;
+                        } else {
+                            return ExtractError.FileExists;
+                        }
+                    }
+                }
+                const ext = try self.extractor(rdr);
+                defer ext.deinit();
+                const fil = try fs.cwd().createFile(real_path, .{});
+                try ext.writeToFile(fil);
+            },
+            .sym, .ext_sym => {},
+            .block, .ext_block, .char, .ext_char => {},
+        }
+        //TODO: permissions
+    }
 };
 
 const FileIterator = struct {
