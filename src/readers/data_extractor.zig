@@ -1,5 +1,6 @@
 const std = @import("std");
 const fs = std.fs;
+const io = std.io;
 
 const File = @import("../file.zig").File;
 const Reader = @import("../reader.zig").Reader;
@@ -18,6 +19,20 @@ pub const DataExtractor = struct {
     sizes: []BlockSize,
     block_offset: []u64,
     frag_data: ?[]u8 = null,
+
+    pub const Config = struct {
+        /// The amount of worker threads to spawn. Defaults to your cpu core count.
+        thread_count: u16,
+        /// The maximum amount of additional memory this extraction will use.
+        /// Default is 1GB.
+        max_mem: u64,
+        pub fn init() !Config {
+            return .{
+                .thread_count = try std.Thread.getCpuCount(),
+                .max_mem = comptime 1024 * 1024 * 1024,
+            };
+        }
+    };
 
     pub fn init(fil: *File, reader: *Reader) !DataExtractor {
         var data_start: u64 = 0;
@@ -78,10 +93,15 @@ pub const DataExtractor = struct {
     }
 
     fn processBlock(self: DataExtractor, block_ind: u32) ![]u8 {
+        _ = self;
+        _ = block_ind;
         //TODO
     }
 
     fn processBlockToFile(self: DataExtractor, block_ind: u32, fil: *fs.File) !void {
+        _ = self;
+        _ = block_ind;
+        _ = fil;
         //TODO
     }
 
@@ -90,7 +110,10 @@ pub const DataExtractor = struct {
     /// Returns the amount of bytes written.
     ///
     /// Optimized for lower memory usage by using File.pwrite.
-    pub fn writeToFile(self: DataExtractor, fil: *fs.File) !void {
+    pub fn writeToFile(self: DataExtractor, conf: Config, fil: *fs.File) !void {
+        _ = self;
+        _ = fil;
+        _ = conf;
         //TODO
     }
 
@@ -98,7 +121,15 @@ pub const DataExtractor = struct {
     /// Returns the amount of bytes written.
     ///
     /// To write data in order, some data may end up cached temporarily.
-    pub fn writeToWriter(self: DataExtractor, writer: io.AnyWriter) !void {
+    pub fn writeToWriter(self: DataExtractor, conf: Config, writer: io.AnyWriter) !void {
+        var pol: std.Thread.Pool = .{};
+        pol.init(std.Thread.Pool.Options{
+            .allocator = std.heap.page_allocator,
+            .n_jobs = 5,
+        });
+        _ = self;
+        _ = writer;
+        _ = conf;
         //TODO
     }
 };

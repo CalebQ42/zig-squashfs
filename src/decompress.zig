@@ -43,4 +43,43 @@ pub const DecompressType = enum(u16) {
         }
         return out;
     }
+
+    pub fn decompressTo(self: DecompressType, alloc: std.mem.Allocator, rdr: io.AnyReader, writer: io.AnyWriter) !void {
+        const buf_size: usize = 1024;
+        switch (self) {
+            .zlib => try compress.zlib.decompress(rdr, writer),
+            .lzma => {
+                var decomp = try compress.lzma.decompress(alloc, rdr);
+                defer decomp.deinit();
+                const buf: [buf_size]u8 = {};
+                var red = try decomp.read(&buf);
+                while (red > 0) : (red = try decomp.read()) {
+                    _ = try writer.writeAll(&buf);
+                }
+            },
+            .lzo => return DecompressError.LzoUnsupported,
+            .xz => {
+                var decomp = try compress.xz.decompress(alloc, rdr);
+                defer decomp.deinit();
+                const buf: [buf_size]u8 = {};
+                var red = try decomp.read(&buf);
+                while (red > 0) : (red = try decomp.read()) {
+                    _ = try writer.writeAll(&buf);
+                }
+            },
+            .lz4 => return DecompressError.Lz4Unsupported,
+            .zstd => {
+                const window_buf = try alloc.alloc(u8, compress.zstd.DecompressorOptions.default_window_buffer_len);
+                defer alloc.free(window_buf);
+                var decomp = compress.zstd.decompressor(rdr, .{
+                    .window_buffer = window_buf,
+                });
+                const buf: [buf_size]u8 = {};
+                var red = try decomp.read(&buf);
+                while (red > 0) : (red = try decomp.read()) {
+                    _ = try writer.writeAll(&buf);
+                }
+            },
+        }
+    }
 };

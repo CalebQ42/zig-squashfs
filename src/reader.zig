@@ -8,7 +8,7 @@ const Superblock = @import("superblock.zig").Superblock;
 const File = @import("file.zig").File;
 const MetadataReader = @import("readers/metadata.zig").MetadataReader;
 const DirEntry = @import("directory.zig").DirEntry;
-const FragEntry = @import("readers/data.zig").FragEntry;
+const FragEntry = @import("readers/data_reader.zig").FragEntry;
 
 /// A squashfs archive reader. Make sure to call deinit().
 /// For most actions, you'll want to use the Reader.root File.
