@@ -33,6 +33,8 @@ pub const FileOffsetReader = struct {
     file: *File,
     offset: u64,
 
+    pub const Error = fs.File.PReadError;
+
     pub fn read(self: *FileOffsetReader, bytes: []u8) !usize {
         const red = try self.file.preadAll(bytes, self.offset);
         self.offset += red;

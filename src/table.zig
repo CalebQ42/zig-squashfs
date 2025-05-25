@@ -13,7 +13,6 @@ pub fn Table(
     comptime T: type,
 ) type {
     return struct {
-        alloc: std.mem.Allocator,
         decomp: DecompressType,
         table: []T = &[0]T{},
         offset: u64,
@@ -21,14 +20,13 @@ pub fn Table(
 
         pub fn init(read: *Reader, offset: u64, item_count: u32) Self {
             return .{
-                .alloc = read.alloc,
                 .decomp = read.super.decomp,
                 .offset = offset,
                 .item_count = item_count,
             };
         }
         pub fn deinit(self: *Self, alloc: std.mem.Allocator) void {
-            alloc.free(self.table);
+            if (self.table.len == 0) alloc.free(self.table);
         }
 
         pub fn getValue(self: *Self, read: *Reader, i: u64) !T {
@@ -36,23 +34,21 @@ pub fn Table(
             if (self.table.len > i) return self.table[i];
             var meta_rdr: MetadataReader = undefined;
             var offset_rdr: FileOffsetReader = undefined;
+            var meta_buf: [8]u8 = [1]u8{0} ** 8;
             var meta_offset: u64 = 0;
             var to_read: u32 = 0;
             while (self.table.len <= i) {
-                _ = try read.holder.file.preadAll(std.mem.sliceAsBytes(&meta_offset), self.offset);
+                _ = try read.holder.file.preadAll(&meta_buf, self.offset);
                 self.offset += 8;
+                meta_offset = std.mem.bytesToValue(u8, &meta_buf);
                 offset_rdr = read.holder.readerAt(meta_offset);
-                meta_rdr = .init(self.alloc, self.decomp, offset_rdr.any());
+                meta_rdr = .init(read.alloc, self.decomp, offset_rdr.any());
                 defer meta_rdr.deinit();
-                to_read = @min(self.item_count - self.table.len, comptime blk: {
-                    break :blk 8192 / @sizeOf(T);
-                });
-                if (!self.alloc.resize(self.table, self.table.len + to_read)) {
-                    const alloc_size = self.table.len + to_read;
-                    self.alloc.free(self.table);
-                    self.table = try self.alloc.alloc(T, alloc_size);
-                }
-                _ = try meta_rdr.any().readAll(std.mem.asBytes(self.table[self.table.len - to_read ..]));
+                to_read = @min(self.item_count - self.table.len, comptime 8192 / @sizeOf(T));
+                const alloc_size = self.table.len + to_read;
+                if (self.table.len != 0) read.alloc.free(self.table);
+                self.table = try read.alloc.alloc(T, alloc_size);
+                _ = try meta_rdr.any().readAll(@ptrCast(self.table[self.table.len - to_read ..]));
             }
             return self.table[i];
         }

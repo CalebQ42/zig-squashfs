@@ -15,7 +15,7 @@ pub const FileInode = struct {
     blocks: []const BlockSize,
 
     pub fn init(alloc: std.mem.Allocator, rdr: io.AnyReader, block_size: u32) !FileInode {
-        const fixed_buf = [16]u8{};
+        var fixed_buf = [1]u8{0} ** 16;
         _ = try rdr.readAll(&fixed_buf);
         const frag_idx = std.mem.bytesToValue(u32, fixed_buf[4..8]);
         const size = std.mem.bytesToValue(u32, fixed_buf[12..16]);
@@ -49,7 +49,7 @@ pub const ExtFileInode = struct {
     blocks: []const BlockSize,
 
     pub fn init(alloc: std.mem.Allocator, rdr: io.AnyReader, block_size: u32) !ExtFileInode {
-        var fixed_buf = [40]u8{};
+        var fixed_buf = [1]u8{0} ** 40;
         _ = try rdr.readAll(&fixed_buf);
         const size = std.mem.bytesToValue(u64, fixed_buf[8..16]);
         const frag_idx = std.mem.bytesToValue(u32, fixed_buf[28..32]);

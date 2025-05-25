@@ -23,7 +23,7 @@ pub const DataReader = struct {
     frag_data: ?[]u8 = null,
 
     next_block_num: u32 = 0,
-    cur_bloc: []u8 = undefined,
+    cur_bloc: []u8 = &[0]u8{},
     cur_offset: u32 = 0,
 
     pub fn init(fil: *File, reader: *Reader) !DataReader {
@@ -84,17 +84,17 @@ pub const DataReader = struct {
     pub fn deinit(self: *DataReader) void {
         self.alloc.free(self.sizes);
         if (self.cur_bloc.len > 0) self.alloc.free(self.cur_bloc);
-        if (self.frag_data != null) self.alloc.free(self.frag_data);
+        if (self.frag_data != null) self.alloc.free(self.frag_data.?);
     }
 
     pub fn skip(self: *DataReader, offset: u32) !void {
         var cur_skip: u32 = 0;
         var to_skip: u32 = 0;
         while (cur_skip < offset) {
-            if (self.offset >= self.block.len) try self.readNextBlock();
-            to_skip = @min(offset - cur_skip, self.block.len - self.offset);
+            if (self.cur_offset >= self.cur_bloc.len) try self.readNextBlock();
+            to_skip = @min(offset - cur_skip, self.cur_bloc.len - self.cur_offset);
             cur_skip += to_skip;
-            self.offset += to_skip;
+            self.cur_offset += to_skip;
         }
     }
 
@@ -106,8 +106,8 @@ pub const DataReader = struct {
         const siz = self.sizes[self.next_block_num];
         self.next_block_num += 1;
         if (self.next_block_num == self.sizes.len - 1 and self.frag_data != null) {
-            try self.sizeBlock(self.frag_data.len);
-            @memcpy(self.cur_bloc, self.frag_data);
+            try self.sizeBlock(self.frag_data.?.len);
+            @memcpy(self.cur_bloc, self.frag_data.?);
             return;
         }
         if (siz.size == 0) {
@@ -120,14 +120,14 @@ pub const DataReader = struct {
             _ = try self.rdr.any().readAll(self.cur_bloc);
         } else {
             self.alloc.free(self.cur_bloc);
-            var limit = std.io.limitedReader(self.reader, siz.size);
+            var limit = std.io.limitedReader(self.rdr, siz.size);
             var dat = try self.decomp.decompress(self.alloc, limit.reader().any());
-            self.block = try dat.toOwnedSlice();
+            self.cur_bloc = try dat.toOwnedSlice();
         }
     }
 
-    fn sizeBlock(self: *DataReader, size: u32) !void {
-        if (!self.alloc.resize(u8, size)) {
+    fn sizeBlock(self: *DataReader, size: usize) !void {
+        if (!self.alloc.resize(self.cur_bloc, size)) {
             self.alloc.free(self.cur_bloc);
             self.cur_bloc = try self.alloc.alloc(u8, size);
         }
@@ -137,15 +137,15 @@ pub const DataReader = struct {
         var cur_read: usize = 0;
         var to_read: usize = 0;
         while (cur_read < bytes.len) {
-            if (self.offset >= self.block.len) {
-                if (self.readNextBlock()) |err| {
+            if (self.cur_offset >= self.cur_bloc.len) {
+                self.readNextBlock() catch |err| {
                     if (err == DataReaderError.EOF) return cur_read;
                     return err;
-                }
+                };
             }
-            to_read = @min(bytes.len - cur_read, self.block.len - self.offset);
-            @memcpy(bytes[cur_read..], self.block[self.offset .. @as(usize, self.offset) + to_read]);
-            self.offset += @truncate(to_read);
+            to_read = @min(bytes.len - cur_read, self.cur_bloc.len - self.cur_offset);
+            @memcpy(bytes[cur_read..], self.cur_bloc[self.cur_offset .. @as(usize, self.cur_offset) + to_read]);
+            self.cur_offset += @truncate(to_read);
             cur_read += to_read;
         }
         return cur_read;

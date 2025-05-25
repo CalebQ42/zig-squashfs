@@ -1,6 +1,7 @@
 const std = @import("std");
 const io = std.io;
 const fs = std.fs;
+const builtin = @import("builtin");
 
 const inode = @import("inode/inode.zig");
 const directory = @import("directory.zig");
@@ -36,16 +37,17 @@ pub const File = struct {
         );
         defer meta_rdr.deinit();
         try meta_rdr.skip(ent.offset);
-        const out: File = .{
-            .name = try rdr.alloc.alloc(u8, ent.name.len),
+        const name = try rdr.alloc.alloc(u8, ent.name.len);
+        errdefer rdr.alloc.free(name);
+        @memcpy(name, ent.name);
+        return .{
+            .name = name,
             .inode = try .init(
                 rdr.alloc,
                 meta_rdr.any(),
                 rdr.super.block_size,
             ),
         };
-        @memcpy(out.name, ent.name);
-        return out;
     }
 
     pub fn deinit(self: *File, alloc: std.mem.Allocator) void {
@@ -159,7 +161,7 @@ pub const File = struct {
         return self.data_rdr.?.read(bytes);
     }
 
-    pub const FileReader = io.GenericReader(*File, (FileError || anyerror), read);
+    const FileReader = io.GenericReader(*File, (FileError || anyerror), read);
 
     pub fn reader(self: *File) FileReader {
         return .{
@@ -199,30 +201,54 @@ pub const File = struct {
                 }
                 var iter = try self.iterator(rdr);
                 defer iter.deinit();
-                while (iter.next()) |f| {
-                    //TODO: Threading
-                    try f.extractReal(rdr, path + "/" + f.name, false);
+                while (iter.next()) |*f| {
+                    const extr_path = try std.mem.concat(rdr.alloc, u8, &[3][]const u8{ real_path, "/", f.name });
+                    defer rdr.alloc.free(extr_path);
+                    try @constCast(f).extractReal(rdr, extr_path, false);
                 }
             },
             .file, .ext_file => {
-                if (exists) {
-                    if (!first) {
-                        return ExtractError.FileExists;
-                    } else {
-                        if (stat.?.kind == .directory) {
-                            real_path += "/" + self.name;
-                        } else {
-                            return ExtractError.FileExists;
-                        }
-                    }
-                }
-                const ext = try self.extractor(rdr);
+                if ((!first and exists) or
+                    (first and exists and stat.?.kind != .directory)) return ExtractError.FileExists;
+                const extr_path = if (first and exists and stat.?.kind == .directory) blk: {
+                    break :blk try std.mem.concat(rdr.alloc, u8, &[3][]const u8{ real_path, "/", self.name });
+                } else blk: {
+                    const tmp = try rdr.alloc.alloc(u8, real_path.len);
+                    @memcpy(tmp, real_path);
+                    break :blk tmp;
+                };
+                defer rdr.alloc.free(extr_path);
+                var ext = try self.extractor(rdr);
                 defer ext.deinit();
-                const fil = try fs.cwd().createFile(real_path, .{});
-                try ext.writeToFile(fil);
+                const fil = try fs.cwd().createFile(extr_path, .{});
+                defer fil.close();
+                try ext.writeToFile(try .init(), &fil);
             },
-            .sym, .ext_sym => {},
-            .block, .ext_block, .char, .ext_char => {},
+            .sym, .ext_sym => {
+                if (exists) return ExtractError.FileExists;
+                try fs.cwd().symLink(try self.symPath(), real_path, .{});
+            },
+            .block, .ext_block, .char, .ext_char, .fifo, .ext_fifo => {
+                if (exists) return ExtractError.FileExists;
+                comptime if (builtin.os.tag != .linux) return;
+                const IFCHR: u32 = 0o020000;
+                const IFBLK: u32 = 0o060000;
+                const IFIFO: u32 = 0o010000;
+                const mode = switch (self.inode.header.inode_type) {
+                    .block, .ext_block => IFBLK,
+                    .char, .ext_char => IFCHR,
+                    .fifo, .ext_fifo => IFIFO,
+                    else => unreachable,
+                };
+                const dev = switch (self.inode.data) {
+                    .block, .char => |b| b.device,
+                    .ext_block, .ext_char => |b| b.device,
+                    .fifo, .ext_fifo => 0,
+                    else => unreachable,
+                };
+                _ = std.os.linux.mknod(@ptrCast(real_path), mode, dev);
+            },
+            .sock, .ext_sock => {},
         }
         //TODO: permissions
     }
