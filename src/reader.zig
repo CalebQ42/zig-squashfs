@@ -11,7 +11,7 @@ const DirEntry = @import("directory.zig").DirEntry;
 const FragEntry = @import("readers/data_reader.zig").FragEntry;
 
 /// A squashfs archive reader. Make sure to call deinit().
-/// For most actions, you'll want to use the Reader.root File.
+/// For most actions, you'll want to use Reader.root.
 pub const Reader = struct {
     alloc: std.mem.Allocator,
     holder: FileHolder,
