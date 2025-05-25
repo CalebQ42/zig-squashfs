@@ -231,13 +231,10 @@ pub const File = struct {
             .block, .ext_block, .char, .ext_char, .fifo, .ext_fifo => {
                 if (exists) return ExtractError.FileExists;
                 comptime if (builtin.os.tag != .linux) return;
-                const IFCHR: u32 = 0o020000;
-                const IFBLK: u32 = 0o060000;
-                const IFIFO: u32 = 0o010000;
-                const mode = switch (self.inode.header.inode_type) {
-                    .block, .ext_block => IFBLK,
-                    .char, .ext_char => IFCHR,
-                    .fifo, .ext_fifo => IFIFO,
+                const mode: u32 = switch (self.inode.header.inode_type) {
+                    .block, .ext_block => std.posix.S.IFBLK,
+                    .char, .ext_char => std.posix.S.IFCHR,
+                    .fifo, .ext_fifo => std.posix.S.IFIFO,
                     else => unreachable,
                 };
                 const dev = switch (self.inode.data) {
