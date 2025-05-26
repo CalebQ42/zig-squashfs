@@ -95,5 +95,5 @@ test "extract" {
     try std.fs.cwd().deleteTree(extract_path);
     var rdr: Reader = try .init(std.testing.allocator, test_sfs_path, 0);
     defer rdr.deinit();
-    try rdr.root.extract(&rdr, extract_path);
+    try rdr.root.extract(&rdr, try .init(), extract_path);
 }

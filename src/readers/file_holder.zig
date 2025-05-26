@@ -27,6 +27,43 @@ pub const FileHolder = struct {
             .offset = self.offset + offset,
         };
     }
+
+    // pub fn writerAt(self: *FileHolder, offset: u64) FileOffsetWriter {
+    //     return .{
+    //         .file = &self.file,
+    //         .offset = self.offset + offset,
+    //     };
+    // }
+};
+
+pub const FileOffsetWriter = struct {
+    file: *File,
+    offset: u64,
+
+    pub fn init(fil: *File, init_offset: u64) FileOffsetWriter {
+        return .{
+            .file = fil,
+            .offset = init_offset,
+        };
+    }
+
+    pub const Error = fs.File.PWriteError;
+
+    pub fn write(self: *FileOffsetWriter, bytes: []const u8) !usize {
+        try self.file.pwriteAll(bytes, self.offset);
+        self.offset += bytes.len;
+        return bytes.len;
+    }
+    pub fn any(self: *FileOffsetWriter) io.AnyWriter {
+        return .{
+            .context = @ptrCast(self),
+            .writeFn = writeOpaque,
+        };
+    }
+    fn writeOpaque(context: *const anyopaque, bytes: []const u8) anyerror!usize {
+        var rdr: *FileOffsetWriter = @constCast(@ptrCast(@alignCast(context)));
+        return try rdr.write(bytes);
+    }
 };
 
 pub const FileOffsetReader = struct {

@@ -44,16 +44,16 @@ pub const DecompressType = enum(u16) {
         return out;
     }
 
-    pub fn decompressTo(self: DecompressType, alloc: std.mem.Allocator, rdr: io.AnyReader, writer: io.AnyWriter) !void {
+    pub fn decompressTo(self: DecompressType, alloc: std.mem.Allocator, rdr: io.AnyReader, writer: io.AnyWriter) anyerror!void {
         const buf_size: usize = 1024;
         switch (self) {
             .zlib => try compress.zlib.decompress(rdr, writer),
             .lzma => {
                 var decomp = try compress.lzma.decompress(alloc, rdr);
                 defer decomp.deinit();
-                const buf: [buf_size]u8 = {};
+                var buf: [buf_size]u8 = undefined;
                 var red = try decomp.read(&buf);
-                while (red > 0) : (red = try decomp.read()) {
+                while (red > 0) : (red = try decomp.read(&buf)) {
                     _ = try writer.writeAll(&buf);
                 }
             },
@@ -61,9 +61,9 @@ pub const DecompressType = enum(u16) {
             .xz => {
                 var decomp = try compress.xz.decompress(alloc, rdr);
                 defer decomp.deinit();
-                const buf: [buf_size]u8 = {};
+                var buf: [buf_size]u8 = undefined;
                 var red = try decomp.read(&buf);
-                while (red > 0) : (red = try decomp.read()) {
+                while (red > 0) : (red = try decomp.read(&buf)) {
                     _ = try writer.writeAll(&buf);
                 }
             },
@@ -74,9 +74,9 @@ pub const DecompressType = enum(u16) {
                 var decomp = compress.zstd.decompressor(rdr, .{
                     .window_buffer = window_buf,
                 });
-                const buf: [buf_size]u8 = {};
+                var buf: [buf_size]u8 = undefined;
                 var red = try decomp.read(&buf);
-                while (red > 0) : (red = try decomp.read()) {
+                while (red > 0) : (red = try decomp.read(&buf)) {
                     _ = try writer.writeAll(&buf);
                 }
             },

@@ -128,17 +128,17 @@ pub const File = struct {
         if (self.dirEntries != null) return;
         var block_start: u32 = 0;
         var offset: u16 = 0;
-        var size: u32 = 0;
+        var siz: u32 = 0;
         switch (self.inode.data) {
             .dir => |d| {
                 block_start = d.block_start;
                 offset = d.offset;
-                size = d.size;
+                siz = d.size;
             },
             .ext_dir => |d| {
                 block_start = d.block_start;
                 offset = d.offset;
-                size = d.size;
+                siz = d.size;
             },
             else => return FileError.NotDirectory,
         }
@@ -150,7 +150,15 @@ pub const File = struct {
         );
         defer meta_rdr.deinit();
         try meta_rdr.skip(offset);
-        self.dirEntries = try directory.readDirectory(rdr.alloc, meta_rdr.any(), size);
+        self.dirEntries = try directory.readDirectory(rdr.alloc, meta_rdr.any(), siz);
+    }
+
+    pub fn size(self: File) u64 {
+        switch (self.inode.data) {
+            .file => |f| f.size,
+            .ext_file => |f| f.size,
+            else => 0,
+        }
     }
 
     /// If the file is a normal file, reads it's data.
@@ -169,21 +177,45 @@ pub const File = struct {
         };
     }
 
-    /// Returns a struct meant to read the file's complete data at once.
-    pub fn extractor(self: *File, rdr: *Reader) !DataExtractor {
+    fn extractor(self: *File, rdr: *Reader) !DataExtractor {
         return .init(self, rdr);
     }
+
+    pub const ExtractConfig = struct {
+        /// The amount of worker threads to spawn. Defaults to your cpu core count.
+        thread_count: u16,
+        /// The maximum amount of additional memory this extraction will use.
+        /// Default is 1GB or a quarter of your system memory, whichever is smaller.
+        /// Actually memory usage will be higher, as this does not account of vaious metadata (such as file names).
+        max_mem: u64,
+        deref_sym: bool = false,
+        unbreak_sym: bool = false,
+        verbose: bool = false,
+        pub fn init() !ExtractConfig {
+            const sys_mem = try std.process.totalSystemMemory();
+            return .{
+                .thread_count = @truncate(try std.Thread.getCpuCount()),
+                .max_mem = @min(sys_mem / 4, 1024 * 1024 * 1024),
+            };
+        }
+    };
 
     pub const ExtractError = error{
         FileExists,
     };
 
     /// Extract's the File to the path.
-    pub fn extract(self: *File, rdr: *Reader, path: []const u8) (ExtractError || anyerror)!void {
-        return self.extractReal(rdr, path, true);
+    pub fn extract(self: *File, rdr: *Reader, config: ExtractConfig, path: []const u8) (ExtractError || anyerror)!void {
+        var pol: std.Thread.Pool = undefined;
+        try pol.init(.{
+            .allocator = std.heap.smp_allocator,
+            .n_jobs = config.thread_count,
+        });
+        defer pol.deinit();
+        return self.extractReal(rdr, config, &pol, path, true);
     }
 
-    pub fn extractReal(self: *File, rdr: *Reader, path: []const u8, first: bool) (ExtractError || anyerror)!void {
+    fn extractReal(self: *File, rdr: *Reader, config: ExtractConfig, pool: *std.Thread.Pool, path: []const u8, first: bool) (ExtractError || anyerror)!void {
         const real_path = std.mem.trimRight(u8, path, "/");
         var exists = true;
         var stat: ?fs.File.Stat = null;
@@ -204,7 +236,7 @@ pub const File = struct {
                 while (iter.next()) |*f| {
                     const extr_path = try std.mem.concat(rdr.alloc, u8, &[3][]const u8{ real_path, "/", f.name });
                     defer rdr.alloc.free(extr_path);
-                    try @constCast(f).extractReal(rdr, extr_path, false);
+                    try @constCast(f).extractReal(rdr, config, pool, extr_path, false);
                 }
             },
             .file, .ext_file => {
@@ -220,9 +252,9 @@ pub const File = struct {
                 defer rdr.alloc.free(extr_path);
                 var ext = try self.extractor(rdr);
                 defer ext.deinit();
-                const fil = try fs.cwd().createFile(extr_path, .{});
+                var fil = try fs.cwd().createFile(extr_path, .{});
                 defer fil.close();
-                try ext.writeToFile(try .init(), &fil);
+                try ext.writeToFile(pool, &fil);
             },
             .sym, .ext_sym => {
                 if (exists) return ExtractError.FileExists;

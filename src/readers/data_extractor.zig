@@ -7,7 +7,9 @@ const Reader = @import("../reader.zig").Reader;
 const BlockSize = @import("../inode/file.zig").BlockSize;
 const DecompressionType = @import("../decompress.zig").DecompressType;
 const FileHolder = @import("../readers/file_holder.zig").FileHolder;
+const FileOffsetWriter = @import("../readers/file_holder.zig").FileOffsetWriter;
 const DataReader = @import("data_reader.zig").DataReader;
+const Config = @import("../file.zig").Config;
 
 /// A specialized File data reader that's meant to write all of it's data at once.
 /// Can be re-used freely until deinit() is called.
@@ -19,20 +21,6 @@ pub const DataExtractor = struct {
     sizes: []BlockSize,
     block_offset: []u64,
     frag_data: ?[]u8 = null,
-
-    pub const Config = struct {
-        /// The amount of worker threads to spawn. Defaults to your cpu core count.
-        thread_count: u16,
-        /// The maximum amount of additional memory this extraction will use.
-        /// Default is 1GB.
-        max_mem: u64,
-        pub fn init() !Config {
-            return .{
-                .thread_count = @truncate(try std.Thread.getCpuCount()),
-                .max_mem = comptime 1024 * 1024 * 1024,
-            };
-        }
-    };
 
     pub fn init(fil: *File, reader: *Reader) !DataExtractor {
         var data_start: u64 = 0;
@@ -91,17 +79,19 @@ pub const DataExtractor = struct {
         if (self.frag_data != null) self.alloc.free(self.frag_data.?);
     }
 
-    fn processBlock(self: DataExtractor, block_ind: u32) ![]u8 {
-        _ = self;
-        _ = block_ind;
-        //TODO
-    }
-
-    fn processBlockToFile(self: DataExtractor, block_ind: u32, fil: *const fs.File) !void {
-        _ = self;
-        _ = block_ind;
-        _ = fil;
-        //TODO
+    fn processBlockToFile(self: *DataExtractor, errs: *std.ArrayList(anyerror), block_ind: usize, fil: *fs.File) void {
+        const offset_rdr = self.holder.readerAt(self.block_offset[block_ind]);
+        var fil_wrtr: FileOffsetWriter = .init(fil, block_ind * self.block_size);
+        var limit = std.io.limitedReader(offset_rdr, self.sizes[block_ind].size);
+        self.decomp.decompressTo(
+            self.alloc,
+            limit.reader().any(),
+            fil_wrtr.any(),
+        ) catch |err| {
+            errs.append(err) catch |ignored_err| {
+                std.debug.print("{}\n", .{ignored_err});
+            };
+        };
     }
 
     /// Write the data completely to the given file.
@@ -109,26 +99,41 @@ pub const DataExtractor = struct {
     /// Returns the amount of bytes written.
     ///
     /// Optimized for lower memory usage by using File.pwrite.
-    pub fn writeToFile(self: DataExtractor, conf: Config, fil: *const fs.File) !void {
-        _ = self;
-        _ = fil;
-        _ = conf;
-        //TODO
+    pub fn writeToFile(self: *DataExtractor, pool: *std.Thread.Pool, fil: *fs.File) !void {
+        var wg: std.Thread.WaitGroup = .{};
+        var errs: std.ArrayList(anyerror) = .init(self.alloc);
+        defer errs.deinit();
+        for (0..self.sizes.len) |i| {
+            pool.spawnWg(&wg, processBlockToFile, .{ self, &errs, i, fil });
+        }
+        wg.wait();
     }
 
-    /// Write the data completely to the given writer.
-    /// Returns the amount of bytes written.
-    ///
-    /// To write data in order, some data may end up cached temporarily.
-    pub fn writeToWriter(self: DataExtractor, conf: Config, writer: io.AnyWriter) !void {
-        var pol: std.Thread.Pool = .{};
-        pol.init(std.Thread.Pool.Options{
-            .allocator = std.heap.page_allocator,
-            .n_jobs = 5,
-        });
-        _ = self;
-        _ = writer;
-        _ = conf;
-        //TODO
-    }
+    // fn processBlock(self: *DataExtractor, errs: std.ArrayList(anyerror), data_out: std.AutoHashMap([]u8), block_ind: u32) void {
+    //     const offset_rdr = self.holder.readerAt(self.block_offset[block_ind]);
+    //     const out = self.decomp.decompress(
+    //         self.alloc,
+    //         std.io.limitedReader(offset_rdr, self.sizes[block_ind].size),
+    //     ) catch |err| {
+    //         errs.append(err);
+    //         return;
+    //     };
+    //     data_out.put(block_ind, )
+    // }
+
+    // Write the data completely to the given writer.
+    // Returns the amount of bytes written.
+    //
+    // To write data in order, some data may end up cached temporarily.
+    // pub fn writeToWriter(self: DataExtractor, pool: *std.Thread.Pool, writer: io.AnyWriter) !void {
+    //     const wg: std.Thread.WaitGroup = .{};
+    //     const errs: std.ArrayList(anyerror) = .init(self.alloc);
+    //     const data: std.AutoHashMap(u32, []u8) = .init(self.alloc);
+    //     const cond: std.Thread. = .{};
+    //     defer errs.deinit();
+    //     for (0..self.sizes.len) |i| {
+    //         pool.spawnWg(&wg, processBlock, .{ &self, i, fil });
+    //     }
+    //     wg.wait();
+    // }
 };
