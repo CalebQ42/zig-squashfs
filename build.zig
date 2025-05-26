@@ -1,6 +1,13 @@
 const std = @import("std");
 
-pub fn build(b: *std.Build) void {
+/// version if version isn't provided during build
+const def_version = "0.0.0+testing";
+
+pub fn build(b: *std.Build) !void {
+    const opt = b.addOptions();
+    const ver = b.option([]const u8, "version", "sematic version") orelse def_version;
+    const sem_ver = try std.SemanticVersion.parse(ver);
+    opt.addOption(std.SemanticVersion, "version", sem_ver);
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
     const lib_mod = b.createModule(.{
@@ -12,19 +19,25 @@ pub fn build(b: *std.Build) void {
         .linkage = .static,
         .name = "zig_squashfs",
         .root_module = lib_mod,
+        .version = sem_ver,
     });
+
     const exe_mod = b.createModule(.{
-        .root_source_file = b.path("src/main.zig"),
+        .root_source_file = b.path("src/zig_unsquashfs.zig"),
         .target = target,
         .optimize = optimize,
     });
+    exe_mod.addOptions("config", opt);
     const exe = b.addExecutable(.{
         .linkage = .static,
         .name = "zig-unsquashfs",
         .root_module = exe_mod,
+        .version = sem_ver,
     });
+
     b.installArtifact(lib);
     b.installArtifact(exe);
+
     const lib_unit_tests = b.addTest(.{
         .root_module = lib_mod,
     });
