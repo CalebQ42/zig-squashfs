@@ -79,7 +79,8 @@ pub const DataExtractor = struct {
         if (self.frag_data != null) self.alloc.free(self.frag_data.?);
     }
 
-    fn processBlockToFile(self: *DataExtractor, errs: *std.ArrayList(anyerror), block_ind: usize, fil: *fs.File) void {
+    fn processBlockToFile(self: *DataExtractor, wg: *std.Thread.WaitGroup, errs: *std.ArrayList(anyerror), block_ind: usize, fil: *fs.File) void {
+        defer wg.finish();
         const offset_rdr = self.holder.readerAt(self.block_offset[block_ind]);
         var fil_wrtr: FileOffsetWriter = .init(fil, block_ind * self.block_size);
         var limit = std.io.limitedReader(offset_rdr, self.sizes[block_ind].size);
@@ -88,6 +89,15 @@ pub const DataExtractor = struct {
             limit.reader().any(),
             fil_wrtr.any(),
         ) catch |err| {
+            errs.append(err) catch |ignored_err| {
+                std.debug.print("{}\n", .{ignored_err});
+            };
+        };
+    }
+
+    fn fragmentToFile(self: *DataExtractor, wg: *std.Thread.WaitGroup, errs: *std.ArrayList(anyerror), fil: *fs.File) void {
+        defer wg.finish();
+        fil.pwriteAll(self.frag_data.?, self.block_size * self.sizes.len) catch |err| {
             errs.append(err) catch |ignored_err| {
                 std.debug.print("{}\n", .{ignored_err});
             };
@@ -104,9 +114,15 @@ pub const DataExtractor = struct {
         var errs: std.ArrayList(anyerror) = .init(self.alloc);
         defer errs.deinit();
         for (0..self.sizes.len) |i| {
-            pool.spawnWg(&wg, processBlockToFile, .{ self, &errs, i, fil });
+            wg.start();
+            try pool.spawn(processBlockToFile, .{ self, &wg, &errs, i, fil });
+        }
+        if (self.frag_data != null) {
+            wg.start();
+            try pool.spawn(fragmentToFile, .{ self, &wg, &errs, fil });
         }
         wg.wait();
+        //TODO: see if there's any errors
     }
 
     // fn processBlock(self: *DataExtractor, errs: std.ArrayList(anyerror), data_out: std.AutoHashMap([]u8), block_ind: u32) void {

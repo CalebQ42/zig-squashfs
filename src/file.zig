@@ -113,6 +113,7 @@ pub const File = struct {
         }
         try self.readDirEntries(rdr);
         var files = try rdr.alloc.alloc(File, self.dirEntries.?.count());
+        errdefer rdr.alloc.free(files);
         var dirEntryIter = self.dirEntries.?.valueIterator();
         var i: u32 = 0;
         while (dirEntryIter.next()) |ent| : (i += 1) {
@@ -208,7 +209,7 @@ pub const File = struct {
     pub fn extract(self: *File, rdr: *Reader, config: ExtractConfig, path: []const u8) (ExtractError || anyerror)!void {
         var pol: std.Thread.Pool = undefined;
         try pol.init(.{
-            .allocator = std.heap.smp_allocator,
+            .allocator = rdr.alloc,
             .n_jobs = config.thread_count,
         });
         defer pol.deinit();
@@ -233,22 +234,22 @@ pub const File = struct {
                 }
                 var iter = try self.iterator(rdr);
                 defer iter.deinit();
-                while (iter.next()) |*f| {
+                while (iter.next()) |f| {
                     const extr_path = try std.mem.concat(rdr.alloc, u8, &[3][]const u8{ real_path, "/", f.name });
                     defer rdr.alloc.free(extr_path);
-                    try @constCast(f).extractReal(rdr, config, pool, extr_path, false);
+                    try f.extractReal(rdr, config, pool, extr_path, false);
                 }
             },
             .file, .ext_file => {
                 if ((!first and exists) or
                     (first and exists and stat.?.kind != .directory)) return ExtractError.FileExists;
-                const extr_path = if (first and exists and stat.?.kind == .directory) blk: {
-                    break :blk try std.mem.concat(rdr.alloc, u8, &[3][]const u8{ real_path, "/", self.name });
-                } else blk: {
-                    const tmp = try rdr.alloc.alloc(u8, real_path.len);
-                    @memcpy(tmp, real_path);
-                    break :blk tmp;
-                };
+                var extr_path: []u8 = undefined;
+                if (first and exists and stat.?.kind == .directory) {
+                    extr_path = try std.mem.concat(rdr.alloc, u8, &[3][]const u8{ real_path, "/", self.name });
+                } else {
+                    extr_path = try rdr.alloc.alloc(u8, real_path.len);
+                    @memcpy(extr_path, real_path);
+                }
                 defer rdr.alloc.free(extr_path);
                 var ext = try self.extractor(rdr);
                 defer ext.deinit();
@@ -289,10 +290,10 @@ const FileIterator = struct {
 
     curIndex: u32 = 0,
 
-    pub fn next(self: *FileIterator) ?File {
+    pub fn next(self: *FileIterator) ?*File {
         if (self.curIndex >= self.files.len) return null;
         defer self.curIndex += 1;
-        return self.files[self.curIndex];
+        return &self.files[self.curIndex];
     }
     pub fn reset(self: *FileIterator) void {
         self.curIndex = 0;

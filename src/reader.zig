@@ -54,8 +54,15 @@ pub const Reader = struct {
         return out;
     }
     pub fn deinit(self: *Reader) void {
+        self.frag_table.deinit(self.alloc);
+        self.export_table.deinit(self.alloc);
+        self.id_table.deinit(self.alloc);
         self.root.deinit(self.alloc);
         self.holder.deinit();
+    }
+
+    pub fn open(self: *Reader, path: []const u8) !File {
+        return self.root.open(self, path);
     }
 
     fn fileFromRef(self: *Reader, ref: inode.InodeRef, name: []const u8) !File {
@@ -92,8 +99,40 @@ test "root iter" {
 test "extract" {
     const test_sfs_path = "testing/LinuxPATest.sfs";
     const extract_path = "testing/testExtract";
-    try std.fs.cwd().deleteTree(extract_path);
+    std.fs.cwd().deleteTree(extract_path) catch |err| {
+        if (err != std.fs.Dir.DeleteFileError.FileNotFound) {
+            return err;
+        }
+    };
     var rdr: Reader = try .init(std.testing.allocator, test_sfs_path, 0);
     defer rdr.deinit();
     try rdr.root.extract(&rdr, try .init(), extract_path);
+}
+
+test "extract single file" {
+    const test_sfs_path = "testing/LinuxPATest.sfs";
+    const sfs_file_path = "Start.exe";
+    const extract_path = "testing/Start.exe";
+    std.fs.cwd().deleteFile(extract_path) catch |err| {
+        if (err != std.fs.Dir.DeleteFileError.FileNotFound) {
+            return err;
+        }
+    };
+    var rdr: Reader = try .init(std.testing.allocator, test_sfs_path, 0);
+    defer rdr.deinit();
+    var fil = try rdr.open(sfs_file_path);
+    defer fil.deinit(std.testing.allocator);
+    try fil.extract(&rdr, try .init(), extract_path);
+}
+
+test "extract single directory" {
+    const test_sfs_path = "testing/LinuxPATest.sfs";
+    const sfs_file_path = "Documents";
+    const extract_path = "testing/Documents";
+    try std.fs.cwd().deleteTree(extract_path);
+    var rdr: Reader = try .init(std.testing.allocator, test_sfs_path, 0);
+    defer rdr.deinit();
+    var fil = try rdr.open(sfs_file_path);
+    defer fil.deinit(std.testing.allocator);
+    try fil.extract(&rdr, try .init(), extract_path);
 }

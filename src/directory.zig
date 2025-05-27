@@ -27,6 +27,7 @@ pub const DirEntry = struct {
     fn init(alloc: std.mem.Allocator, hdr: DirHeader, rdr: io.AnyReader) !DirEntry {
         const raw = try rdr.readStruct(RawDirEntryStart);
         const name = try alloc.alloc(u8, raw.name_size + 1);
+        errdefer alloc.free(name);
         _ = try rdr.read(name);
         return .{
             .block_start = hdr.inode_block_start,

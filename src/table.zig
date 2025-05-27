@@ -26,22 +26,21 @@ pub fn Table(
             };
         }
         pub fn deinit(self: *Self, alloc: std.mem.Allocator) void {
-            if (self.table.len == 0) alloc.free(self.table);
+            if (self.table.len != 0) alloc.free(self.table);
         }
 
         pub fn getValue(self: *Self, read: *Reader, i: u64) !T {
             if (i >= self.item_count) return TableError.InvalidIndex;
             if (self.table.len > i) return self.table[i];
-            var meta_rdr: MetadataReader = undefined;
             var offset_rdr: FileOffsetReader = undefined;
+            var meta_rdr: MetadataReader = undefined;
             var meta_buf: [8]u8 = [1]u8{0} ** 8;
-            var meta_offset: u64 = 0;
+            const meta_offset = std.mem.bytesAsValue(u64, &meta_buf);
             var to_read: u32 = 0;
             while (self.table.len <= i) {
                 _ = try read.holder.file.preadAll(&meta_buf, self.offset);
                 self.offset += 8;
-                meta_offset = std.mem.bytesToValue(u8, &meta_buf);
-                offset_rdr = read.holder.readerAt(meta_offset);
+                offset_rdr = read.holder.readerAt(meta_offset.*);
                 meta_rdr = .init(read.alloc, self.decomp, offset_rdr.any());
                 defer meta_rdr.deinit();
                 to_read = @min(self.item_count - self.table.len, comptime 8192 / @sizeOf(T));

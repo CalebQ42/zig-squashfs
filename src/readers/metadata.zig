@@ -64,7 +64,7 @@ pub const MetadataReader = struct {
         while (cur_read < bytes.len) {
             if (self.offset >= self.block.len) try self.readNextBlock();
             to_read = @min(bytes.len - cur_read, self.block.len - self.offset);
-            @memcpy(bytes[cur_read..], self.block[self.offset .. @as(usize, self.offset) + to_read]);
+            @memcpy(bytes[cur_read .. cur_read + to_read], self.block[self.offset .. @as(usize, self.offset) + to_read]);
             self.offset += @truncate(to_read);
             cur_read += to_read;
         }

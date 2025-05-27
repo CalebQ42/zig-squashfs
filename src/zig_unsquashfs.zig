@@ -2,6 +2,7 @@ const std = @import("std");
 const config = @import("config");
 
 const Reader = @import("reader.zig").Reader;
+const ExtractConfig = @import("file.zig").File.ExtractConfig;
 
 const stdout = std.io.getStdOut();
 
@@ -121,26 +122,37 @@ pub fn main() !void {
         _ = try stdout.writeAll("no extract location given\n");
         return;
     }
-    var rdr: Reader = .init(
+    var rdr = Reader.init(
         alloc.allocator(),
         filename,
         offset,
     ) catch |err| {
-        try std.fmt.format(stdout.writer(), "Error opening {s} as squashfs: {any}", "\n", .{ filename, err });
+        try std.fmt.format(stdout.writer(), "Error opening {s} as squashfs: {any}\n", .{ filename, err });
+        return;
     };
     if (list == .None) {
+        var conf = ExtractConfig.init() catch |err| {
+            try std.fmt.format(stdout.writer(), "Error getting system info: {any}\n", .{err});
+            return;
+        };
+        conf.deref_sym = deref;
+        conf.unbreak_sym = unbreak;
+        conf.verbose = verbose;
         if (extr_files.items.len == 0) {
-            rdr.root.extract(&rdr, extr_location) catch |err| {
-                try std.fmt.format(stdout.writer(), "Error extracting archive: {any}", "\n", .{err});
+            rdr.root.extract(&rdr, conf, extr_location) catch |err| {
+                try std.fmt.format(stdout.writer(), "Error extracting archive: {any}\n", .{err});
+                return;
             };
         } else {
             for (extr_files.items) |path| {
                 var fil = rdr.root.open(&rdr, path) catch |err| {
-                    try std.fmt.format(stdout.writer(), "Error extracting {s}: {any}", "\n", .{ path, err });
+                    try std.fmt.format(stdout.writer(), "Error extracting {s}: {any}\n", .{ path, err });
+                    return;
                 };
                 defer fil.deinit(alloc.allocator());
-                fil.extract(&rdr, extr_location) catch |err| {
-                    try std.fmt.format(stdout.writer(), "Error extracting {s}: {any}", "\n", .{ path, err });
+                fil.extract(&rdr, conf, extr_location) catch |err| {
+                    try std.fmt.format(stdout.writer(), "Error extracting {s}: {any}\n", .{ path, err });
+                    return;
                 };
             }
         }
