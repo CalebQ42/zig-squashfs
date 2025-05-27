@@ -230,7 +230,11 @@ pub const File = struct {
         switch (self.inode.header.inode_type) {
             .dir, .ext_dir => {
                 if (!exists) {
-                    try fs.cwd().makeDir(real_path);
+                    fs.cwd().makeDir(real_path) catch |err| {
+                        if (config.verbose)
+                            std.log.err("error creating directory {s}: {any}", .{ real_path, err });
+                        return err;
+                    };
                 }
                 var iter = try self.iterator(rdr);
                 defer iter.deinit();
@@ -253,13 +257,26 @@ pub const File = struct {
                 defer rdr.alloc.free(extr_path);
                 var ext = try self.extractor(rdr);
                 defer ext.deinit();
-                var fil = try fs.cwd().createFile(extr_path, .{});
+                var fil = fs.cwd().createFile(extr_path, .{}) catch |err| {
+                    if (config.verbose)
+                        std.log.err("error creating file {s}: {any}", .{ extr_path, err });
+                    return err;
+                };
                 defer fil.close();
-                try ext.writeToFile(pool, &fil);
+                ext.writeToFile(pool, &fil) catch |err| {
+                    if (config.verbose)
+                        std.log.err("error writing file {s}: {any}", .{ self.name, err });
+                    return err;
+                };
             },
             .sym, .ext_sym => {
+                //TODO: unbreak symlinks & dereference symlinks
                 if (exists) return ExtractError.FileExists;
-                try fs.cwd().symLink(try self.symPath(), real_path, .{});
+                fs.cwd().symLink(try self.symPath(), real_path, .{}) catch |err| {
+                    if (config.verbose)
+                        std.log.err("error creating symlink {s}: {any}", .{ self.name, err });
+                    return err;
+                };
             },
             .block, .ext_block, .char, .ext_char, .fifo, .ext_fifo => {
                 if (exists) return ExtractError.FileExists;
@@ -278,7 +295,7 @@ pub const File = struct {
                 };
                 _ = std.os.linux.mknod(@ptrCast(real_path), mode, dev);
             },
-            .sock, .ext_sock => {},
+            .sock, .ext_sock => {}, //TODO
         }
         //TODO: permissions
     }

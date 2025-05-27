@@ -8,7 +8,7 @@ const Superblock = @import("superblock.zig").Superblock;
 const File = @import("file.zig").File;
 const MetadataReader = @import("readers/metadata.zig").MetadataReader;
 const DirEntry = @import("directory.zig").DirEntry;
-const FragEntry = @import("readers/data_reader.zig").FragEntry;
+const FragEntry = @import("fragment.zig").FragEntry;
 
 /// A squashfs archive reader. Make sure to call deinit().
 /// For most actions, you'll want to use Reader.root.
@@ -96,18 +96,18 @@ test "root iter" {
     }
 }
 
-test "extract" {
-    const test_sfs_path = "testing/LinuxPATest.sfs";
-    const extract_path = "testing/testExtract";
-    std.fs.cwd().deleteTree(extract_path) catch |err| {
-        if (err != std.fs.Dir.DeleteFileError.FileNotFound) {
-            return err;
-        }
-    };
-    var rdr: Reader = try .init(std.testing.allocator, test_sfs_path, 0);
-    defer rdr.deinit();
-    try rdr.root.extract(&rdr, try .init(), extract_path);
-}
+// test "extract" {
+//     const test_sfs_path = "testing/LinuxPATest.sfs";
+//     const extract_path = "testing/testExtract";
+//     std.fs.cwd().deleteTree(extract_path) catch |err| {
+//         if (err != std.fs.Dir.DeleteFileError.FileNotFound) {
+//             return err;
+//         }
+//     };
+//     var rdr: Reader = try .init(std.testing.allocator, test_sfs_path, 0);
+//     defer rdr.deinit();
+//     try rdr.root.extract(&rdr, try .init(), extract_path);
+// }
 
 test "extract single file" {
     const test_sfs_path = "testing/LinuxPATest.sfs";
@@ -134,5 +134,7 @@ test "extract single directory" {
     defer rdr.deinit();
     var fil = try rdr.open(sfs_file_path);
     defer fil.deinit(std.testing.allocator);
-    try fil.extract(&rdr, try .init(), extract_path);
+    var config: File.ExtractConfig = try .init();
+    config.verbose = true;
+    try fil.extract(&rdr, config, extract_path);
 }

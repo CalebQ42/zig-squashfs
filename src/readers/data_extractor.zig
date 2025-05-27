@@ -18,6 +18,7 @@ pub const DataExtractor = struct {
     decomp: DecompressionType,
     holder: *FileHolder,
     block_size: u32,
+    file_size: u64,
     sizes: []BlockSize,
     block_offset: []u64,
     frag_data: ?[]u8 = null,
@@ -25,7 +26,7 @@ pub const DataExtractor = struct {
     pub fn init(fil: *File, reader: *Reader) !DataExtractor {
         var data_start: u64 = 0;
         var sizes: []BlockSize = undefined;
-        var size: u64 = 0;
+        var file_size: u64 = 0;
         var frag_idx: u32 = 0;
         var frag_offset: u32 = 0;
         switch (fil.inode.data) {
@@ -33,7 +34,7 @@ pub const DataExtractor = struct {
                 data_start = f.data_start;
                 sizes = try reader.alloc.alloc(BlockSize, f.blocks.len);
                 @memcpy(sizes, f.blocks);
-                size = f.size;
+                file_size = f.size;
                 frag_idx = f.frag_idx;
                 frag_offset = f.frag_offset;
             },
@@ -41,7 +42,7 @@ pub const DataExtractor = struct {
                 data_start = f.data_start;
                 sizes = try reader.alloc.alloc(BlockSize, f.blocks.len);
                 @memcpy(sizes, f.blocks);
-                size = f.size;
+                file_size = f.size;
                 frag_idx = f.frag_idx;
                 frag_offset = f.frag_offset;
             },
@@ -52,6 +53,7 @@ pub const DataExtractor = struct {
             .decomp = reader.super.decomp,
             .holder = &reader.holder,
             .block_size = reader.super.block_size,
+            .file_size = file_size,
             .sizes = sizes,
             .block_offset = try reader.alloc.alloc(u64, sizes.len),
         };
@@ -67,7 +69,7 @@ pub const DataExtractor = struct {
             std.debug.print("{} {}\n", .{ frag_offset, frag_entry });
             defer frag_rdr.deinit();
             try frag_rdr.skip(frag_offset);
-            out.frag_data = try reader.alloc.alloc(u8, size % out.block_size);
+            out.frag_data = try reader.alloc.alloc(u8, file_size % out.block_size);
             _ = try frag_rdr.any().readAll(out.frag_data.?);
         }
         return out;
@@ -81,26 +83,51 @@ pub const DataExtractor = struct {
 
     fn processBlockToFile(self: *DataExtractor, wg: *std.Thread.WaitGroup, errs: *std.ArrayList(anyerror), block_ind: usize, fil: *fs.File) void {
         defer wg.finish();
-        const offset_rdr = self.holder.readerAt(self.block_offset[block_ind]);
-        var fil_wrtr: FileOffsetWriter = .init(fil, block_ind * self.block_size);
-        var limit = std.io.limitedReader(offset_rdr, self.sizes[block_ind].size);
-        self.decomp.decompressTo(
-            self.alloc,
-            limit.reader().any(),
-            fil_wrtr.any(),
-        ) catch |err| {
-            errs.append(err) catch |ignored_err| {
-                std.debug.print("{}\n", .{ignored_err});
+        var offset_rdr = self.holder.readerAt(self.block_offset[block_ind]);
+        if (self.sizes[block_ind].not_compressed) {
+            @branchHint(.unlikely);
+            if (self.sizes[block_ind].size == 0) {
+                if (block_ind == self.sizes.len - 1) {
+                    fil.pwriteAll(&[1]u8{0}, self.file_size - 1) catch |err| {
+                        errs.append(err) catch {};
+                    };
+                } else {
+                    fil.pwriteAll(&[1]u8{0}, ((block_ind + 1) * self.block_size) - 1) catch |err| {
+                        errs.append(err) catch {};
+                    };
+                }
+                return;
+            }
+            const dat = self.alloc.alloc(u8, self.sizes[block_ind].size) catch |err| {
+                errs.append(err) catch {};
+                return;
             };
-        };
+            defer self.alloc.free(dat);
+            _ = offset_rdr.any().readAll(dat) catch |err| {
+                errs.append(err) catch {};
+                return;
+            };
+            fil.pwriteAll(dat, block_ind * self.block_size) catch |err| {
+                errs.append(err) catch {};
+            };
+        } else {
+            @branchHint(.likely);
+            var fil_wrtr: FileOffsetWriter = .init(fil, block_ind * self.block_size);
+            var limit = std.io.limitedReader(offset_rdr, self.sizes[block_ind].size);
+            self.decomp.decompressTo(
+                self.alloc,
+                limit.reader().any(),
+                fil_wrtr.any(),
+            ) catch |err| {
+                errs.append(err) catch {};
+            };
+        }
     }
 
     fn fragmentToFile(self: *DataExtractor, wg: *std.Thread.WaitGroup, errs: *std.ArrayList(anyerror), fil: *fs.File) void {
         defer wg.finish();
         fil.pwriteAll(self.frag_data.?, self.block_size * self.sizes.len) catch |err| {
-            errs.append(err) catch |ignored_err| {
-                std.debug.print("{}\n", .{ignored_err});
-            };
+            errs.append(err) catch {};
         };
     }
 
@@ -122,7 +149,10 @@ pub const DataExtractor = struct {
             try pool.spawn(fragmentToFile, .{ self, &wg, &errs, fil });
         }
         wg.wait();
-        //TODO: see if there's any errors
+        if (errs.items.len > 0) {
+            //TODO: better handle all the errors
+            return errs.items[0];
+        }
     }
 
     // fn processBlock(self: *DataExtractor, errs: std.ArrayList(anyerror), data_out: std.AutoHashMap([]u8), block_ind: u32) void {

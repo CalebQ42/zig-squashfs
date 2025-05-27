@@ -7,8 +7,7 @@ const Reader = @import("../reader.zig").Reader;
 const BlockSize = @import("../inode/file.zig").BlockSize;
 const DecompressionType = @import("../decompress.zig").DecompressType;
 const FileOffsetReader = @import("../readers/file_holder.zig").FileOffsetReader;
-
-pub const FragEntry = packed struct { start: u64, size: BlockSize, _: u32 };
+const FragEntry = @import("../fragment.zig").FragEntry;
 
 const DataReaderError = error{
     EOF,
