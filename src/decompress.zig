@@ -45,7 +45,7 @@ pub const DecompressType = enum(u16) {
     }
 
     pub fn decompressTo(self: DecompressType, alloc: std.mem.Allocator, rdr: io.AnyReader, writer: io.AnyWriter) anyerror!void {
-        const buf_size: usize = 1024;
+        const buf_size: usize = 8192;
         switch (self) {
             .zlib => try compress.zlib.decompress(rdr, writer),
             .lzma => {
