@@ -18,6 +18,7 @@ pub const DataReader = struct {
     decomp: DecompressionType,
     rdr: FileOffsetReader,
     block_size: u32,
+    file_size: u64,
     sizes: []BlockSize,
     frag_data: ?[]u8 = null,
 
@@ -28,7 +29,7 @@ pub const DataReader = struct {
     pub fn init(fil: *File, reader: *Reader) !DataReader {
         var data_start: u64 = 0;
         var sizes: []BlockSize = undefined;
-        var size: u64 = 0;
+        var file_size: u64 = 0;
         var frag_idx: u32 = 0;
         var frag_offset: u32 = 0;
         switch (fil.inode.data) {
@@ -36,7 +37,7 @@ pub const DataReader = struct {
                 sizes = try reader.alloc.alloc(BlockSize, f.blocks.len);
                 @memcpy(sizes, f.blocks);
                 data_start = f.data_start;
-                size = f.size;
+                file_size = f.size;
                 frag_idx = f.frag_idx;
                 frag_offset = f.frag_offset;
             },
@@ -44,7 +45,7 @@ pub const DataReader = struct {
                 sizes = try reader.alloc.alloc(BlockSize, f.blocks.len);
                 @memcpy(sizes, f.blocks);
                 data_start = f.data_start;
-                size = f.size;
+                file_size = f.size;
                 frag_idx = f.frag_idx;
                 frag_offset = f.frag_offset;
             },
@@ -55,16 +56,13 @@ pub const DataReader = struct {
             .decomp = reader.super.decomp,
             .rdr = reader.holder.readerAt(data_start),
             .block_size = reader.super.block_size,
+            .file_size = file_size,
             .sizes = sizes,
         };
         errdefer out.deinit();
         if (frag_idx != 0xFFFFFFFF) {
-            const frag_entry = try reader.frag_table.getValue(frag_idx);
-            var frag_rdr = try .fromFragEntry(reader, frag_entry);
-            defer frag_rdr.deinit();
-            try frag_rdr.skip(frag_offset);
-            out.frag_data = try reader.alloc.alloc(u8, size % out.block_size);
-            _ = try frag_rdr.any().readAll(out.frag_data);
+            const frag_ent = try reader.frag_table.getValue(reader, frag_idx);
+            out.frag_data = try frag_ent.getData(reader, frag_offset, @truncate(file_size % reader.super.block_size));
         }
         return out;
     }
@@ -104,13 +102,17 @@ pub const DataReader = struct {
         }
         const siz = self.sizes[self.next_block_num];
         self.next_block_num += 1;
-        if (self.next_block_num == self.sizes.len - 1 and self.frag_data != null) {
+        if (self.next_block_num == self.sizes.len and self.frag_data != null) {
             try self.sizeBlock(self.frag_data.?.len);
             @memcpy(self.cur_bloc, self.frag_data.?);
             return;
         }
         if (siz.size == 0) {
-            try self.sizeBlock(self.block_size);
+            if (self.next_block_num == self.sizes.len) {
+                try self.sizeBlock(@truncate(self.file_size % self.block_size));
+            } else {
+                try self.sizeBlock(self.block_size);
+            }
             @memset(self.cur_bloc, 0);
             return;
         }

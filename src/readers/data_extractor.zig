@@ -64,13 +64,8 @@ pub const DataExtractor = struct {
             offset += out.sizes[i].size;
         }
         if (frag_idx != 0xFFFFFFFF) {
-            const frag_entry = try reader.frag_table.getValue(reader, frag_idx);
-            var frag_rdr: DataReader = try .fromFragEntry(reader, frag_entry);
-            std.debug.print("{} {}\n", .{ frag_offset, frag_entry });
-            defer frag_rdr.deinit();
-            try frag_rdr.skip(frag_offset);
-            out.frag_data = try reader.alloc.alloc(u8, file_size % out.block_size);
-            _ = try frag_rdr.any().readAll(out.frag_data.?);
+            const frag_ent = try reader.frag_table.getValue(reader, frag_idx);
+            out.frag_data = try frag_ent.getData(reader, frag_offset, @truncate(file_size % reader.super.block_size));
         }
         return out;
     }
@@ -83,35 +78,40 @@ pub const DataExtractor = struct {
 
     fn processBlockToFile(self: *DataExtractor, wg: *std.Thread.WaitGroup, errs: *std.ArrayList(anyerror), block_ind: usize, fil: *fs.File) void {
         defer wg.finish();
-        var offset_rdr = self.holder.readerAt(self.block_offset[block_ind]);
         if (self.sizes[block_ind].not_compressed) {
             @branchHint(.unlikely);
             if (self.sizes[block_ind].size == 0) {
                 if (block_ind == self.sizes.len - 1) {
                     fil.pwriteAll(&[1]u8{0}, self.file_size - 1) catch |err| {
+                        std.debug.print("yo1\n", .{});
                         errs.append(err) catch {};
                     };
                 } else {
                     fil.pwriteAll(&[1]u8{0}, ((block_ind + 1) * self.block_size) - 1) catch |err| {
+                        std.debug.print("yo2\n", .{});
                         errs.append(err) catch {};
                     };
                 }
                 return;
             }
             const dat = self.alloc.alloc(u8, self.sizes[block_ind].size) catch |err| {
+                std.debug.print("yo3\n", .{});
                 errs.append(err) catch {};
                 return;
             };
             defer self.alloc.free(dat);
-            _ = offset_rdr.any().readAll(dat) catch |err| {
+            _ = fil.preadAll(dat, self.block_offset[block_ind]) catch |err| {
+                std.debug.print("yo4\n", .{});
                 errs.append(err) catch {};
                 return;
             };
             fil.pwriteAll(dat, block_ind * self.block_size) catch |err| {
+                std.debug.print("yo5\n", .{});
                 errs.append(err) catch {};
             };
         } else {
             @branchHint(.likely);
+            const offset_rdr = self.holder.readerAt(self.block_offset[block_ind]);
             var fil_wrtr: FileOffsetWriter = .init(fil, block_ind * self.block_size);
             var limit = std.io.limitedReader(offset_rdr, self.sizes[block_ind].size);
             self.decomp.decompressTo(
@@ -119,6 +119,7 @@ pub const DataExtractor = struct {
                 limit.reader().any(),
                 fil_wrtr.any(),
             ) catch |err| {
+                std.debug.print("yo6\n", .{});
                 errs.append(err) catch {};
             };
         }
@@ -127,6 +128,7 @@ pub const DataExtractor = struct {
     fn fragmentToFile(self: *DataExtractor, wg: *std.Thread.WaitGroup, errs: *std.ArrayList(anyerror), fil: *fs.File) void {
         defer wg.finish();
         fil.pwriteAll(self.frag_data.?, self.block_size * self.sizes.len) catch |err| {
+            std.debug.print("yo7\n", .{});
             errs.append(err) catch {};
         };
     }

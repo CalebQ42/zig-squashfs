@@ -96,18 +96,18 @@ test "root iter" {
     }
 }
 
-// test "extract" {
-//     const test_sfs_path = "testing/LinuxPATest.sfs";
-//     const extract_path = "testing/testExtract";
-//     std.fs.cwd().deleteTree(extract_path) catch |err| {
-//         if (err != std.fs.Dir.DeleteFileError.FileNotFound) {
-//             return err;
-//         }
-//     };
-//     var rdr: Reader = try .init(std.testing.allocator, test_sfs_path, 0);
-//     defer rdr.deinit();
-//     try rdr.root.extract(&rdr, try .init(), extract_path);
-// }
+test "extract" {
+    const test_sfs_path = "testing/LinuxPATest.sfs";
+    const extract_path = "testing/testExtract";
+    std.fs.cwd().deleteTree(extract_path) catch |err| {
+        if (err != std.fs.Dir.DeleteFileError.FileNotFound) {
+            return err;
+        }
+    };
+    var rdr: Reader = try .init(std.testing.allocator, test_sfs_path, 0);
+    defer rdr.deinit();
+    try rdr.root.extract(&rdr, try .init(), extract_path);
+}
 
 test "extract single file" {
     const test_sfs_path = "testing/LinuxPATest.sfs";
