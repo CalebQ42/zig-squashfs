@@ -85,8 +85,9 @@ pub const Reader = struct {
     }
 };
 
+const test_sfs_path = "testing/LinuxPATest.sfs";
+
 test "root iter" {
-    const test_sfs_path = "testing/LinuxPATest.sfs";
     var rdr: Reader = try .init(std.testing.allocator, test_sfs_path, 0);
     defer rdr.deinit();
     var rootIter = try rdr.root.iterator(&rdr);
@@ -96,23 +97,9 @@ test "root iter" {
     }
 }
 
-test "extract" {
-    const test_sfs_path = "testing/LinuxPATest.sfs";
-    const extract_path = "testing/testExtract";
-    std.fs.cwd().deleteTree(extract_path) catch |err| {
-        if (err != std.fs.Dir.DeleteFileError.FileNotFound) {
-            return err;
-        }
-    };
-    var rdr: Reader = try .init(std.testing.allocator, test_sfs_path, 0);
-    defer rdr.deinit();
-    try rdr.root.extract(&rdr, try .init(), extract_path);
-}
-
 test "extract single file" {
-    const test_sfs_path = "testing/LinuxPATest.sfs";
-    const sfs_file_path = "Start.exe";
-    const extract_path = "testing/Start.exe";
+    const sfs_file_path = "PortableApps/Cool_Retro_Term-dac2b4f-x86_64.AppImage";
+    const extract_path = "testing/Cool_Retro_Term-dac2b4f-x86_64.AppImage";
     std.fs.cwd().deleteFile(extract_path) catch |err| {
         if (err != std.fs.Dir.DeleteFileError.FileNotFound) {
             return err;
@@ -126,7 +113,6 @@ test "extract single file" {
 }
 
 test "extract single directory" {
-    const test_sfs_path = "testing/LinuxPATest.sfs";
     const sfs_file_path = "Documents";
     const extract_path = "testing/Documents";
     try std.fs.cwd().deleteTree(extract_path);
@@ -137,4 +123,16 @@ test "extract single directory" {
     var config: File.ExtractConfig = try .init();
     config.verbose = true;
     try fil.extract(&rdr, config, extract_path);
+}
+
+test "full extract" {
+    const extract_path = "testing/testExtract";
+    std.fs.cwd().deleteTree(extract_path) catch |err| {
+        if (err != std.fs.Dir.DeleteFileError.FileNotFound) {
+            return err;
+        }
+    };
+    var rdr: Reader = try .init(std.testing.allocator, test_sfs_path, 0);
+    defer rdr.deinit();
+    try rdr.root.extract(&rdr, try .init(), extract_path);
 }

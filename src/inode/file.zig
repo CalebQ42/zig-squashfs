@@ -2,9 +2,9 @@ const std = @import("std");
 const io = std.io;
 
 pub const BlockSize = packed struct {
-    size: u23,
+    size: u24,
     not_compressed: bool,
-    _: u8,
+    _: u7,
 };
 
 pub const FileInode = struct {
@@ -15,7 +15,7 @@ pub const FileInode = struct {
     blocks: []const BlockSize,
 
     pub fn init(alloc: std.mem.Allocator, rdr: io.AnyReader, block_size: u32) !FileInode {
-        var fixed_buf = [1]u8{0} ** 16;
+        var fixed_buf: [16]u8 = undefined;
         _ = try rdr.readAll(&fixed_buf);
         const frag_idx = std.mem.bytesToValue(u32, fixed_buf[4..8]);
         const size = std.mem.bytesToValue(u32, fixed_buf[12..16]);

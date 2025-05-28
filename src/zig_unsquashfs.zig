@@ -64,6 +64,7 @@ pub fn main() !void {
         return;
     };
     defer args.deinit();
+    _ = args.next();
     while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
             try help();

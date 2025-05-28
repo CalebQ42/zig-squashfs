@@ -76,7 +76,7 @@ pub const DataExtractor = struct {
         if (self.frag_data != null) self.alloc.free(self.frag_data.?);
     }
 
-    fn processBlockToFile(self: *DataExtractor, wg: *std.Thread.WaitGroup, errs: *std.ArrayList(anyerror), block_ind: usize, fil: *fs.File) void {
+    fn processBlockToFile(self: *DataExtractor, wg: *std.Thread.WaitGroup, errs: *MutexList, block_ind: usize, fil: *fs.File) void {
         defer wg.finish();
         if (self.sizes[block_ind].not_compressed) {
             @branchHint(.unlikely);
@@ -95,18 +95,15 @@ pub const DataExtractor = struct {
                 return;
             }
             const dat = self.alloc.alloc(u8, self.sizes[block_ind].size) catch |err| {
-                std.debug.print("yo3\n", .{});
                 errs.append(err) catch {};
                 return;
             };
             defer self.alloc.free(dat);
-            _ = fil.preadAll(dat, self.block_offset[block_ind]) catch |err| {
-                std.debug.print("yo4\n", .{});
+            _ = self.holder.file.preadAll(dat, self.block_offset[block_ind]) catch |err| {
                 errs.append(err) catch {};
                 return;
             };
             fil.pwriteAll(dat, block_ind * self.block_size) catch |err| {
-                std.debug.print("yo5\n", .{});
                 errs.append(err) catch {};
             };
         } else {
@@ -119,16 +116,14 @@ pub const DataExtractor = struct {
                 limit.reader().any(),
                 fil_wrtr.any(),
             ) catch |err| {
-                std.debug.print("yo6\n", .{});
                 errs.append(err) catch {};
             };
         }
     }
 
-    fn fragmentToFile(self: *DataExtractor, wg: *std.Thread.WaitGroup, errs: *std.ArrayList(anyerror), fil: *fs.File) void {
+    fn fragmentToFile(self: *DataExtractor, wg: *std.Thread.WaitGroup, errs: *MutexList, fil: *fs.File) void {
         defer wg.finish();
         fil.pwriteAll(self.frag_data.?, self.block_size * self.sizes.len) catch |err| {
-            std.debug.print("yo7\n", .{});
             errs.append(err) catch {};
         };
     }
@@ -140,7 +135,7 @@ pub const DataExtractor = struct {
     /// Optimized for lower memory usage by using File.pwrite.
     pub fn writeToFile(self: *DataExtractor, pool: *std.Thread.Pool, fil: *fs.File) !void {
         var wg: std.Thread.WaitGroup = .{};
-        var errs: std.ArrayList(anyerror) = .init(self.alloc);
+        var errs: MutexList = .init(self.alloc);
         defer errs.deinit();
         for (0..self.sizes.len) |i| {
             wg.start();
@@ -151,9 +146,9 @@ pub const DataExtractor = struct {
             try pool.spawn(fragmentToFile, .{ self, &wg, &errs, fil });
         }
         wg.wait();
-        if (errs.items.len > 0) {
+        if (errs.list.items.len > 0) {
             //TODO: better handle all the errors
-            return errs.items[0];
+            return errs.list.items[0];
         }
     }
 
@@ -184,4 +179,24 @@ pub const DataExtractor = struct {
     //     }
     //     wg.wait();
     // }
+};
+
+const MutexList = struct {
+    list: std.ArrayList(anyerror),
+    mut: std.Thread.Mutex = .{},
+
+    fn init(alloc: std.mem.Allocator) MutexList {
+        return .{
+            .list = .init(alloc),
+        };
+    }
+    fn deinit(self: *MutexList) void {
+        self.list.deinit();
+    }
+
+    fn append(self: *MutexList, err: anyerror) !void {
+        self.mut.lock();
+        defer self.mut.unlock();
+        try self.list.append(err);
+    }
 };
