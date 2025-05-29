@@ -40,7 +40,7 @@ pub const File = struct {
         const name = try rdr.alloc.alloc(u8, ent.name.len);
         errdefer rdr.alloc.free(name);
         @memcpy(name, ent.name);
-        return .{
+        var out: File = .{
             .name = name,
             .inode = try .init(
                 rdr.alloc,
@@ -48,6 +48,13 @@ pub const File = struct {
                 rdr.super.block_size,
             ),
         };
+        switch (out.inode.header.inode_type) {
+            .file, .ext_file => {
+                out.data_rdr = try .init(&out, rdr);
+            },
+            else => {},
+        }
+        return out;
     }
 
     pub fn deinit(self: *File, alloc: std.mem.Allocator) void {
@@ -155,11 +162,11 @@ pub const File = struct {
     }
 
     pub fn size(self: File) u64 {
-        switch (self.inode.data) {
+        return switch (self.inode.data) {
             .file => |f| f.size,
             .ext_file => |f| f.size,
             else => 0,
-        }
+        };
     }
 
     /// If the file is a normal file, reads it's data.
@@ -255,19 +262,28 @@ pub const File = struct {
                     @memcpy(extr_path, real_path);
                 }
                 defer rdr.alloc.free(extr_path);
-                var ext = try self.extractor(rdr);
-                defer ext.deinit();
                 var fil = fs.cwd().createFile(extr_path, .{}) catch |err| {
                     if (config.verbose)
                         std.log.err("error creating file {s}: {any}", .{ extr_path, err });
                     return err;
                 };
                 defer fil.close();
-                ext.writeToFile(pool, &fil) catch |err| {
-                    if (config.verbose)
-                        std.log.err("error writing file {s}: {any}", .{ self.name, err });
-                    return err;
-                };
+                if (self.size() > rdr.super.block_size) {
+                    var ext = try self.extractor(rdr);
+                    defer ext.deinit();
+                    ext.writeToFile(pool, &fil) catch |err| {
+                        if (config.verbose)
+                            std.log.err("error writing file {s}: {any}", .{ self.name, err });
+                        return err;
+                    };
+                } else {
+                    var buf = [1]u8{0} ** 8192;
+                    var total_red: u64 = 0;
+                    while (total_red < self.size()) {
+                        const red = try self.read(&buf);
+                        total_red += red;
+                    }
+                }
             },
             .sym, .ext_sym => {
                 //TODO: unbreak symlinks & dereference symlinks
