@@ -60,6 +60,7 @@ pub const File = struct {
     pub fn deinit(self: *File, alloc: std.mem.Allocator) void {
         self.inode.deinit();
         alloc.free(self.name);
+        if (self.data_rdr != null) self.data_rdr.?.deinit();
         if (self.dirEntries != null) {
             var iter = self.dirEntries.?.iterator();
             while (iter.next()) |ent| {
@@ -268,7 +269,7 @@ pub const File = struct {
                     return err;
                 };
                 defer fil.close();
-                if (self.size() > rdr.super.block_size) {
+                if (config.thread_count > 1 and self.size() > rdr.super.block_size) {
                     var ext = try self.extractor(rdr);
                     defer ext.deinit();
                     ext.writeToFile(pool, &fil) catch |err| {

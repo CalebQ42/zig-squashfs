@@ -96,17 +96,15 @@ pub const DataReader = struct {
     }
 
     fn readNextBlock(self: *DataReader) !void {
-        if (self.next_block_num == self.sizes.len) {
-            if (self.cur_bloc.len > 0) self.alloc.free(self.cur_bloc);
-            return DataReaderError.EOF;
-        }
-        const siz = self.sizes[self.next_block_num];
-        self.next_block_num += 1;
+        defer self.next_block_num += 1;
         if (self.next_block_num == self.sizes.len and self.frag_data != null) {
             try self.sizeBlock(self.frag_data.?.len);
             @memcpy(self.cur_bloc, self.frag_data.?);
             return;
+        } else if (self.next_block_num >= self.sizes.len) {
+            return DataReaderError.EOF;
         }
+        const siz = self.sizes[self.next_block_num];
         if (siz.size == 0) {
             if (self.next_block_num == self.sizes.len) {
                 try self.sizeBlock(@truncate(self.file_size % self.block_size));
@@ -145,7 +143,7 @@ pub const DataReader = struct {
                 };
             }
             to_read = @min(bytes.len - cur_read, self.cur_bloc.len - self.cur_offset);
-            @memcpy(bytes[cur_read..], self.cur_bloc[self.cur_offset .. @as(usize, self.cur_offset) + to_read]);
+            @memcpy(bytes[cur_read .. cur_read + to_read], self.cur_bloc[self.cur_offset .. @as(usize, self.cur_offset) + to_read]);
             self.cur_offset += @truncate(to_read);
             cur_read += to_read;
         }
