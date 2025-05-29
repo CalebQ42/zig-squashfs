@@ -3,6 +3,7 @@ const std = @import("std");
 const Reader = @import("reader.zig").Reader;
 const Inode = @import("inode/inode.zig").Inode;
 const DirEntry = @import("directory.zig").DirEntry;
+const DecompressType = @import("decompress.zig").DecompressType;
 const FileHolder = @import("readers/file_holder.zig").FileHolder;
 const DataReader = @import("readers/data_reader.zig").DataReader;
 const MetadataReader = @import("readers/metadata.zig").MetadataReader;
@@ -26,8 +27,17 @@ pub const File = union(enum) {
 
     const Self = @This();
 
-    fn fromDirEntry(ent: DirEntry) !File {
-        _ = ent;
+    fn fromDirEntry(alloc: std.mem.Allocator, holder: *FileHolder, decomp: DecompressType, inode_start: u64, dir_start: u64, block_size: u32, ent: DirEntry) !File {
+        const offset_rdr = holder.readerAt(inode_start + ent.block_start);
+        var meta_rdr: MetadataReader = .init(alloc, decomp, offset_rdr);
+        const inode: Inode = try .init(alloc, meta_rdr, block_size);
+        return switch (inode.header.inode_type) {
+
+        }
+    }
+
+    fn fromDirEntryReader(rdr: *Reader, ent: DirEntry) !File {
+        return fromDirEntry(rdr.alloc, &rdr.holder, rdr.super.decomp, rdr.super.inode_table_start, rdr.super.dir_table_start, ent);
     }
 
     pub fn deinit(self: Self) void {
@@ -43,10 +53,21 @@ pub const File = union(enum) {
 pub const RegularFile = struct {
     alloc: std.mem.Allocator,
     fil: *FileHolder,
+    decomp: DecompressType,
 
     inode: Inode,
 
     data_rdr: DataReader,
+
+    fn init(alloc: std.mem.Allocator, fil: *FileHolder, decomp: DecompressType, inode: Inode) !RegularFile{
+        return .{
+            .alloc = alloc,
+            .fil = fil,
+            .decomp = decomp,
+            .inode = inode,
+            .data_rdr = try .init()
+        }
+    }
 
     pub fn deinit(self: RegularFile) void {
         self.inode.deinit();

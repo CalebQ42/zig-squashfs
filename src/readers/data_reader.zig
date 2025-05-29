@@ -8,6 +8,7 @@ const BlockSize = @import("../inode/file.zig").BlockSize;
 const DecompressionType = @import("../decompress.zig").DecompressType;
 const FileOffsetReader = @import("../readers/file_holder.zig").FileOffsetReader;
 const FragEntry = @import("../fragment.zig").FragEntry;
+const Inode = @import("../inode/inode.zig").Inode;
 
 const DataReaderError = error{
     EOF,
@@ -26,15 +27,15 @@ pub const DataReader = struct {
     cur_bloc: []u8 = &[0]u8{},
     cur_offset: u32 = 0,
 
-    pub fn init(fil: *File, reader: *Reader) !DataReader {
+    pub fn init(alloc: std.mem.Allocator, holder: FileHolder, inode: Inode, decomp: DecompressionType, block_size: u32) !DataReader {
         var data_start: u64 = 0;
         var sizes: []BlockSize = undefined;
         var file_size: u64 = 0;
         var frag_idx: u32 = 0;
         var frag_offset: u32 = 0;
-        switch (fil.inode.data) {
+        switch (inode.data) {
             .file => |f| {
-                sizes = try reader.alloc.alloc(BlockSize, f.blocks.len);
+                sizes = try alloc.alloc(BlockSize, f.blocks.len);
                 @memcpy(sizes, f.blocks);
                 data_start = f.data_start;
                 file_size = f.size;
@@ -42,20 +43,20 @@ pub const DataReader = struct {
                 frag_offset = f.frag_offset;
             },
             .ext_file => |f| {
-                sizes = try reader.alloc.alloc(BlockSize, f.blocks.len);
+                sizes = try alloc.alloc(BlockSize, f.blocks.len);
                 @memcpy(sizes, f.blocks);
                 data_start = f.data_start;
                 file_size = f.size;
                 frag_idx = f.frag_idx;
                 frag_offset = f.frag_offset;
             },
-            else => return File.FileError.NotNormalFile,
+            else => unreachable,
         }
         var out: DataReader = .{
-            .alloc = reader.alloc,
-            .decomp = reader.super.decomp,
-            .rdr = reader.holder.readerAt(data_start),
-            .block_size = reader.super.block_size,
+            .alloc = alloc,
+            .decomp = decomp,
+            .rdr = holder.readerAt(data_start),
+            .block_size = block_size,
             .file_size = file_size,
             .sizes = sizes,
         };
