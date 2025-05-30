@@ -65,7 +65,7 @@ pub const Reader = struct {
         return self.root.open(self, path);
     }
 
-    fn fileFromRef(self: *Reader, ref: inode.InodeRef, name: []const u8) !File {
+    fn fileFromRef(self: *Reader, ref: inode.InodeRef, name: []const u8, parent_path: []const u8) !File {
         var offset_rdr = self.holder.readerAt(ref.block_start + self.super.inode_table_start);
         var meta_rdr: MetadataReader = .init(
             self.alloc,
@@ -81,6 +81,7 @@ pub const Reader = struct {
                 meta_rdr.any(),
                 self.super.block_size,
             ),
+            .parent_path = parent_path,
         };
     }
 };

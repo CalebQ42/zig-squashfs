@@ -1,6 +1,7 @@
 const std = @import("std");
 const io = std.io;
 const fs = std.fs;
+const log = std.log;
 const builtin = @import("builtin");
 
 const inode = @import("inode/inode.zig");
@@ -18,6 +19,8 @@ pub const File = struct {
     name: []const u8,
     inode: inode.Inode,
     dirEntries: ?std.StringHashMap(DirEntry) = null,
+    /// The path within the archive to the parent directory.
+    parent_path: []const u8,
 
     data_rdr: ?DataReader = null,
 
@@ -28,7 +31,7 @@ pub const File = struct {
         NotFound,
     };
 
-    fn fromDirEntry(rdr: *Reader, ent: DirEntry) !File {
+    fn fromDirEntry(rdr: *Reader, ent: DirEntry, parent_path: []const u8) !File {
         var offset_rdr = rdr.holder.readerAt(ent.block_start + rdr.super.inode_table_start);
         var meta_rdr: MetadataReader = .init(
             rdr.alloc,
@@ -47,6 +50,7 @@ pub const File = struct {
                 meta_rdr.any(),
                 rdr.super.block_size,
             ),
+            .parent_path = parent_path,
         };
         switch (out.inode.header.inode_type) {
             .file, .ext_file => {
@@ -60,6 +64,7 @@ pub const File = struct {
     pub fn deinit(self: *File, alloc: std.mem.Allocator) void {
         self.inode.deinit();
         alloc.free(self.name);
+        alloc.free(self.parent_path);
         if (self.data_rdr != null) self.data_rdr.?.deinit();
         if (self.dirEntries != null) {
             var iter = self.dirEntries.?.iterator();
@@ -125,7 +130,12 @@ pub const File = struct {
         var dirEntryIter = self.dirEntries.?.valueIterator();
         var i: u32 = 0;
         while (dirEntryIter.next()) |ent| : (i += 1) {
-            files[i] = try .fromDirEntry(rdr, ent.*);
+            const parent = if (self.parent_path.len == 0) blk: {
+                const tmp = try rdr.alloc(u8, self.name.len);
+                @memcpy(tmp, self.name);
+                break :blk tmp;
+            } else try std.mem.concat(rdr.alloc, u8, &[3][]const u8{ self.parent_path, "/", self.name });
+            files[i] = try .fromDirEntry(rdr, ent.*, parent);
         }
         return .{
             .alloc = rdr.alloc,
@@ -162,6 +172,7 @@ pub const File = struct {
         self.dirEntries = try directory.readDirectory(rdr.alloc, meta_rdr.any(), siz);
     }
 
+    /// If the file is a regular file, returns the file size, otherwise returns 0.
     pub fn size(self: File) u64 {
         return switch (self.inode.data) {
             .file => |f| f.size,
@@ -197,8 +208,11 @@ pub const File = struct {
         /// Default is 1GB or a quarter of your system memory, whichever is smaller.
         /// Actually memory usage will be higher, as this does not account of vaious metadata (such as file names).
         max_mem: u64,
+        /// Replace symlinks with their target file. Only works if the target is within the archive.
         deref_sym: bool = false,
-        unbreak_sym: bool = false,
+        //TODO:
+        // /// Attempts to extract a symlink's target along with the symlink.
+        // unbreak_sym: bool = false,\]
         verbose: bool = false,
         pub fn init() !ExtractConfig {
             const sys_mem = try std.process.totalSystemMemory();
@@ -221,100 +235,81 @@ pub const File = struct {
             .n_jobs = config.thread_count,
         });
         defer pol.deinit();
-        return self.extractReal(rdr, config, &pol, path, true);
+        var errs: std.ArrayList(anyerror) = .init(rdr.alloc);
+        self.extractReal(rdr, &errs, &pol, config, path);
+        if (errs.items.len > 0) {
+            return errs.items[0];
+        }
     }
 
-    fn extractReal(self: *File, rdr: *Reader, config: ExtractConfig, pool: *std.Thread.Pool, path: []const u8, first: bool) (ExtractError || anyerror)!void {
-        const real_path = std.mem.trimRight(u8, path, "/");
-        var exists = true;
+    fn extractReal(
+        self: *File,
+        rdr: *Reader,
+        errs: *std.ArrayList(anyerror),
+        extr_pool: *std.Thread.Pool,
+        config: ExtractConfig,
+        path: []const u8,
+    ) void {
+        var extr_path: []const u8 = std.mem.trim(u8, path, "/");
         var stat: ?fs.File.Stat = null;
-        if (fs.cwd().statFile(real_path)) |s| {
+        if (fs.cwd().statFile(path)) |s| {
             stat = s;
         } else |err| {
-            if (err == fs.File.OpenError.FileNotFound) {
-                exists = false;
-            } else return err;
+            if (err != fs.File.OpenError.FileNotFound) {
+                if (config.verbose)
+                    log.err("error checking if extraction path is valid: {}\n", .{err});
+                errs.append(err) catch {};
+                return;
+            }
         }
         switch (self.inode.header.inode_type) {
             .dir, .ext_dir => {
-                if (!exists) {
-                    fs.cwd().makeDir(real_path) catch |err| {
-                        if (config.verbose)
-                            std.log.err("error creating directory {s}: {any}", .{ real_path, err });
-                        return err;
-                    };
-                }
-                var iter = try self.iterator(rdr);
-                defer iter.deinit();
-                while (iter.next()) |f| {
-                    const extr_path = try std.mem.concat(rdr.alloc, u8, &[3][]const u8{ real_path, "/", f.name });
-                    defer rdr.alloc.free(extr_path);
-                    try f.extractReal(rdr, config, pool, extr_path, false);
-                }
+                if (stat != null) {}
             },
             .file, .ext_file => {
-                if ((!first and exists) or
-                    (first and exists and stat.?.kind != .directory)) return ExtractError.FileExists;
-                var extr_path: []u8 = undefined;
-                if (first and exists and stat.?.kind == .directory) {
-                    extr_path = try std.mem.concat(rdr.alloc, u8, &[3][]const u8{ real_path, "/", self.name });
-                } else {
-                    extr_path = try rdr.alloc.alloc(u8, real_path.len);
-                    @memcpy(extr_path, real_path);
+                if (stat != null) {
+                    if (stat.?.kind != .directory) {
+                        if (config.verbose)
+                            log.err("error extracting {s}: file already exists at {s}\n", .{ self.name, path });
+                        errs.append(ExtractError.FileExists) catch {};
+                        return;
+                    }
+                    extr_path = std.mem.concat(rdr.alloc, u8, &[3][]const u8{ path, "/", self.name }) catch |err| {
+                        if (config.verbose)
+                            log.err("error allocating memory: {}\n", .{err});
+                        errs.append(err) catch {};
+                        return;
+                    };
                 }
-                defer rdr.alloc.free(extr_path);
+                defer if (extr_path.len > path.len) rdr.alloc.free(extr_path);
+                var ext = self.extractor(rdr) catch |err| {
+                    if (config.verbose)
+                        log.err("error reading file {s}: {}\n", .{ self.name, err });
+                    errs.append(err) catch {};
+                    return;
+                };
+                defer ext.deinit();
                 var fil = fs.cwd().createFile(extr_path, .{}) catch |err| {
                     if (config.verbose)
-                        std.log.err("error creating file {s}: {any}", .{ extr_path, err });
-                    return err;
+                        log.err("error creating {s}: {}\n", .{ extr_path, err });
+                    errs.append(err) catch {};
+                    return;
                 };
                 defer fil.close();
-                if (config.thread_count > 1 and self.size() > rdr.super.block_size) {
-                    var ext = try self.extractor(rdr);
-                    defer ext.deinit();
-                    ext.writeToFile(pool, &fil) catch |err| {
-                        if (config.verbose)
-                            std.log.err("error writing file {s}: {any}", .{ self.name, err });
-                        return err;
-                    };
-                } else {
-                    var buf = [1]u8{0} ** 8192;
-                    var total_red: u64 = 0;
-                    while (total_red < self.size()) {
-                        const red = try self.read(&buf);
-                        total_red += red;
-                    }
-                }
-            },
-            .sym, .ext_sym => {
-                //TODO: unbreak symlinks & dereference symlinks
-                if (exists) return ExtractError.FileExists;
-                fs.cwd().symLink(try self.symPath(), real_path, .{}) catch |err| {
+                ext.writeToFile(extr_pool, &fil) catch |err| {
                     if (config.verbose)
-                        std.log.err("error creating symlink {s}: {any}", .{ self.name, err });
-                    return err;
+                        log.err("error writing to {s}: {}\n", .{ self.name, err });
+                    errs.append(err) catch {};
+                    return;
                 };
             },
-            .block, .ext_block, .char, .ext_char, .fifo, .ext_fifo => {
-                if (exists) return ExtractError.FileExists;
-                comptime if (builtin.os.tag != .linux) return;
-                const mode: u32 = switch (self.inode.header.inode_type) {
-                    .block, .ext_block => std.posix.S.IFBLK,
-                    .char, .ext_char => std.posix.S.IFCHR,
-                    .fifo, .ext_fifo => std.posix.S.IFIFO,
-                    else => unreachable,
-                };
-                const dev = switch (self.inode.data) {
-                    .block, .char => |b| b.device,
-                    .ext_block, .ext_char => |b| b.device,
-                    .fifo, .ext_fifo => 0,
-                    else => unreachable,
-                };
-                _ = std.os.linux.mknod(@ptrCast(real_path), mode, dev);
+            .sym, .ext_sym => {},
+            .char, .ext_char, .block, .ext_block, .fifo, .ext_fifo => {},
+            else => {
+                if (config.verbose)
+                    log.info("socket file {s} ignored\n", .{self.name});
             },
-            .sock, .ext_sock => {}, //TODO
         }
-        //TODO: permissions
     }
 };
 
