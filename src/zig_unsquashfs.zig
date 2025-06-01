@@ -132,6 +132,7 @@ pub fn main() !void {
         try std.fmt.format(stdout.writer(), "Error opening {s} as squashfs: {any}\n", .{ filename, err });
         return;
     };
+    defer rdr.deinit();
     switch (list) {
         .None => {
             var conf = ExtractConfig.init() catch |err| {
@@ -160,14 +161,43 @@ pub fn main() !void {
                 }
             }
         },
-        else => {},
+        else => {
+            if (extr_files.items.len == 0) {
+                try printFile(alloc.allocator(), &rdr, &rdr.root);
+            } else {
+                for (extr_files.items) |path| {
+                    var fil = rdr.root.open(&rdr, path) catch |err| {
+                        try std.fmt.format(stdout.writer(), "Error finding {s}: {any}\n", .{ path, err });
+                        return;
+                    };
+                    defer fil.deinit(alloc.allocator());
+                    try printFile(alloc.allocator(), &rdr, &fil);
+                }
+            }
+        },
     }
 }
 
-fn printFile(rdr: *Reader, f: *File) !void {
-    if (f.name.len == 0) {
-
+fn printFile(alloc: std.mem.Allocator, rdr: *Reader, f: *File) anyerror!void {
+    const pth = try f.file_path(alloc);
+    defer alloc.free(pth);
+    if (list == .List) {
+        try std.fmt.format(stdout.writer(), "{s}\n", .{pth});
+        if (f.isDir()) {
+            try printDir(alloc, rdr, f);
+        }
+        return;
+    }
+    try std.fmt.format(stdout.writer(), "{s} {d}/{d} {d} {s}\n", .{ "tmp-perm", try f.uid(rdr), try f.gid(rdr), f.size(), pth });
+    if (f.isDir()) {
+        try printDir(alloc, rdr, f);
     }
 }
 
-fn printDir(rdr: *Reader, f: *File) !void {}
+fn printDir(alloc: std.mem.Allocator, rdr: *Reader, f: *File) anyerror!void {
+    var iter = try f.iterator(rdr);
+    defer iter.deinit();
+    while (iter.next()) |fil| {
+        try printFile(alloc, rdr, fil);
+    }
+}
