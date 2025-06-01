@@ -1,6 +1,7 @@
 const std = @import("std");
 const config = @import("config");
 
+const File = @import("file.zig").File;
 const Reader = @import("reader.zig").Reader;
 const ExtractConfig = @import("file.zig").File.ExtractConfig;
 
@@ -131,33 +132,42 @@ pub fn main() !void {
         try std.fmt.format(stdout.writer(), "Error opening {s} as squashfs: {any}\n", .{ filename, err });
         return;
     };
-    if (list == .None) {
-        var conf = ExtractConfig.init() catch |err| {
-            try std.fmt.format(stdout.writer(), "Error getting system info: {any}\n", .{err});
-            return;
-        };
-        conf.deref_sym = deref;
-        conf.unbreak_sym = unbreak;
-        conf.verbose = verbose;
-        if (extr_files.items.len == 0) {
-            rdr.root.extract(&rdr, conf, extr_location) catch |err| {
-                try std.fmt.format(stdout.writer(), "Error extracting archive: {any}\n", .{err});
+    switch (list) {
+        .None => {
+            var conf = ExtractConfig.init() catch |err| {
+                try std.fmt.format(stdout.writer(), "Error getting system info: {any}\n", .{err});
                 return;
             };
-        } else {
-            for (extr_files.items) |path| {
-                var fil = rdr.root.open(&rdr, path) catch |err| {
-                    try std.fmt.format(stdout.writer(), "Error extracting {s}: {any}\n", .{ path, err });
+            conf.deref_sym = deref;
+            conf.unbreak_sym = unbreak;
+            conf.verbose = verbose;
+            if (extr_files.items.len == 0) {
+                rdr.root.extract(&rdr, conf, extr_location) catch |err| {
+                    try std.fmt.format(stdout.writer(), "Error extracting archive: {any}\n", .{err});
                     return;
                 };
-                defer fil.deinit(alloc.allocator());
-                fil.extract(&rdr, conf, extr_location) catch |err| {
-                    try std.fmt.format(stdout.writer(), "Error extracting {s}: {any}\n", .{ path, err });
-                    return;
-                };
+            } else {
+                for (extr_files.items) |path| {
+                    var fil = rdr.root.open(&rdr, path) catch |err| {
+                        try std.fmt.format(stdout.writer(), "Error extracting {s}: {any}\n", .{ path, err });
+                        return;
+                    };
+                    defer fil.deinit(alloc.allocator());
+                    fil.extract(&rdr, conf, extr_location) catch |err| {
+                        try std.fmt.format(stdout.writer(), "Error extracting {s}: {any}\n", .{ path, err });
+                        return;
+                    };
+                }
             }
-        }
-        return;
+        },
+        else => {},
     }
-    //TODO: listing
 }
+
+fn printFile(rdr: *Reader, f: *File) !void {
+    if (f.name.len == 0) {
+
+    }
+}
+
+fn printDir(rdr: *Reader, f: *File) !void {}

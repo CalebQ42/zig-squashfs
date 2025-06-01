@@ -59,13 +59,21 @@ pub const File = struct {
         return out;
     }
 
-    fn file_path(self: File, alloc: std.mem.Allocator) ![]u8 {
+    pub fn file_path(self: File, alloc: std.mem.Allocator) ![]u8 {
         if (self.parent_path.len == 0) {
             const out = try alloc.alloc(u8, self.name.len);
             @memcpy(out, self.name);
             return out;
         }
         return std.mem.concat(alloc, u8, &[3][]const u8{ self.parent_path, "/", self.name });
+    }
+
+    pub fn uid(self: File, rdr: *Reader) !u32 {
+        return rdr.id_table.getValue(rdr, self.inode.header.uid_idx);
+    }
+
+    pub fn gid(self: File, rdr: *Reader) !u32 {
+        return rdr.id_table.getValue(rdr, self.inode.header.gid_idx);
     }
 
     pub fn deinit(self: *File, alloc: std.mem.Allocator) void {
