@@ -50,7 +50,7 @@ pub const Reader = struct {
             super.id_table_start,
             super.id_count,
         );
-        out.root = try out.fileFromRef(super.root_ref, "");
+        out.root = try out.rootFile();
         return out;
     }
     pub fn deinit(self: *Reader) void {
@@ -65,22 +65,23 @@ pub const Reader = struct {
         return self.root.open(self, path);
     }
 
-    fn fileFromRef(self: *Reader, ref: inode.InodeRef, name: []const u8) !File {
-        var offset_rdr = self.holder.readerAt(ref.block_start + self.super.inode_table_start);
+    fn rootFile(self: *Reader) !File {
+        var offset_rdr = self.holder.readerAt(self.super.root_ref.block_start + self.super.inode_table_start);
         var meta_rdr: MetadataReader = .init(
             self.alloc,
             self.super.decomp,
             offset_rdr.any(),
         );
         defer meta_rdr.deinit();
-        try meta_rdr.skip(ref.offset);
+        try meta_rdr.skip(self.super.root_ref.offset);
         return .{
-            .name = name,
+            .name = "",
             .inode = try .init(
                 self.alloc,
                 meta_rdr.any(),
                 self.super.block_size,
             ),
+            .parent_path = "",
         };
     }
 };

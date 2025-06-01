@@ -17,8 +17,9 @@ const MetadataReader = @import("readers/metadata.zig").MetadataReader;
 pub const File = struct {
     name: []const u8,
     inode: inode.Inode,
-    dirEntries: ?std.StringHashMap(DirEntry) = null,
+    parent_path: []const u8,
 
+    dirEntries: ?std.StringHashMap(DirEntry) = null,
     data_rdr: ?DataReader = null,
 
     pub const FileError = error{
@@ -28,7 +29,7 @@ pub const File = struct {
         NotFound,
     };
 
-    fn fromDirEntry(rdr: *Reader, ent: DirEntry) !File {
+    fn fromDirEntry(rdr: *Reader, ent: DirEntry, parent_path: []const u8) !File {
         var offset_rdr = rdr.holder.readerAt(ent.block_start + rdr.super.inode_table_start);
         var meta_rdr: MetadataReader = .init(
             rdr.alloc,
@@ -47,6 +48,7 @@ pub const File = struct {
                 meta_rdr.any(),
                 rdr.super.block_size,
             ),
+            .parent_path = parent_path,
         };
         switch (out.inode.header.inode_type) {
             .file, .ext_file => {
@@ -57,9 +59,19 @@ pub const File = struct {
         return out;
     }
 
+    fn file_path(self: File, alloc: std.mem.Allocator) ![]u8 {
+        if (self.parent_path.len == 0) {
+            const out = try alloc.alloc(u8, self.name.len);
+            @memcpy(out, self.name);
+            return out;
+        }
+        return std.mem.concat(alloc, u8, &[3][]const u8{ self.parent_path, "/", self.name });
+    }
+
     pub fn deinit(self: *File, alloc: std.mem.Allocator) void {
         self.inode.deinit();
         alloc.free(self.name);
+        alloc.free(self.parent_path);
         if (self.data_rdr != null) self.data_rdr.?.deinit();
         if (self.dirEntries != null) {
             var iter = self.dirEntries.?.iterator();
@@ -100,7 +112,7 @@ pub const File = struct {
         if (ent == null) {
             return FileError.NotFound;
         }
-        var fil = try fromDirEntry(rdr, ent.?);
+        var fil = try fromDirEntry(rdr, ent.?, try self.file_path(rdr.alloc));
         return fil.realOpen(rdr, clean_path[split_idx..], false);
     }
 
@@ -125,7 +137,7 @@ pub const File = struct {
         var dirEntryIter = self.dirEntries.?.valueIterator();
         var i: u32 = 0;
         while (dirEntryIter.next()) |ent| : (i += 1) {
-            files[i] = try .fromDirEntry(rdr, ent.*);
+            files[i] = try .fromDirEntry(rdr, ent.*, try self.file_path(rdr.alloc));
         }
         return .{
             .alloc = rdr.alloc,
