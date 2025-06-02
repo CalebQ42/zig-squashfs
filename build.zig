@@ -28,6 +28,7 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
     exe_mod.addOptions("config", opt);
+    exe_mod.addImport("squashfs", lib_mod);
     const exe = b.addExecutable(.{
         .linkage = .static,
         .name = "unsquashfs",

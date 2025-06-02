@@ -4,13 +4,14 @@ const fs = std.fs;
 const File = fs.File;
 
 pub const CustomSfsReader = @import("sfs_reader.zig").SfsReader;
-pub const PReader = @import("preader.zig").PReader;
 
-pub const FileSfsReader = CustomSfsReader(PReader(
+pub const FileSfsReader = CustomSfsReader(
     File,
     File.PReadError,
     File.pread,
-));
+);
+
+pub const SfsFile = @import("sfs_file.zig");
 
 test "FileSfsReader" {
     const testFile = "testing/LinuxPATest.sfs";

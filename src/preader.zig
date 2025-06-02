@@ -1,4 +1,5 @@
 const mem = @import("std").mem;
+const std = @import("std");
 
 pub fn PReader(
     comptime Context: type,
@@ -18,6 +19,7 @@ pub fn PReader(
         }
         /// Creates the PReader with an additional offset that is applied to all calls.
         pub fn initWithOffset(rdr: Context, offset: u64) Self {
+            std.io.AnyReader;
             return .{
                 .rdr = rdr,
                 .initOffset = offset,

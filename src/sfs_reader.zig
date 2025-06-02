@@ -2,22 +2,31 @@ const std = @import("std");
 const fs = std.fs;
 
 const File = std.fs.File;
+
 const PReader = @import("preader.zig").PReader;
 
 pub fn SfsReader(
-    comptime preader: type,
+    comptime Context: type,
+    comptime ErrorType: type,
+    comptime preadFn: fn (ctx: Context, buf: []u8, offset: u64) ErrorType!usize,
 ) type {
-    // std.debug.assert(std.mem.eql(u8, @typeName(preader), "PReader"));
     return struct {
         const Self = @This();
+        const PRdr = PReader(Context, ErrorType, preadFn);
 
         alloc: std.mem.Allocator,
-        rdr: preader,
+        rdr: PRdr,
 
-        pub fn init(alloc: std.mem.Allocator, rdr: preader) !Self {
+        pub fn init(alloc: std.mem.Allocator, rdr: Context) !Self {
             return .{
                 .alloc = alloc,
-                .rdr = rdr,
+                .rdr = .init(rdr),
+            };
+        }
+        pub fn initWOffset(alloc: std.mem.Allocator, rdr: Context, offset: u64) !Self {
+            return .{
+                .alloc = alloc,
+                .rdr = .initWithOffset(rdr, offset),
             };
         }
     };
