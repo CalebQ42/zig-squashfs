@@ -11,26 +11,27 @@ pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
     const lib_mod = b.createModule(.{
-        .root_source_file = b.path("src/root.zig"),
+        .root_source_file = b.path("src/lib_root.zig"),
         .target = target,
         .optimize = optimize,
     });
     const lib = b.addLibrary(.{
         .linkage = .static,
-        .name = "zig_squashfs",
+        .name = "squashfs",
         .root_module = lib_mod,
         .version = sem_ver,
     });
 
     const exe_mod = b.createModule(.{
-        .root_source_file = b.path("src/zig_unsquashfs.zig"),
+        .root_source_file = b.path("src/bin/unsquashfs.zig"),
         .target = target,
         .optimize = optimize,
     });
+    exe_mod.addImport("squashfs", lib_mod);
     exe_mod.addOptions("config", opt);
     const exe = b.addExecutable(.{
         .linkage = .static,
-        .name = "zig-unsquashfs",
+        .name = "unsquashfs",
         .root_module = exe_mod,
         .version = sem_ver,
     });

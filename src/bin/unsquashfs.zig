@@ -1,9 +1,11 @@
 const std = @import("std");
 const config = @import("config");
 
-const File = @import("file.zig").File;
-const Reader = @import("reader.zig").Reader;
-const ExtractConfig = @import("file.zig").File.ExtractConfig;
+const sfs = @import("squashfs");
+
+const File = sfs.SfsFile;
+const Reader = sfs.SfsReader;
+const ExtractConfig = sfs.File.ExtractConfig;
 
 const stdout = std.io.getStdOut();
 
