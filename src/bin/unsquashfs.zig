@@ -5,7 +5,7 @@ const sfs = @import("squashfs");
 
 const File = sfs.SfsFile;
 const Reader = sfs.SfsReader;
-const ExtractConfig = sfs.File.ExtractConfig;
+const ExtractConfig = File.ExtractConfig;
 
 const stdout = std.io.getStdOut();
 
@@ -126,9 +126,11 @@ pub fn main() !void {
         _ = try stdout.writeAll("no extract location given\n");
         return;
     }
+    const sfs_fil = try std.fs.cwd().openFile(filename, .{});
+    defer sfs_fil.close();
     var rdr = Reader.init(
         alloc.allocator(),
-        filename,
+        sfs_fil,
         offset,
     ) catch |err| {
         try std.fmt.format(stdout.writer(), "Error opening {s} as squashfs: {any}\n", .{ filename, err });

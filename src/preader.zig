@@ -8,6 +8,7 @@ pub fn PReader(
 ) type {
     return struct {
         const Self = @This();
+        pub const Reader = OffsetReader(Context, Error, preadFn);
 
         ctx: Context,
         offset: u64,
@@ -24,9 +25,9 @@ pub fn PReader(
             };
         }
         pub fn preadAll(self: Self, buf: []u8, offset: u64) Error!usize {
-            const total_red: usize = 0;
+            var total_red: usize = 0;
             while (total_red < buf.len) {
-                const red = preadFn(self.ctx, buf, self.offset + offset);
+                const red = try preadFn(self.ctx, buf[total_red..], self.offset + offset + total_red);
                 if (red == 0) break;
                 total_red += red;
             }
@@ -38,7 +39,7 @@ pub fn PReader(
             _ = try self.preadAll(std.mem.asBytes(&out), offset);
             return out;
         }
-        pub fn readerAt(self: Self, offset: u64) OffsetReader(Context, Error, preadFn) {
+        pub fn readerAt(self: Self, offset: u64) Reader {
             return .init(self.ctx, self.offset + offset);
         }
     };
@@ -46,11 +47,12 @@ pub fn PReader(
 
 pub fn OffsetReader(
     comptime Context: type,
-    comptime Error: type,
-    comptime preadFn: fn (ctx: Context, buf: []u8, offset: u64) Error!usize,
+    comptime ErrorType: type,
+    comptime preadFn: fn (ctx: Context, buf: []u8, offset: u64) ErrorType!usize,
 ) type {
     return struct {
         const Self = @This();
+        pub const Error = ErrorType;
 
         ctx: Context,
         offset: u64,
@@ -61,13 +63,23 @@ pub fn OffsetReader(
                 .offset = init_offset,
             };
         }
-        pub fn read(self: *Self, buf: []u8) Error!usize {
+        pub fn read(self: *Self, buf: []u8) ErrorType!usize {
             if (preadFn(self.ctx, buf, self.offset)) |siz| {
                 self.offset += siz;
                 return siz;
             } else |err| {
                 return err;
             }
+        }
+        pub fn readAll(self: *Self, buf: []u8) ErrorType!usize {
+            var total_red: usize = 0;
+            while (total_red < buf.len) {
+                const red = try self.read(buf[total_red..]);
+                if (red == 0) break;
+                total_red += red;
+            }
+
+            return total_red;
         }
     };
 }
