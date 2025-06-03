@@ -128,7 +128,7 @@ pub fn main() !void {
     }
     const sfs_fil = try std.fs.cwd().openFile(filename, .{});
     defer sfs_fil.close();
-    var rdr = Reader.init(
+    var rdr = Reader.initWOffset(
         alloc.allocator(),
         sfs_fil,
         offset,

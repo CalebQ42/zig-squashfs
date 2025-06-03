@@ -94,6 +94,7 @@ pub fn init(alloc: std.mem.Allocator, block_size: u32, reader: anytype) !Inode {
 pub fn fromRef(rdr: *SfsReader, ref: Ref) !Inode {
     const offset_rdr = rdr.rdr.readerAt(ref.block + rdr.super.inode_start);
     var meta_rdr: MetadataReader(@TypeOf(offset_rdr)) = try .init(rdr.alloc, rdr.super.compress, offset_rdr);
+    try meta_rdr.skip(ref.offset);
     return init(rdr.alloc, rdr.super.block_size, &meta_rdr);
 }
 pub fn deinit(self: Inode) void {
