@@ -63,6 +63,7 @@ pub fn MetadataReader(
                     self.block[self.block_offset .. self.block_offset + to_read],
                 );
                 cur_red += to_read;
+                self.block_offset += to_read;
             }
             return cur_red;
         }

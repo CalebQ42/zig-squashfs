@@ -5,7 +5,7 @@ pub const Device = packed struct {
     dev: u32,
     pub fn read(reader: anytype) !Device {
         var out: Device = undefined;
-        _ = try reader.readAll(@alignCast(std.mem.asBytes(&out)));
+        _ = try reader.readAll(std.mem.asBytes(&out));
         return out;
     }
 };
@@ -15,7 +15,7 @@ pub const ExtDevice = packed struct {
     xattr_idx: u32,
     pub fn read(reader: anytype) !ExtDevice {
         var out: ExtDevice = undefined;
-        _ = try reader.readAll(@alignCast(std.mem.asBytes(&out)));
+        _ = try reader.readAll(std.mem.asBytes(&out));
         return out;
     }
 };
@@ -23,7 +23,7 @@ pub const IPC = packed struct {
     hard_links: u32,
     pub fn read(reader: anytype) !IPC {
         var out: IPC = undefined;
-        _ = try reader.readAll(@alignCast(std.mem.asBytes(&out)));
+        _ = try reader.readAll(std.mem.asBytes(&out));
         return out;
     }
 };
@@ -32,7 +32,7 @@ pub const ExtIPC = packed struct {
     xattr_idx: u32,
     pub fn read(reader: anytype) !ExtIPC {
         var out: ExtIPC = undefined;
-        _ = try reader.readAll(@alignCast(std.mem.asBytes(&out)));
+        _ = try reader.readAll(std.mem.asBytes(&out));
         return out;
     }
 };

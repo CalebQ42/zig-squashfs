@@ -60,15 +60,16 @@ pub const Data = union(enum) {
 
 const std = @import("std");
 
+const SfsReader = @import("sfs_reader.zig");
+const MetadataReader = @import("readers/metadata.zig").MetadataReader;
+
 const Inode = @This();
 
 alloc: std.mem.Allocator,
 hdr: Header,
 data: Data,
 
-pub fn read(alloc: std.mem.Allocator, block_size: u32, reader: anytype) !Inode {
-    // comptime std.debug.assert(std.meta.hasFn(@TypeOf(reader), "readAll"));
-    std.debug.print("{}\n", .{@TypeOf(reader)});
+pub fn init(alloc: std.mem.Allocator, block_size: u32, reader: anytype) !Inode {
     var out: Inode = undefined;
     _ = try reader.readAll(std.mem.asBytes(&out.hdr));
     out.alloc = alloc;
@@ -89,6 +90,11 @@ pub fn read(alloc: std.mem.Allocator, block_size: u32, reader: anytype) !Inode {
         .ext_socket => .{ .ext_socket = try .read(reader) },
     };
     return out;
+}
+pub fn fromRef(rdr: *SfsReader, ref: Ref) !Inode {
+    const offset_rdr = rdr.rdr.readerAt(ref.block + rdr.super.inode_start);
+    var meta_rdr: MetadataReader(@TypeOf(offset_rdr)) = try .init(rdr.alloc, rdr.super.compress, offset_rdr);
+    return init(rdr.alloc, rdr.super.block_size, &meta_rdr);
 }
 pub fn deinit(self: Inode) void {
     switch (self.data) {

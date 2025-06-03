@@ -78,7 +78,6 @@ pub fn OffsetReader(
                 if (red == 0) break;
                 total_red += red;
             }
-
             return total_red;
         }
     };

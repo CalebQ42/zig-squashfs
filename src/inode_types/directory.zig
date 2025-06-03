@@ -8,7 +8,7 @@ pub const Directory = packed struct {
     parent_num: u32,
     pub fn read(reader: anytype) !Directory {
         var out: Directory = undefined;
-        _ = try reader.readAll(@alignCast(mem.asBytes(&out)));
+        _ = try reader.readAll(mem.asBytes(&out));
         return out;
     }
 };
@@ -23,7 +23,7 @@ pub const ExtDirectory = packed struct {
     xattr_idx: u32,
     pub fn read(reader: anytype) !ExtDirectory {
         var out: ExtDirectory = undefined;
-        _ = try reader.readAll(@alignCast(mem.asBytes(&out)));
+        _ = try reader.readAll(mem.asBytes(&out));
         return out;
     }
 };

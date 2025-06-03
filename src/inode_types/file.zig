@@ -17,7 +17,7 @@ pub const File = struct {
     block_sizes: []DataBlockSize,
     pub fn read(alloc: std.mem.Allocator, block_size: u32, reader: anytype) !File {
         var init: InitFile = undefined;
-        _ = try reader.readAll(@alignCast(std.mem.asBytes(&init)));
+        _ = try reader.readAll(std.mem.asBytes(&init));
         var block_num = init.size / block_size;
         if (init.frag_idx == 0xFFFFFFFF and init.size % block_size != 0) {
             block_num += 1;
@@ -29,7 +29,7 @@ pub const File = struct {
             .size = init.size,
             .block_sizes = try alloc.alloc(DataBlockSize, block_num),
         };
-        _ = try reader.readAll(@alignCast(std.mem.sliceAsBytes(out.block_sizes)));
+        _ = try reader.readAll(std.mem.sliceAsBytes(out.block_sizes));
         return out;
     }
     pub fn deinit(self: File, alloc: std.mem.Allocator) void {
@@ -57,7 +57,7 @@ pub const ExtFile = struct {
     block_sizes: []DataBlockSize,
     pub fn read(alloc: std.mem.Allocator, block_size: u32, reader: anytype) !ExtFile {
         var init: InitExtFile = undefined;
-        _ = try reader.readAll(@alignCast(std.mem.asBytes(&init)));
+        _ = try reader.readAll(std.mem.asBytes(&init));
         var block_num = init.size / block_size;
         if (init.frag_idx == 0xFFFFFFFF and init.size % block_size != 0) {
             block_num += 1;
@@ -72,7 +72,7 @@ pub const ExtFile = struct {
             .xattr_idx = init.xattr_idx,
             .block_sizes = try alloc.alloc(DataBlockSize, block_num),
         };
-        _ = try reader.readAll(@alignCast(std.mem.sliceAsBytes(out.block_sizes)));
+        _ = try reader.readAll(std.mem.sliceAsBytes(out.block_sizes));
         return out;
     }
     pub fn deinit(self: ExtFile, alloc: std.mem.Allocator) void {

@@ -3,20 +3,25 @@ const std = @import("std");
 const File = std.fs.File;
 
 const PReader = @import("preader.zig").PReader;
-const SfsFile = @import("sfs_file.zig").SfsFile;
+const Dir = @import("sfs_file.zig").Dir;
 const Superblock = @import("superblock.zig").Superblock;
 const FilePReader = PReader(File, File.PReadError, File.pread);
-const MetadataReader = @import("readers/metadata.zig").MetadataReader;
+const Inode = @import("inode.zig");
+const SfsFile = @import("sfs_file.zig").SfsFile;
 
 const SfsReader = @This();
 
 alloc: std.mem.Allocator,
 super: Superblock,
 rdr: FilePReader,
-root: SfsFile,
+root: Dir,
 
-pub fn init(alloc: std.mem.Allocator, fil: File, offset: u64) !*SfsReader {
+pub fn init(alloc: std.mem.Allocator, fil: File) !*SfsReader {
+    return initWOffset(alloc, fil, 0);
+}
+pub fn initWOffset(alloc: std.mem.Allocator, fil: File, offset: u64) !*SfsReader {
     const out = try alloc.create(SfsReader);
+    errdefer alloc.destroy(out);
     out.* = .{
         .alloc = alloc,
         .rdr = .initWOffset(fil, offset),
@@ -25,25 +30,14 @@ pub fn init(alloc: std.mem.Allocator, fil: File, offset: u64) !*SfsReader {
     };
     _ = try out.rdr.preadAll(std.mem.asBytes(&out.super), 0);
     try out.super.verify();
-    const off_rdr = out.rdr.readerAt(out.super.root_ref.block + out.super.inode_start);
-    var meta_rdr: MetadataReader(@TypeOf(off_rdr)) = try .init(
-        alloc,
-        out.super.compress,
-        off_rdr,
-    );
-    try meta_rdr.skip(out.super.root_ref.offset);
-    out.root = .{
-        .directory = .{
-            .inode = try .read(alloc, out.super.block_size, &meta_rdr),
-            .name = "",
-            .rdr = out,
-            //TODO: fill dir entries
-        },
-    };
+    out.root = try .init(out, try .fromRef(out, out.super.root_ref), "");
     return out;
 }
-
 pub fn deinit(self: *SfsReader) void {
     self.root.deinit();
     self.alloc.destroy(self);
+}
+
+pub fn open(self: *SfsReader, path: []const u8) !SfsFile {
+    return self.root.open(path);
 }
