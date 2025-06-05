@@ -12,14 +12,15 @@ pub const SfsFile = union(enum) {
     symlink: Sym,
     other: Other,
 
-    pub fn fromRef(rdr: *SfsReader, ref: Inode.Ref, name: []u8) !SfsFile {
+    pub fn fromRef(rdr: *SfsReader, ref: Inode.Ref, name: []u8, parent_path: []u8) !SfsFile {
         return fromInode(
             rdr,
             try .fromRef(rdr, ref),
             name,
+            parent_path,
         );
     }
-    pub fn fromDirEntry(rdr: *SfsReader, ent: dir.DirEntry) !SfsFile {
+    pub fn fromDirEntry(rdr: *SfsReader, ent: dir.DirEntry, parent_path: []u8) !SfsFile {
         const offset_rdr = rdr.rdr.readerAt(ent.block + rdr.super.inode_start);
         var meta_rdr: MetadataReader(@TypeOf(offset_rdr)) = try .init(rdr.alloc, rdr.super.compress, offset_rdr);
         try meta_rdr.skip(ent.offset);
@@ -31,14 +32,35 @@ pub const SfsFile = union(enum) {
                 &meta_rdr,
             ),
             ent.name,
+            parent_path,
         );
     }
-    pub fn fromInode(rdr: *SfsReader, inode: Inode, name: []u8) !SfsFile {
+    pub fn fromInode(rdr: *SfsReader, inode: Inode, name: []u8, parent_path: []u8) !SfsFile {
         return switch (inode.hdr.inode_type) {
-            .file, .ext_file => .{ .regular = try .init(rdr, inode, name) },
-            .directory, .ext_directory => .{ .directory = try .init(rdr, inode, name) },
-            .symlink, .ext_symlink => .{ .symlink = try .init(rdr, inode, name) },
-            else => .{ .other = try .init(rdr, inode, name) },
+            .file, .ext_file => .{ .regular = try .init(
+                rdr,
+                inode,
+                name,
+                std.mem.trim(parent_path, "/"),
+            ) },
+            .directory, .ext_directory => .{ .directory = try .init(
+                rdr,
+                inode,
+                name,
+                std.mem.trim(parent_path, "/"),
+            ) },
+            .symlink, .ext_symlink => .{ .symlink = try .init(
+                rdr,
+                inode,
+                name,
+                std.mem.trim(parent_path, "/"),
+            ) },
+            else => .{ .other = try .init(
+                rdr,
+                inode,
+                name,
+                std.mem.trim(parent_path, "/"),
+            ) },
         };
     }
     pub fn deinit(self: SfsFile) void {
@@ -48,6 +70,23 @@ pub const SfsFile = union(enum) {
             .symlink => |s| s.deinit(),
             .other => |o| o.deinit(),
         }
+    }
+
+    pub fn fileName(self: SfsFile) []const u8 {
+        return switch (self) {
+            .regular => |r| r.name,
+            .directory => |d| d.name,
+            .symlink => |s| s.name,
+            .other => |o| o.name,
+        };
+    }
+    pub fn filePath(self: SfsFile, alloc: std.mem.Allocator) ![]u8 {
+        return switch (self) {
+            .regular => |r| r.filePath(alloc),
+            .directory => |d| d.filePath(alloc),
+            .symlink => |s| s.filePath(alloc),
+            .other => |o| o.filePath(alloc),
+        };
     }
 
     pub const ExtractConfig = struct {
@@ -67,18 +106,31 @@ pub const SfsFile = union(enum) {
             };
         }
     };
+
+    pub fn extract(self: SfsFile, config: ExtractConfig, path: []u8) !void {
+        _ = self;
+        _ = config;
+        _ = path;
+    }
 };
 
 pub const Regular = struct {
     rdr: *SfsReader,
     name: []u8,
+    parent_path: []u8,
     inode: Inode,
 
     //TODO: data reader
 
-    pub fn init(rdr: *SfsReader, inode: Inode, name: []u8) !Regular {
+    const Self = @This();
+
+    pub fn init(rdr: *SfsReader, inode: Inode, name: []u8, parent_path: []u8) !Self {
         const name_cpy = try rdr.alloc.alloc(u8, name.len);
+        errdefer rdr.alloc.free(name_cpy);
         @memcpy(name_cpy, name);
+        const parent_cpy = try rdr.alloc.alloc(u8, parent_path.len);
+        errdefer rdr.alloc.free(parent_cpy);
+        @memcpy(parent_cpy, name);
         //TODO: start data reader,
         return .{
             .rdr = rdr,
@@ -86,12 +138,11 @@ pub const Regular = struct {
             .inode = inode,
         };
     }
-    pub fn deinit(self: Regular) void {
-        self.inode.deinit();
-        self.rdr.alloc.free(self.name);
+    pub fn deinit(self: Self) void {
+        commonDeinit(self);
     }
 
-    pub fn size(self: Regular) u64 {
+    pub fn size(self: Self) u64 {
         return switch (self.inode.data) {
             .file => |f| f.size,
             .ext_file => |f| f.size,
@@ -103,14 +154,20 @@ pub const Regular = struct {
 pub const Dir = struct {
     rdr: *SfsReader,
     name: []u8,
+    parent_path: []u8,
     inode: Inode,
 
     entries: std.StringArrayHashMap(dir.DirEntry),
 
-    pub fn init(rdr: *SfsReader, inode: Inode, name: []u8) !Dir {
+    const Self = @This();
+
+    pub fn init(rdr: *SfsReader, inode: Inode, name: []u8, parent_path: []u8) !Self {
         const name_cpy = try rdr.alloc.alloc(u8, name.len);
         errdefer rdr.alloc.free(name_cpy);
         @memcpy(name_cpy, name);
+        const parent_cpy = try rdr.alloc.alloc(u8, parent_path.len);
+        errdefer rdr.alloc.free(parent_cpy);
+        @memcpy(parent_cpy, name);
         var block: u32 = 0;
         var offset: u16 = 0;
         var size: u32 = 0;
@@ -137,13 +194,13 @@ pub const Dir = struct {
         return .{
             .rdr = rdr,
             .name = name_cpy,
+            .parent_path = parent_cpy,
             .inode = inode,
             .entries = try dir.readEntries(rdr.alloc, &meta_rdr, size),
         };
     }
-    pub fn deinit(self: *Dir) void {
-        self.inode.deinit();
-        self.rdr.alloc.free(self.name);
+    pub fn deinit(self: *Self) void {
+        commonDeinit(self);
         for (self.entries.values()) |e| {
             e.deinit(self.rdr.alloc);
         }
@@ -154,7 +211,7 @@ pub const Dir = struct {
         NotFound,
     };
 
-    pub fn open(self: Dir, path: []const u8) !SfsFile {
+    pub fn open(self: Self, path: []const u8) !SfsFile {
         const fil_path = std.mem.trim(u8, path, "/");
         if (fil_path.len == 0) return .{ .directory = self };
         const sep_ind = std.mem.indexOf(u8, fil_path, "/") orelse fil_path.len;
@@ -170,13 +227,13 @@ pub const Dir = struct {
         return fil.directory.open(fil_path[sep_ind..]);
     }
 
-    pub fn iterator(self: Dir) DirIterator {
+    pub fn iterator(self: Self) DirIterator {
         return .{
             .rdr = self.rdr,
             .entries = self.entries.values(),
         };
     }
-    pub fn nameIterator(self: Dir) NameIterator {
+    pub fn nameIterator(self: Self) NameIterator {
         return .{
             .rdr = self.rdr,
             .entries = self.entries.values(),
@@ -211,38 +268,55 @@ pub const Dir = struct {
 pub const Sym = struct {
     rdr: *SfsReader,
     name: []u8,
+    parent_path: []u8,
     inode: Inode,
 
-    pub fn init(rdr: *SfsReader, inode: Inode, name: []u8) !Sym {
+    const Self = @This();
+
+    pub fn init(rdr: *SfsReader, inode: Inode, name: []u8, parent_path: []u8) !Self {
         const name_cpy = try rdr.alloc.alloc(u8, name.len);
         @memcpy(name_cpy, name);
+        const parent_cpy = try rdr.alloc.alloc(u8, parent_path.len);
+        @memcpy(parent_cpy, name);
         return .{
             .rdr = rdr,
             .name = name_cpy,
             .inode = inode,
         };
     }
-    pub fn deinit(self: Sym) void {
-        self.inode.deinit();
-        self.rdr.alloc.free(self.name);
+    pub fn deinit(self: Self) void {
+        commonDeinit(self);
     }
 };
 
 pub const Other = struct {
     rdr: *SfsReader,
     name: []u8,
+    parent_path: []u8,
     inode: Inode,
 
-    pub fn init(rdr: *SfsReader, inode: Inode, name: []u8) !Other {
+    const Self = @This();
+
+    pub fn init(rdr: *SfsReader, inode: Inode, name: []u8, parent_path: []u8) !Self {
         const name_cpy = try rdr.alloc.alloc(u8, name.len);
         @memcpy(name_cpy, name);
+        const parent_cpy = try rdr.alloc.alloc(u8, parent_path.len);
+        @memcpy(parent_cpy, name);
         return .{
             .rdr = rdr,
             .name = name_cpy,
             .inode = inode,
         };
     }
-    pub fn deinit(self: Other) void {
-        self.rdr.alloc.free(self.name);
+    pub fn deinit(self: Self) void {
+        commonDeinit(self);
     }
+
+    pub fn filePath(self: Self, alloc: std.mem.Allocator) []u8 {}
 };
+
+fn commonDeinit(self: anytype) void {
+    self.inode.deinit();
+    self.rdr.alloc.free(self.name);
+    self.rdr.alloc.free(self.parent_path);
+}
