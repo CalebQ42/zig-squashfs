@@ -10,7 +10,7 @@ const ExtractError = error{
     FileExists,
 };
 
-pub const SfsFile = union(enum) {
+pub const SfsFile = union {
     regular: Regular,
     directory: Dir,
     symlink: Sym,
@@ -339,27 +339,69 @@ pub const Dir = struct {
                 try fil.extract(config, fil_ext_path);
             }
         } else {
-            const reg_files: std.ArrayList(struct { []const u8, Regular }) = .init(self.rdr.alloc);
+            const reg_files: std.ArrayList(struct { []const u8, dir.DirEntry }) = .init(self.rdr.alloc);
             defer reg_files.deinit();
+            defer for (reg_files.items) |it| {
+                self.rdr.alloc.free(it.@"0");
+            };
+            errdefer for (reg_files.items) |it| {
+                it.@"1".deinit(self.rdr.alloc);
+            };
             const errs: std.ArrayList(anyerror) = .init(self.rdr.alloc);
             defer errs.deinit();
             self.extractThreaded(config, path, reg_files, errs);
             if (errs.items.len > 0) {
                 return errs.items[0];
             }
+            const pool: std.Thread.Pool = undefined;
+            try pool.init(.{
+                .n_jobs = config.threads,
+            });
+            defer pool.deinit();
+            const wg: std.Thread.WaitGroup = .{};
+            for (reg_files.items) |*it| {
+                const fil: SfsFile = .fromDirEntry(self.rdr, it.@"1", "") catch |err| {
+                    if (config.verbose)
+                        config.log("error extracting {s}: {}\n", .{ it.@"1".name, err });
+                    return err;
+                };
+                //TODO: If certain config options are set, have the option of symlinks.
+                pool.spawn(Regular.extractThreaded, .{ fil.regular, config, it.@"0", &wg, &errs });
+                it.@"1".deinit(self.rdr.alloc);
+            }
         }
     }
     fn extractThreaded(self: Self, config: SfsFile.ExtractConfig, path: []const u8, reg_files: *std.ArrayList(struct { []const u8, dir.DirEntry }), errs: *std.ArrayList(anyerror)) void {
         const ext_path = self.extractPath(config, path) catch |err| {
-            return err;
+            errs.append(err) catch {};
+            return;
         };
         defer if (ext_path.len != path.len) self.rdr.alloc.free(ext_path);
         for (self.entries.keys()) |k| {
             const ent = self.entries.get(k) orelse unreachable;
-            const fil_ext_path = std.mem.concat(self.rdr.alloc, u8, [3][]const u8{}) catch |err| {
+            const fil_ext_path = std.mem.concat(self.rdr.alloc, u8, [3][]const u8{ ext_path, "/", ent.name }) catch |err| {
                 if (config.verbose)
                     config.log("can't allocate memory: {}\n", .{err});
-                return err;
+                errs.append(err) catch {};
+                return;
+            };
+            if (ent.inode_type == .file) { //TODO: Also add symlinks if certain config options are set.
+                reg_files.append(.{ fil_ext_path, ent }) catch {};
+                return;
+            }
+            defer self.rdr.free(fil_ext_path);
+            const fil: SfsFile = .fromDirEntry(self.rdr, ent, "") catch |err| {
+                if (config.verbose)
+                    config.log("error extracting {s}: {}\n", .{ ent.name, err });
+                errs.append(err) catch {};
+                return;
+            };
+            defer fil.deinit();
+            fil.extract(config, fil_ext_path) catch |err| {
+                if (config.verbose)
+                    config.log("error extracting {s}: {}\n", .{ ent.name, err });
+                errs.append(err) catch {};
+                return;
             };
         }
     }

@@ -20,7 +20,7 @@ pub const DirEntry = struct {
     offset: u16,
     inode_type: InodeType,
     num: u32,
-    name: []u8,
+    name: []const u8,
 
     pub fn deinit(self: DirEntry, alloc: std.mem.Allocator) void {
         alloc.free(self.name);
