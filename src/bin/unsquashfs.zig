@@ -147,7 +147,7 @@ pub fn main() !void {
             conf.unbreak_sym = unbreak;
             conf.verbose = verbose;
             if (extr_files.items.len == 0) {
-                rdr.root.extract(&rdr, conf, extr_location) catch |err| {
+                rdr.root.extract(conf, extr_location) catch |err| {
                     try std.fmt.format(stdout.writer(), "Error extracting archive: {any}\n", .{err});
                     return;
                 };

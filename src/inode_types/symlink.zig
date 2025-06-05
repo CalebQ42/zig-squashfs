@@ -3,7 +3,7 @@ const std = @import("std");
 pub const Symlink = struct {
     hard_links: u32,
     target_size: u32,
-    target: []u8,
+    target: []const u8,
     pub fn read(alloc: std.mem.Allocator, reader: anytype) !Symlink {
         var buf: [8]u8 = undefined;
         _ = try reader.readAll(&buf);
@@ -24,7 +24,7 @@ pub const Symlink = struct {
 pub const ExtSymlink = struct {
     hard_links: u32,
     target_size: u32,
-    target: []u8,
+    target: []const u8,
     xattr_idx: u32,
     pub fn read(alloc: std.mem.Allocator, reader: anytype) !ExtSymlink {
         var buf: [8]u8 = undefined;

@@ -6,13 +6,17 @@ const SfsReader = @import("sfs_reader.zig");
 const Inode = @import("inode.zig");
 const MetadataReader = @import("readers/metadata.zig").MetadataReader;
 
+const ExtractError = error{
+    FileExists,
+};
+
 pub const SfsFile = union(enum) {
     regular: Regular,
     directory: Dir,
     symlink: Sym,
     other: Other,
 
-    pub fn fromRef(rdr: *SfsReader, ref: Inode.Ref, name: []u8, parent_path: []u8) !SfsFile {
+    pub fn fromRef(rdr: *SfsReader, ref: Inode.Ref, name: []const u8, parent_path: []const u8) !SfsFile {
         return fromInode(
             rdr,
             try .fromRef(rdr, ref),
@@ -20,7 +24,7 @@ pub const SfsFile = union(enum) {
             parent_path,
         );
     }
-    pub fn fromDirEntry(rdr: *SfsReader, ent: dir.DirEntry, parent_path: []u8) !SfsFile {
+    pub fn fromDirEntry(rdr: *SfsReader, ent: dir.DirEntry, parent_path: []const u8) !SfsFile {
         const offset_rdr = rdr.rdr.readerAt(ent.block + rdr.super.inode_start);
         var meta_rdr: MetadataReader(@TypeOf(offset_rdr)) = try .init(rdr.alloc, rdr.super.compress, offset_rdr);
         try meta_rdr.skip(ent.offset);
@@ -35,7 +39,7 @@ pub const SfsFile = union(enum) {
             parent_path,
         );
     }
-    pub fn fromInode(rdr: *SfsReader, inode: Inode, name: []u8, parent_path: []u8) !SfsFile {
+    pub fn fromInode(rdr: *SfsReader, inode: Inode, name: []const u8, parent_path: []const u8) !SfsFile {
         return switch (inode.hdr.inode_type) {
             .file, .ext_file => .{ .regular = try .init(
                 rdr,
@@ -80,7 +84,7 @@ pub const SfsFile = union(enum) {
             .other => |o| o.name,
         };
     }
-    pub fn filePath(self: SfsFile, alloc: std.mem.Allocator) ![]u8 {
+    pub fn filePath(self: SfsFile, alloc: std.mem.Allocator) ![]const u8 {
         return switch (self) {
             .regular => |r| r.filePath(alloc),
             .directory => |d| d.filePath(alloc),
@@ -99,32 +103,45 @@ pub const SfsFile = union(enum) {
         deref_sym: bool = false,
         /// Verbose logging.
         verbose: bool = false,
+        /// Location to verbose log. If null, uses stdout.
+        log_writer: ?std.io.AnyWriter,
 
         pub fn init() !ExtractConfig {
             return .{
                 .threads = @truncate(try std.Thread.getCpuCount()),
             };
         }
+
+        fn log(self: ExtractConfig, comptime fmt: []const u8, args: anytype) void {
+            std.fmt.format(
+                self.log_writer orelse std.io.getStdOut().reader().any(),
+                fmt,
+                args,
+            ) catch {};
+        }
     };
 
-    pub fn extract(self: SfsFile, config: ExtractConfig, path: []u8) !void {
-        _ = self;
-        _ = config;
-        _ = path;
+    pub fn extract(self: SfsFile, config: ExtractConfig, path: []const u8) !void {
+        return switch (self) {
+            .regular => |r| r.extract(config, path),
+            .directory => |d| d.extract(config, path),
+            .symlink => |s| s.extract(config, path),
+            .other => |o| o.extract(config, path),
+        };
     }
 };
 
 pub const Regular = struct {
     rdr: *SfsReader,
-    name: []u8,
-    parent_path: []u8,
+    name: []const u8,
+    parent_path: []const u8,
     inode: Inode,
 
     //TODO: data reader
 
     const Self = @This();
 
-    pub fn init(rdr: *SfsReader, inode: Inode, name: []u8, parent_path: []u8) !Self {
+    pub fn init(rdr: *SfsReader, inode: Inode, name: []const u8, parent_path: []const u8) !Self {
         const name_cpy = try rdr.alloc.alloc(u8, name.len);
         errdefer rdr.alloc.free(name_cpy);
         @memcpy(name_cpy, name);
@@ -149,19 +166,69 @@ pub const Regular = struct {
             else => unreachable,
         };
     }
+
+    pub fn filePath(self: Self, alloc: std.mem.Allocator) ![]const u8 {
+        if (self.parent_path.len == 0) {
+            const out = try alloc.alloc(u8, self.name.len);
+            @memcpy(out, self.name);
+            return out;
+        }
+        return std.mem.concat(alloc, u8, [3][]const u8{ self.parent_path, "/", self.name });
+    }
+
+    pub fn extract(self: Self, config: SfsFile.ExtractConfig, path: []const u8) !void {
+        const extr_fil = try extractFile(self, config, path);
+        defer extr_fil.close();
+        //TODO: actual extraction.
+    }
+    fn extractThreaded(self: Self, config: SfsFile.ExtractConfig, path: []const u8, wg: *std.Thread.WaitGroup, errs: *std.ArrayList(anyerror)) void {
+        defer wg.finish();
+        const extr_fil = extractFile(self, config, path) catch |err| {
+            errs.append(err) catch {};
+        };
+        defer extr_fil.close();
+        //TODO: actual extraction.
+    }
+    fn extractFile(self: Self, config: SfsFile.ExtractConfig, path: []const u8) !std.fs.File {
+        var path_is_dir = false;
+        if (std.fs.cwd().statFile(path)) |s| {
+            if (s.kind != .directory) return ExtractError.FileExists;
+            path_is_dir = true;
+        } else |err| {
+            if (err != std.fs.File.OpenError.FileNotFound) {
+                if (config.verbose)
+                    config.log("file at {s} already exists\n", .{path});
+                return err;
+            }
+        }
+        const extr_path = if (path_is_dir)
+            std.mem.concat(self.rdr.alloc, u8, [3][]const u8{ std.mem.trim(u8, path, "/"), "/", self.name }) catch |err| {
+                if (config.verbose)
+                    config.log("can't allocate memory: {}\n", .{err});
+            }
+        else
+            path;
+        defer if (extr_path.len != path.len) self.rdr.alloc.free(extr_path);
+        if (config.verbose)
+            config.lo("{s} extracting to {s}\n", .{ self.name, extr_path });
+        return std.fs.cwd().createFile(extr_path, .{}) catch |err| {
+            if (config.verbose)
+                config.log("can't create {s}: {}\n", .{ extr_path, err });
+        };
+    }
 };
 
 pub const Dir = struct {
     rdr: *SfsReader,
-    name: []u8,
-    parent_path: []u8,
+    name: []const u8,
+    parent_path: []const u8,
     inode: Inode,
 
     entries: std.StringArrayHashMap(dir.DirEntry),
 
     const Self = @This();
 
-    pub fn init(rdr: *SfsReader, inode: Inode, name: []u8, parent_path: []u8) !Self {
+    pub fn init(rdr: *SfsReader, inode: Inode, name: []const u8, parent_path: []const u8) !Self {
         const name_cpy = try rdr.alloc.alloc(u8, name.len);
         errdefer rdr.alloc.free(name_cpy);
         @memcpy(name_cpy, name);
@@ -207,6 +274,15 @@ pub const Dir = struct {
         self.entries.deinit();
     }
 
+    pub fn filePath(self: Self, alloc: std.mem.Allocator) ![]const u8 {
+        if (self.parent_path.len == 0) {
+            const out = try alloc.alloc(u8, self.name.len);
+            @memcpy(out, self.name);
+            return out;
+        }
+        return std.mem.concat(alloc, u8, [3][]const u8{ self.parent_path, "/", self.name });
+    }
+
     const OpenError = error{
         NotFound,
     };
@@ -240,40 +316,92 @@ pub const Dir = struct {
         };
     }
 
-    const DirIterator = struct {
-        rdr: *SfsReader,
-        entries: []dir.DirEntry,
-        idx: usize = 0,
-
-        /// Make sure to call deinit() on the returned SfsFile.
-        pub fn next(self: *DirIterator) !?SfsFile {
-            if (self.idx >= self.entries.len) return null;
-            defer self.idx += 1;
-            return .initWDirEntry(self.rdr, self.entries[self.idx]);
+    pub fn extract(self: Self, config: SfsFile.ExtractConfig, path: []const u8) !void {
+        if (config.threads > 1) {
+            const ext_path = self.extractPath(config, path) catch |err| {
+                return err;
+            };
+            defer if (ext_path.len != path.len) self.rdr.alloc.free(ext_path);
+            for (self.entries.keys()) |k| {
+                const ent = self.entries.get(k) orelse unreachable;
+                const fil_ext_path = std.mem.concat(self.rdr.alloc, u8, [3][]const u8{}) catch |err| {
+                    if (config.verbose)
+                        config.log("can't allocate memory: {}\n", .{err});
+                    return err;
+                };
+                defer self.rdr.alloc.free(fil_ext_path);
+                const fil: SfsFile = .fromDirEntry(self.rdr, ent, "") catch |err| {
+                    if (config.verbose)
+                        config.log("error getting {s}: {}\n", .{ ent.name, err });
+                    return err;
+                };
+                defer fil.deinit();
+                try fil.extract(config, fil_ext_path);
+            }
+        } else {
+            const reg_files: std.ArrayList(struct { []const u8, Regular }) = .init(self.rdr.alloc);
+            defer reg_files.deinit();
+            const errs: std.ArrayList(anyerror) = .init(self.rdr.alloc);
+            defer errs.deinit();
+            self.extractThreaded(config, path, reg_files, errs);
+            if (errs.items.len > 0) {
+                return errs.items[0];
+            }
         }
-    };
-    const NameIterator = struct {
-        rdr: *SfsReader,
-        entries: []dir.DirEntry,
-        idx: usize = 0,
-
-        pub fn next(self: *DirIterator) ?[]u8 {
-            if (self.idx >= self.entries.len) return null;
-            defer self.idx += 1;
-            return self.entries[self.idx].name;
+    }
+    fn extractThreaded(self: Self, config: SfsFile.ExtractConfig, path: []const u8, reg_files: *std.ArrayList(struct { []const u8, dir.DirEntry }), errs: *std.ArrayList(anyerror)) void {
+        const ext_path = self.extractPath(config, path) catch |err| {
+            return err;
+        };
+        defer if (ext_path.len != path.len) self.rdr.alloc.free(ext_path);
+        for (self.entries.keys()) |k| {
+            const ent = self.entries.get(k) orelse unreachable;
+            const fil_ext_path = std.mem.concat(self.rdr.alloc, u8, [3][]const u8{}) catch |err| {
+                if (config.verbose)
+                    config.log("can't allocate memory: {}\n", .{err});
+                return err;
+            };
         }
-    };
+    }
+    fn extractPath(self: Self, config: SfsFile.ExtractConfig, path: []const u8) ![]const u8 {
+        var path_is_dir = false;
+        if (std.fs.cwd().statFile(path)) |s| {
+            if (s.kind != .directory) return ExtractError.FileExists;
+            path_is_dir = true;
+        } else |err| {
+            if (err != std.fs.File.OpenError.FileNotFound) {
+                if (config.verbose)
+                    config.log("file at {s} already exists\n", .{path});
+                return err;
+            }
+        }
+        const extr_path = if (!path_is_dir)
+            std.mem.concat(self.rdr.alloc, u8, [3][]const u8{ std.mem.trim(u8, path, "/"), "/", self.name }) catch |err| {
+                if (config.verbose)
+                    config.log("can't allocate memory: {}\n", .{err});
+            }
+        else
+            path;
+        if (!path_is_dir) {
+            std.fs.cwd().makeDir(extr_path, .{}) catch |err| {
+                if (config.verbose)
+                    config.log("can't create {s}: {}\n", .{ extr_path, err });
+                return err;
+            };
+        }
+        return extr_path;
+    }
 };
 
 pub const Sym = struct {
     rdr: *SfsReader,
-    name: []u8,
-    parent_path: []u8,
+    name: []const u8,
+    parent_path: []const u8,
     inode: Inode,
 
     const Self = @This();
 
-    pub fn init(rdr: *SfsReader, inode: Inode, name: []u8, parent_path: []u8) !Self {
+    pub fn init(rdr: *SfsReader, inode: Inode, name: []const u8, parent_path: []const u8) !Self {
         const name_cpy = try rdr.alloc.alloc(u8, name.len);
         @memcpy(name_cpy, name);
         const parent_cpy = try rdr.alloc.alloc(u8, parent_path.len);
@@ -287,17 +415,29 @@ pub const Sym = struct {
     pub fn deinit(self: Self) void {
         commonDeinit(self);
     }
+
+    pub fn filePath(self: Self, alloc: std.mem.Allocator) ![]const u8 {
+        if (self.parent_path.len == 0) {
+            const out = try alloc.alloc(u8, self.name.len);
+            @memcpy(out, self.name);
+            return out;
+        }
+        return std.mem.concat(alloc, u8, [3][]const u8{ self.parent_path, "/", self.name });
+    }
+
+    pub fn extract(self: Self, config: SfsFile.ExtractConfig, path: []const u8) !void {}
+    fn extractReal(self: Self, config: SfsFile.ExtractConfig, path: []const u8, reg_file_pool: *std.ArrayList(struct { []const u8, Regular })) !void {}
 };
 
 pub const Other = struct {
     rdr: *SfsReader,
-    name: []u8,
-    parent_path: []u8,
+    name: []const u8,
+    parent_path: []const u8,
     inode: Inode,
 
     const Self = @This();
 
-    pub fn init(rdr: *SfsReader, inode: Inode, name: []u8, parent_path: []u8) !Self {
+    pub fn init(rdr: *SfsReader, inode: Inode, name: []const u8, parent_path: []const u8) !Self {
         const name_cpy = try rdr.alloc.alloc(u8, name.len);
         @memcpy(name_cpy, name);
         const parent_cpy = try rdr.alloc.alloc(u8, parent_path.len);
@@ -312,7 +452,17 @@ pub const Other = struct {
         commonDeinit(self);
     }
 
-    pub fn filePath(self: Self, alloc: std.mem.Allocator) []u8 {}
+    pub fn filePath(self: Self, alloc: std.mem.Allocator) ![]const u8 {
+        if (self.parent_path.len == 0) {
+            const out = try alloc.alloc(u8, self.name.len);
+            @memcpy(out, self.name);
+            return out;
+        }
+        return std.mem.concat(alloc, u8, [3][]const u8{ self.parent_path, "/", self.name });
+    }
+
+    pub fn extract(self: Self, config: SfsFile.ExtractConfig, path: []const u8) !void {}
+    fn extractReal(self: Self, config: SfsFile.ExtractConfig, path: []const u8, reg_file_pool: *std.ArrayList(struct { []const u8, Regular })) !void {}
 };
 
 fn commonDeinit(self: anytype) void {
@@ -320,3 +470,27 @@ fn commonDeinit(self: anytype) void {
     self.rdr.alloc.free(self.name);
     self.rdr.alloc.free(self.parent_path);
 }
+
+const DirIterator = struct {
+    rdr: *SfsReader,
+    entries: []dir.DirEntry,
+    idx: usize = 0,
+
+    /// Make sure to call deinit() on the returned SfsFile.
+    pub fn next(self: *DirIterator) !?SfsFile {
+        if (self.idx >= self.entries.len) return null;
+        defer self.idx += 1;
+        return .initWDirEntry(self.rdr, self.entries[self.idx]);
+    }
+};
+const NameIterator = struct {
+    rdr: *SfsReader,
+    entries: []dir.DirEntry,
+    idx: usize = 0,
+
+    pub fn next(self: *DirIterator) ?[]const u8 {
+        if (self.idx >= self.entries.len) return null;
+        defer self.idx += 1;
+        return self.entries[self.idx].name;
+    }
+};
