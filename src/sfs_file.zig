@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 const dir = @import("directory.zig");
 
@@ -338,6 +339,7 @@ pub const Dir = struct {
                 defer fil.deinit();
                 try fil.extract(config, fil_ext_path);
             }
+            //TODO: set permissions
         } else {
             const reg_files: std.ArrayList(struct { []const u8, dir.DirEntry }) = .init(self.rdr.alloc);
             defer reg_files.deinit();
@@ -369,6 +371,7 @@ pub const Dir = struct {
                 pool.spawn(Regular.extractThreaded, .{ fil.regular, config, it.@"0", &wg, &errs });
                 it.@"1".deinit(self.rdr.alloc);
             }
+            //TODO: set permissions
         }
     }
     fn extractThreaded(self: Self, config: SfsFile.ExtractConfig, path: []const u8, reg_files: *std.ArrayList(struct { []const u8, dir.DirEntry }), errs: *std.ArrayList(anyerror)) void {
@@ -467,8 +470,41 @@ pub const Sym = struct {
         return std.mem.concat(alloc, u8, [3][]const u8{ self.parent_path, "/", self.name });
     }
 
-    pub fn extract(self: Self, config: SfsFile.ExtractConfig, path: []const u8) !void {}
-    fn extractReal(self: Self, config: SfsFile.ExtractConfig, path: []const u8, reg_file_pool: *std.ArrayList(struct { []const u8, Regular })) !void {}
+    pub fn target(self: Self) []const u8 {
+        return switch (self.inode.data) {
+            .symlink => |s| s.target,
+            .ext_symlink => |s| s.target,
+            else => unreachable,
+        };
+    }
+
+    pub fn extract(self: Self, config: SfsFile.ExtractConfig, path: []const u8) !void {
+        //TODO: config options.
+        var path_is_dir = false;
+        if (std.fs.cwd().statFile(path)) |s| {
+            if (s.kind != .directory) return ExtractError.FileExists;
+            path_is_dir = true;
+        } else |err| {
+            if (err != std.fs.File.OpenError.FileNotFound) {
+                if (config.verbose)
+                    config.log("file at {s} already exists\n", .{path});
+                return err;
+            }
+        }
+        const extr_path = if (path_is_dir)
+            std.mem.concat(self.rdr.alloc, u8, [3][]const u8{ std.mem.trim(u8, path, "/"), "/", self.name }) catch |err| {
+                if (config.verbose)
+                    config.log("can't allocate memory: {}\n", .{err});
+            }
+        else
+            path;
+        defer if (extr_path.len != path.len) self.rdr.alloc.free(extr_path);
+        std.fs.cwd().symLink(self.target(), extr_path, .{}) catch |err| {
+            if (config.verbose)
+                config.log("can't create symlink {s}: {}\n", .{ self.name, err });
+        };
+        //TODO: set permissions
+    }
 };
 
 pub const Other = struct {
@@ -503,8 +539,51 @@ pub const Other = struct {
         return std.mem.concat(alloc, u8, [3][]const u8{ self.parent_path, "/", self.name });
     }
 
-    pub fn extract(self: Self, config: SfsFile.ExtractConfig, path: []const u8) !void {}
-    fn extractReal(self: Self, config: SfsFile.ExtractConfig, path: []const u8, reg_file_pool: *std.ArrayList(struct { []const u8, Regular })) !void {}
+    pub fn extract(self: Self, config: SfsFile.ExtractConfig, path: []const u8) !void {
+        comptime if (builtin.os.tag != .linux) {
+            if (config.verbose)
+                config.log("ignoring device/IPC {s} on incompatible OS\n", .{self.name});
+            return;
+        };
+        var path_is_dir = false;
+        if (std.fs.cwd().statFile(path)) |s| {
+            if (s.kind != .directory) return ExtractError.FileExists;
+            path_is_dir = true;
+        } else |err| {
+            if (err != std.fs.File.OpenError.FileNotFound) {
+                if (config.verbose)
+                    config.log("file at {s} already exists\n", .{path});
+                return err;
+            }
+        }
+        const extr_path = if (path_is_dir)
+            std.mem.concat(self.rdr.alloc, u8, [3][]const u8{ std.mem.trim(u8, path, "/"), "/", self.name }) catch |err| {
+                if (config.verbose)
+                    config.log("can't allocate memory: {}\n", .{err});
+            }
+        else
+            path;
+        defer if (extr_path.len != path.len) self.rdr.alloc.free(extr_path);
+        const mode: u32 = switch (self.inode.hdr.inode_type) {
+            .block_dev, .ext_block_dev => std.os.linux.S.IFBLK,
+            .char_dev, .ext_char_dev => std.os.linux.S.IFCHR,
+            .fifo, .ext_fifo => std.os.linux.S.IFIFO,
+            .socket, .ext_socket => std.os.linux.S.IFSOCK,
+            else => unreachable,
+        };
+        const dev: u32 = switch (self.inode.data) {
+            .block_dev => |b| b.dev,
+            .ext_block_dev => |b| b.dev,
+            .char_dev => |c| c.dev,
+            .ext_char_dev => |c| c.dev,
+            else => 0,
+        };
+        const exit = std.os.linux.mknod(extr_path, mode, dev);
+        //TODO: handle exit code.
+        //TODO: remove println.
+        std.debug.print("mknod exit code: {d}\n", .{exit});
+        //TODO: set permissions
+    }
 };
 
 fn commonDeinit(self: anytype) void {
