@@ -4,7 +4,7 @@ const File = std.fs.File;
 
 const Dir = @import("sfs_file.zig").Dir;
 const Superblock = @import("superblock.zig").Superblock;
-const FilePReader = @import("preader.zig").PReader(File, File.PReadError, File.pread);
+const FilePReader = @import("readers/preader.zig").PReader(File);
 const Inode = @import("inode.zig");
 const SfsFile = @import("sfs_file.zig").SfsFile;
 const FragEntry = @import("fragment.zig").FragEntry;
