@@ -5,6 +5,8 @@ const Compressor = @import("../decompress.zig").Compressor;
 const DataBlockSize = @import("../inode.zig").DataBlockSize;
 const FilePReader = @import("preader.zig").PReader(std.fs.File);
 
+const FullReaderError = error{InvalidIndex};
+
 const Self = @This();
 
 alloc: std.mem.Allocator,
@@ -52,4 +54,28 @@ pub fn addFrag(self: *Self, start: u64, size: DataBlockSize, offset: u32) !void 
         _ = try self.comp.decompress(self.alloc, limit_rdr, dat);
     }
     @memcpy(self.frag_data, dat[offset .. offset + frag_size]);
+}
+
+pub fn block(self: Self, idx: u32) ![]u8 {
+    if (idx > self.sizes.len) return FullReaderError.InvalidIndex;
+    if (idx == self.sizes.len) {
+        if (self.frag_data.len > 0) {
+            const dat = try self.alloc.alloc(u8, self.frag_data.len);
+            @memcpy(dat, self.frag_data);
+            return dat;
+        }
+        return FullReaderError.InvalidIndex;
+    }
+    var buf = try self.alloc.alloc(u8, self.block_size);
+    errdefer self.alloc.free(buf);
+    if (self.sizes[idx].not_compressed) {
+        _ = try self.rdr.preadAll(buf, self.offsets[idx]);
+        return buf;
+    }
+    const off_rdr = self.rdr.readerAt(self.offsets[idx]);
+    const siz = try self.comp.decompress(self.alloc, off_rdr, buf);
+    if (siz == self.block_size) {
+        return buf;
+    }
+    return buf[0..siz];
 }
