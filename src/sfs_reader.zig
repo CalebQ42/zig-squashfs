@@ -37,7 +37,7 @@ pub fn initWOffset(alloc: std.mem.Allocator, fil: File, offset: u64) !*SfsReader
     out.root = try .init(out, try .fromRef(out, out.super.root_ref), "", "");
     out.frag_table = .init(alloc, out.rdr, out.super.compress, out.super.frag_count, out.super.frag_start);
     out.id_table = .init(alloc, out.rdr, out.super.compress, out.super.id_count, out.super.id_start);
-    out.export_table = .init(alloc, out.rdr, out.super.compress, out.super.export_count, out.super.export_start);
+    out.export_table = .init(alloc, out.rdr, out.super.compress, out.super.inode_count, out.super.export_start);
     return out;
 }
 pub fn deinit(self: *SfsReader) void {

@@ -41,9 +41,10 @@ pub fn readEntries(alloc: std.mem.Allocator, reader: anytype, size: u32) !std.St
         for (0..hdr.count + 1) |_| {
             red = try reader.readAll(std.mem.asBytes(&raw));
             cur_red += red + raw.name_len + 1;
-            const ent: DirEntry = .{ .block = hdr.block, .offset = raw.offset, .inode_type = raw.inode_type, .num = @intCast(hdr.num + raw.num_offset), .name = try alloc.alloc(u8, raw.name_len + 1) };
-            errdefer ent.deinit(alloc);
-            _ = try reader.readAll(ent.name);
+            const name = try alloc.alloc(u8, raw.name_len + 1);
+            errdefer alloc.free(name);
+            _ = try reader.readAll(name);
+            const ent: DirEntry = .{ .block = hdr.block, .offset = raw.offset, .inode_type = raw.inode_type, .num = @intCast(hdr.num + raw.num_offset), .name = name };
             out.putAssumeCapacity(ent.name, ent);
         }
     }

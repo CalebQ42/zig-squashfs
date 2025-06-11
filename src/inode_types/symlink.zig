@@ -8,12 +8,14 @@ pub const Symlink = struct {
         var buf: [8]u8 = undefined;
         _ = try reader.readAll(&buf);
         const siz = std.mem.readInt(u32, buf[4..], .little);
+        const target = try alloc.alloc(u8, siz + 1);
+        errdefer alloc.free(target);
+        _ = try reader.readAll(target);
         const out: Symlink = .{
             .hard_links = std.mem.readInt(u32, buf[0..4], .little),
             .target_size = siz,
-            .target = try alloc.alloc(u8, siz + 1),
+            .target = target,
         };
-        _ = try reader.readAll(out.target);
         return out;
     }
     pub fn deinit(self: Symlink, alloc: std.mem.Allocator) void {
@@ -30,13 +32,15 @@ pub const ExtSymlink = struct {
         var buf: [8]u8 = undefined;
         _ = try reader.readAll(&buf);
         const siz = std.mem.readInt(u32, buf[4..], .little);
+        const target = try alloc.alloc(u8, siz + 1);
+        errdefer alloc.free(target);
+        _ = try reader.readAll(target);
         var out: ExtSymlink = .{
             .hard_links = std.mem.readInt(u32, buf[0..4], .little),
             .target_size = siz,
-            .target = try alloc.alloc(u8, siz + 1),
+            .target = target,
             .xattr_idx = 0,
         };
-        _ = try reader.readAll(out.target);
         _ = try reader.readAll(std.mem.asBytes(&out.xattr_idx));
         return out;
     }

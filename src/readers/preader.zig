@@ -27,7 +27,7 @@ pub fn PReader(
             return self.ctx.pread(buf, offset + self.offset);
         }
         pub fn preadAll(self: Self, buf: []u8, offset: u64) !usize {
-            comptime if (std.meta.hasFn(Context, "preadAll")) {
+            if (std.meta.hasFn(Context, "preadAll")) {
                 return self.ctx.preadAll(buf, offset + self.offset);
             } else {
                 var total_red: usize = 0;
@@ -37,7 +37,7 @@ pub fn PReader(
                     total_red += red;
                 }
                 return total_red;
-            };
+            }
         }
         pub fn preadStruct(self: Self, comptime T: type, offset: u64) !T {
             comptime std.debug.assert(@typeInfo(T).@"struct".layout != .auto);
@@ -67,7 +67,7 @@ pub fn PReader(
                 return red;
             }
             pub fn readAll(self: *OffsetReader, buf: []u8) !usize {
-                comptime if (std.meta.hasFn(Context, "preadAll")) {
+                if (std.meta.hasFn(Context, "preadAll")) {
                     const red = try self.ctx.preadAll(buf, self.offset);
                     self.offset += red;
                     return red;
@@ -79,7 +79,7 @@ pub fn PReader(
                         total_red += red;
                     }
                     return total_red;
-                };
+                }
             }
         };
     };

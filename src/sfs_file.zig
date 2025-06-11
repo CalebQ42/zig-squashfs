@@ -11,7 +11,7 @@ const ExtractError = error{
     FileExists,
 };
 
-pub const SfsFile = union {
+pub const SfsFile = union(enum) {
     regular: Regular,
     directory: Dir,
     symlink: Sym,
@@ -46,34 +46,34 @@ pub const SfsFile = union {
                 rdr,
                 inode,
                 name,
-                std.mem.trim(parent_path, "/"),
+                std.mem.trim(u8, parent_path, "/"),
             ) },
             .directory, .ext_directory => .{ .directory = try .init(
                 rdr,
                 inode,
                 name,
-                std.mem.trim(parent_path, "/"),
+                std.mem.trim(u8, parent_path, "/"),
             ) },
             .symlink, .ext_symlink => .{ .symlink = try .init(
                 rdr,
                 inode,
                 name,
-                std.mem.trim(parent_path, "/"),
+                std.mem.trim(u8, parent_path, "/"),
             ) },
             else => .{ .other = try .init(
                 rdr,
                 inode,
                 name,
-                std.mem.trim(parent_path, "/"),
+                std.mem.trim(u8, parent_path, "/"),
             ) },
         };
     }
     pub fn deinit(self: SfsFile) void {
         switch (self) {
-            .regular => |r| r.deinit(),
-            .directory => |d| d.deinit(),
-            .symlink => |s| s.deinit(),
-            .other => |o| o.deinit(),
+            .regular => |*r| r.deinit(),
+            .directory => |*d| d.deinit(),
+            .symlink => |*s| s.deinit(),
+            .other => |*o| o.deinit(),
         }
     }
 
@@ -105,7 +105,7 @@ pub const SfsFile = union {
         /// Verbose logging.
         verbose: bool = false,
         /// Location to verbose log. If null, uses stdout.
-        log_writer: ?std.io.AnyWriter,
+        log_writer: ?std.io.AnyWriter = null,
 
         pub fn init() !ExtractConfig {
             return .{
@@ -115,14 +115,14 @@ pub const SfsFile = union {
 
         fn log(self: ExtractConfig, comptime fmt: []const u8, args: anytype) void {
             std.fmt.format(
-                self.log_writer orelse std.io.getStdOut().reader().any(),
+                self.log_writer orelse std.io.getStdOut().writer().any(),
                 fmt,
                 args,
             ) catch {};
         }
     };
 
-    pub fn extract(self: SfsFile, config: ExtractConfig, path: []const u8) !void {
+    pub fn extract(self: SfsFile, config: ExtractConfig, path: []const u8) anyerror!void {
         return switch (self) {
             .regular => |r| r.extract(config, path),
             .directory => |d| d.extract(config, path),
@@ -153,6 +153,7 @@ pub const Regular = struct {
         return .{
             .rdr = rdr,
             .name = name_cpy,
+            .parent_path = parent_cpy,
             .inode = inode,
         };
     }
@@ -203,18 +204,20 @@ pub const Regular = struct {
             }
         }
         const extr_path = if (path_is_dir)
-            std.mem.concat(self.rdr.alloc, u8, [3][]const u8{ std.mem.trim(u8, path, "/"), "/", self.name }) catch |err| {
+            std.mem.concat(self.rdr.alloc, u8, &[3][]const u8{ std.mem.trim(u8, path, "/"), "/", self.name }) catch |err| {
                 if (config.verbose)
                     config.log("can't allocate memory: {}\n", .{err});
+                return err;
             }
         else
             path;
         defer if (extr_path.len != path.len) self.rdr.alloc.free(extr_path);
         if (config.verbose)
-            config.lo("{s} extracting to {s}\n", .{ self.name, extr_path });
+            config.log("{s} extracting to {s}\n", .{ self.name, extr_path });
         return std.fs.cwd().createFile(extr_path, .{}) catch |err| {
             if (config.verbose)
                 config.log("can't create {s}: {}\n", .{ extr_path, err });
+            return err;
         };
     }
 };
@@ -281,7 +284,7 @@ pub const Dir = struct {
             @memcpy(out, self.name);
             return out;
         }
-        return std.mem.concat(alloc, u8, [3][]const u8{ self.parent_path, "/", self.name });
+        return std.mem.concat(alloc, u8, &[3][]const u8{ self.parent_path, "/", self.name });
     }
 
     const OpenError = error{
@@ -297,10 +300,10 @@ pub const Dir = struct {
             return OpenError.NotFound;
         };
         if (sep_ind == fil_path.len) {
-            return .initWDirEntry(self.rdr, ent);
+            return SfsFile.fromDirEntry(self.rdr, ent, try self.filePath(self.rdr.alloc));
         }
         if (ent.inode_type != .directory) return OpenError.NotFound;
-        const fil: SfsFile = try .initWDirEntry(self.rdr, ent);
+        const fil: SfsFile = try SfsFile.fromDirEntry(self.rdr, ent, try self.filePath(self.rdr.alloc));
         return fil.directory.open(fil_path[sep_ind..]);
     }
 
@@ -325,13 +328,13 @@ pub const Dir = struct {
             defer if (ext_path.len != path.len) self.rdr.alloc.free(ext_path);
             for (self.entries.keys()) |k| {
                 const ent = self.entries.get(k) orelse unreachable;
-                const fil_ext_path = std.mem.concat(self.rdr.alloc, u8, [3][]const u8{}) catch |err| {
+                const fil_ext_path = std.mem.concat(self.rdr.alloc, u8, &[3][]const u8{ ext_path, "/", ent.name }) catch |err| {
                     if (config.verbose)
                         config.log("can't allocate memory: {}\n", .{err});
                     return err;
                 };
                 defer self.rdr.alloc.free(fil_ext_path);
-                const fil: SfsFile = .fromDirEntry(self.rdr, ent, "") catch |err| {
+                const fil: SfsFile = SfsFile.fromDirEntry(self.rdr, ent, "") catch |err| {
                     if (config.verbose)
                         config.log("error getting {s}: {}\n", .{ ent.name, err });
                     return err;
@@ -341,7 +344,7 @@ pub const Dir = struct {
             }
             //TODO: set permissions
         } else {
-            const reg_files: std.ArrayList(struct { []const u8, dir.DirEntry }) = .init(self.rdr.alloc);
+            var reg_files: std.ArrayList(struct { []const u8, dir.DirEntry }) = .init(self.rdr.alloc);
             defer reg_files.deinit();
             defer for (reg_files.items) |it| {
                 self.rdr.alloc.free(it.@"0");
@@ -349,26 +352,27 @@ pub const Dir = struct {
             errdefer for (reg_files.items) |it| {
                 it.@"1".deinit(self.rdr.alloc);
             };
-            const errs: std.ArrayList(anyerror) = .init(self.rdr.alloc);
+            var errs: std.ArrayList(anyerror) = .init(self.rdr.alloc);
             defer errs.deinit();
-            self.extractThreaded(config, path, reg_files, errs);
+            self.extractThreaded(config, path, &reg_files, &errs);
             if (errs.items.len > 0) {
                 return errs.items[0];
             }
-            const pool: std.Thread.Pool = undefined;
+            var pool: std.Thread.Pool = undefined;
             try pool.init(.{
+                .allocator = self.rdr.alloc,
                 .n_jobs = config.threads,
             });
             defer pool.deinit();
             const wg: std.Thread.WaitGroup = .{};
             for (reg_files.items) |*it| {
-                const fil: SfsFile = .fromDirEntry(self.rdr, it.@"1", "") catch |err| {
+                const fil: SfsFile = SfsFile.fromDirEntry(self.rdr, it.@"1", "") catch |err| {
                     if (config.verbose)
                         config.log("error extracting {s}: {}\n", .{ it.@"1".name, err });
                     return err;
                 };
                 //TODO: If certain config options are set, have the option of symlinks.
-                pool.spawn(Regular.extractThreaded, .{ fil.regular, config, it.@"0", &wg, &errs });
+                try pool.spawn(Regular.extractThreaded, .{ fil.regular, config, it.@"0", &wg, &errs });
                 it.@"1".deinit(self.rdr.alloc);
             }
             //TODO: set permissions
@@ -382,7 +386,7 @@ pub const Dir = struct {
         defer if (ext_path.len != path.len) self.rdr.alloc.free(ext_path);
         for (self.entries.keys()) |k| {
             const ent = self.entries.get(k) orelse unreachable;
-            const fil_ext_path = std.mem.concat(self.rdr.alloc, u8, [3][]const u8{ ext_path, "/", ent.name }) catch |err| {
+            const fil_ext_path = std.mem.concat(self.rdr.alloc, u8, &[3][]const u8{ ext_path, "/", ent.name }) catch |err| {
                 if (config.verbose)
                     config.log("can't allocate memory: {}\n", .{err});
                 errs.append(err) catch {};
@@ -392,8 +396,8 @@ pub const Dir = struct {
                 reg_files.append(.{ fil_ext_path, ent }) catch {};
                 return;
             }
-            defer self.rdr.free(fil_ext_path);
-            const fil: SfsFile = .fromDirEntry(self.rdr, ent, "") catch |err| {
+            defer self.rdr.alloc.free(fil_ext_path);
+            const fil: SfsFile = SfsFile.fromDirEntry(self.rdr, ent, "") catch |err| {
                 if (config.verbose)
                     config.log("error extracting {s}: {}\n", .{ ent.name, err });
                 errs.append(err) catch {};
@@ -421,14 +425,15 @@ pub const Dir = struct {
             }
         }
         const extr_path = if (!path_is_dir)
-            std.mem.concat(self.rdr.alloc, u8, [3][]const u8{ std.mem.trim(u8, path, "/"), "/", self.name }) catch |err| {
+            std.mem.concat(self.rdr.alloc, u8, &[3][]const u8{ std.mem.trim(u8, path, "/"), "/", self.name }) catch |err| {
                 if (config.verbose)
                     config.log("can't allocate memory: {}\n", .{err});
+                return err;
             }
         else
             path;
         if (!path_is_dir) {
-            std.fs.cwd().makeDir(extr_path, .{}) catch |err| {
+            std.fs.cwd().makeDir(extr_path) catch |err| {
                 if (config.verbose)
                     config.log("can't create {s}: {}\n", .{ extr_path, err });
                 return err;
@@ -454,6 +459,7 @@ pub const Sym = struct {
         return .{
             .rdr = rdr,
             .name = name_cpy,
+            .parent_path = parent_cpy,
             .inode = inode,
         };
     }
@@ -492,9 +498,10 @@ pub const Sym = struct {
             }
         }
         const extr_path = if (path_is_dir)
-            std.mem.concat(self.rdr.alloc, u8, [3][]const u8{ std.mem.trim(u8, path, "/"), "/", self.name }) catch |err| {
+            std.mem.concat(self.rdr.alloc, u8, &[3][]const u8{ std.mem.trim(u8, path, "/"), "/", self.name }) catch |err| {
                 if (config.verbose)
                     config.log("can't allocate memory: {}\n", .{err});
+                return err;
             }
         else
             path;
@@ -523,6 +530,7 @@ pub const Other = struct {
         return .{
             .rdr = rdr,
             .name = name_cpy,
+            .parent_path = parent_cpy,
             .inode = inode,
         };
     }
@@ -557,9 +565,10 @@ pub const Other = struct {
             }
         }
         const extr_path = if (path_is_dir)
-            std.mem.concat(self.rdr.alloc, u8, [3][]const u8{ std.mem.trim(u8, path, "/"), "/", self.name }) catch |err| {
+            std.mem.concat(self.rdr.alloc, u8, &[3][]const u8{ std.mem.trim(u8, path, "/"), "/", self.name }) catch |err| {
                 if (config.verbose)
                     config.log("can't allocate memory: {}\n", .{err});
+                return err;
             }
         else
             path;

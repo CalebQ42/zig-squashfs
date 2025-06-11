@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const FilePReader = @import("preader.zig").PReader(std.fs.File, std.fs.File.PReadError, std.fs.File.pread);
+const FilePReader = @import("readers/preader.zig").PReader(std.fs.File);
 const Compressor = @import("decompress.zig").Compressor;
 const MetadataReader = @import("readers/metadata.zig").MetadataReader;
 const InodeRef = @import("inode.zig").Ref;

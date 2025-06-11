@@ -153,7 +153,7 @@ pub fn main() !void {
                 };
             } else {
                 for (extr_files.items) |path| {
-                    var fil = rdr.root.open(&rdr, path) catch |err| {
+                    var fil = rdr.root.open(path) catch |err| {
                         try std.fmt.format(stdout.writer(), "Error extracting {s}: {any}\n", .{ path, err });
                         return;
                     };
