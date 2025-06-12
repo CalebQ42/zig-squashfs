@@ -1,6 +1,8 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 const SfsReader = @import("../sfs_reader.zig");
+const MemPool = @import("../util/mem_pool.zig").MemPool;
 const Compressor = @import("../decompress.zig").Compressor;
 const DataBlockSize = @import("../inode.zig").DataBlockSize;
 const FilePReader = @import("preader.zig").PReader(std.fs.File);
@@ -10,8 +12,10 @@ const FullReaderError = error{InvalidIndex};
 const Self = @This();
 
 alloc: std.mem.Allocator,
-rdr: *FilePReader,
 comp: Compressor,
+rdr: *FilePReader,
+threadPool: *std.Thread.Pool,
+memPool: *MemPool(struct { u32, anyerror![]u8 }),
 
 file_size: u64,
 block_size: u32,
@@ -56,6 +60,11 @@ pub fn addFrag(self: *Self, start: u64, size: DataBlockSize, offset: u32) !void 
     @memcpy(self.frag_data, dat[offset .. offset + frag_size]);
 }
 
+pub fn setPools(self: *Self, thr: *std.Thread.Pool, mem: *MemPool(struct { u32, anyerror![]u8 })) void {
+    self.threadPool = thr;
+    self.memPool = mem;
+}
+
 pub fn block(self: Self, idx: u32) ![]u8 {
     if (idx > self.sizes.len) return FullReaderError.InvalidIndex;
     if (idx == self.sizes.len) {
@@ -78,4 +87,22 @@ pub fn block(self: Self, idx: u32) ![]u8 {
         return buf;
     }
     return buf[0..siz];
+}
+
+pub fn blockThreaded(self: Self, idx: u32) !void {}
+
+/// Write's the entire file's data to the given writer.
+/// If available, pwriteAll will be used, otherwise write will.
+pub fn writeTo(self: Self, writer: anytype) !usize {
+    comptime std.debug.assert(std.meta.hasFn(writer, "write") or
+        std.meta.hasFn(writer, "writeAll") or
+        std.meta.hasFn(writer, "pwrite") or
+        std.meta.hasFn(writer, "pwriteAll"));
+    if (self.threadPool == null) {
+        self.threadPool = undefined;
+        self.threadPool.init(.{
+            .n_jobs = try std.Thread.getCpuCount(),
+        });
+        self.memPool = .init(self.alloc);
+    }
 }
