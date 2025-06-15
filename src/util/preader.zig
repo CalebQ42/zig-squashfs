@@ -39,7 +39,7 @@ pub fn PReader(comptime T: type) type {
             };
         }
 
-        const OffsetReader = struct {
+        pub const OffsetReader = struct {
             p_rdr: T,
             cur_offset: u64,
 
