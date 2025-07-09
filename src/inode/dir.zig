@@ -1,37 +1,31 @@
-const io = @import("std").io;
+const std = @import("std");
 
-pub const DirInode = packed struct {
-    block_start: u32,
-    hard_links: u32,
-    /// Note: size is 3 larger then the actual size, due to "." and ".."
+pub const Dir = packed struct {
+    block: u32,
+    hard_link: u32,
     size: u16,
     offset: u16,
     parent_num: u32,
 
-    pub fn init(rdr: io.AnyReader) !DirInode {
-        return rdr.readStruct(DirInode);
+    pub fn init(rdr: anytype) !Dir {
+        const out: Dir = undefined;
+        _ = rdr.read(std.mem.asBytes(&out));
+        return out;
     }
 };
 
-const DirIndex = struct {
-    offset: u32,
-    block_start: u32,
-    name_size: u32,
-    name: []const u8,
-};
-
-pub const ExtDirInode = packed struct {
-    hard_links: u32,
-    /// Note: size is 3 larger then the actual size, due to "." and ".."
+pub const ExtDir = packed struct {
+    hard_link: u32,
     size: u32,
-    block_start: u32,
+    block: u32,
     parent_num: u32,
-    index_count: u16,
+    idx_count: u16,
     offset: u16,
-    xattr_inx: u32,
-    // TODO: possibly also read dir indexes. Maybe relagate to function...
+    xattr_idx: u32,
 
-    pub fn init(rdr: io.AnyReader) !ExtDirInode {
-        return rdr.readStruct(ExtDirInode);
+    pub fn init(rdr: anytype) !ExtDir {
+        const out: ExtDir = undefined;
+        _ = rdr.read(std.mem.asBytes(&out));
+        return out;
     }
 };
