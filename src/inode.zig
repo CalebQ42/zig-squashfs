@@ -4,13 +4,17 @@ const dir = @import("inode/dir.zig");
 const file = @import("inode/file.zig");
 const misc = @import("inode/misc.zig");
 
+const ToRead = @import("reader/to_read.zig").ToRead;
+const Compression = @import("superblock.zig").Compression;
+const MetadataReader = @import("reader/metadata.zig").MetadataReader;
+
 pub const Ref = packed struct {
     offset: u16,
     block: u32,
     _: u16,
 };
 
-const Type = enum(u16) {
+pub const Type = enum(u16) {
     dir = 1,
     file,
     symlink,
@@ -27,7 +31,7 @@ const Type = enum(u16) {
     ext_socket,
 };
 
-const Header = packed struct {
+pub const Header = packed struct {
     type: Type,
     perm: u16,
     uid_idx: u16,
@@ -36,7 +40,7 @@ const Header = packed struct {
     num: u32,
 };
 
-const Data = union(enum) {
+pub const Data = union(enum) {
     dir: dir.Dir,
     file: file.File,
     symlink: misc.Symlink,
@@ -59,7 +63,6 @@ hdr: Header,
 data: Data,
 
 pub fn init(rdr: anytype, alloc: std.mem.Allocator, block_size: u32) !Self {
-    std.debug.assert(std.meta.hasFn(@TypeOf(rdr), "read"));
     var hdr: Header = undefined;
     _ = try rdr.read(std.mem.asBytes(&hdr));
     const data = switch (hdr.type) {
@@ -82,4 +85,11 @@ pub fn init(rdr: anytype, alloc: std.mem.Allocator, block_size: u32) !Self {
         .hdr = hdr,
         .data = data,
     };
+}
+pub fn initFromRef(p_rdr: anytype, comp: Compression, ref: Ref, table_start: u64, alloc: std.mem.Allocator, block_size: u32) !Self {
+    const rdr: ToRead(@TypeOf(p_rdr)) = .init(p_rdr, ref.block + table_start);
+    const meta_rdr: MetadataReader(ToRead(@TypeOf(p_rdr))) = try .init(alloc, comp, rdr);
+    defer meta_rdr.deinit();
+    try meta_rdr.skip(ref.offset);
+    return init(meta_rdr, alloc, block_size);
 }

@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const InodeRef = @import("inode.zig").Ref;
+
 pub const Superblock = packed struct {
     magic: u32,
     inode_count: u32,
@@ -26,7 +28,7 @@ pub const Superblock = packed struct {
     id_count: u16,
     ver_maj: u16,
     ver_min: u16,
-    root_ref: u64,
+    root_ref: InodeRef,
     size: u64,
     id_start: u64,
     xattr_start: u64,
@@ -57,11 +59,13 @@ pub const Compression = enum(u16) {
             },
             .lzma => {
                 const decomp = try std.compress.lzma.decompress(alloc, source);
+                defer decomp.deinit();
                 return decomp.read(dest);
             },
             .lzo => return DecompressError.LzoUnavailable,
             .xz => {
                 const decomp = try std.compress.xz.decompress(alloc, source);
+                defer decomp.deinit();
                 return decomp.read(dest);
             },
             .lz4 => return DecompressError.Lz4Unavailable,

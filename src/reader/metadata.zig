@@ -8,6 +8,7 @@ const MetaHeader = packed struct {
 };
 
 pub fn MetadataReader(comptime T: type) type {
+    comptime std.debug.assert(std.meta.hasFn(T, "read"));
     return struct {
         const Self = @This();
 
@@ -38,6 +39,31 @@ pub fn MetadataReader(comptime T: type) type {
                 std.io.limitedReader(self.rdr, hdr.size),
                 self.block,
             );
+            self.block_offset = 0;
+        }
+
+        pub fn skip(self: *Self, offset: u32) !void {
+            var skipped = 0;
+            var to_skip = 0;
+            while (skipped < offset) {
+                if (self.block_offset >= self.block_size) try self.readNextBlock();
+                to_skip = @min(self.block_size - self.block_offset, offset - skipped);
+                self.block_offset += to_skip;
+                skipped += to_skip;
+            }
+        }
+
+        pub fn read(self: *Self, buf: []u8) !usize {
+            var cur_red: usize = 0;
+            var to_read: usize = 0;
+            while (cur_red < buf.len) {
+                if (self.block_offset >= self.block_size) try self.readNextBlock();
+                to_read = @min(buf.len - cur_red, self.block_size - self.block_offset);
+                @memcpy(buf[cur_red .. cur_red + to_read], self.block[self.block_offset .. self.block_offset + to_read]);
+                cur_red += to_read;
+                self.block_offset += to_read;
+            }
+            return cur_red;
         }
     };
 }
