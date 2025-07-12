@@ -38,7 +38,7 @@ pub const Superblock = packed struct {
     export_start: u64,
 };
 
-const DecompressError = error{
+pub const DecompressError = error{
     LzoUnavailable,
     Lz4Unavailable,
 };

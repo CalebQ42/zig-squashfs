@@ -4,6 +4,8 @@ const dir = @import("inode/dir.zig");
 const file = @import("inode/file.zig");
 const misc = @import("inode/misc.zig");
 
+const Reader = @import("reader.zig");
+const DirEntry = @import("directory.zig").Entry;
 const ToRead = @import("reader/to_read.zig").ToRead;
 const Compression = @import("superblock.zig").Compression;
 const MetadataReader = @import("reader/metadata.zig").MetadataReader;
@@ -86,10 +88,11 @@ pub fn init(rdr: anytype, alloc: std.mem.Allocator, block_size: u32) !Self {
         .data = data,
     };
 }
-pub fn initFromRef(p_rdr: anytype, comp: Compression, ref: Ref, table_start: u64, alloc: std.mem.Allocator, block_size: u32) !Self {
-    const rdr: ToRead(@TypeOf(p_rdr)) = .init(p_rdr, ref.block + table_start);
-    const meta_rdr: MetadataReader(ToRead(@TypeOf(p_rdr))) = try .init(alloc, comp, rdr);
-    defer meta_rdr.deinit();
-    try meta_rdr.skip(ref.offset);
-    return init(meta_rdr, alloc, block_size);
+pub fn deinit(self: Self, alloc: std.mem.Allocator) void {
+    switch (self.data) {
+        .file => |f| alloc.free(f.block_sizes),
+        .ext_file => |f| alloc.free(f.block_sizes),
+        .symlink => |s| alloc.free(s.target),
+        .ext_symlink => |s| alloc.free(s.target),
+    }
 }

@@ -5,8 +5,13 @@ const Table = @import("table.zig").Table;
 const PRead = @import("reader/p_read.zig").PRead;
 const FragEntry = @import("fragment.zig").FragEntry;
 const Superblock = @import("superblock.zig").Superblock;
+const MetadataReader = @import("reader/metadata.zig").MetadataReader;
 
-pub fn Reader(comptime T: type) type {
+pub const SfsError = error{
+    NotExportable,
+};
+
+pub fn SfsReader(comptime T: type) type {
     comptime std.debug.assert(std.meta.hasFn(T, "pread"));
 
     return struct {
@@ -40,14 +45,22 @@ pub fn Reader(comptime T: type) type {
             self.id_table.deinit();
             self.frag_table.deinit();
             self.export_table.deinit();
+            // if (self.root != null) self.root.?.deinit();
         }
 
         /// Returns the inode with the given Inode Number.
-        /// Requires for the archive to have an export table.
-        pub fn InodeAt(self: Self, num: u32) !Inode {
+        /// Requires the archive to have an export table.
+        pub fn inodeAt(self: Self, num: u32) !Inode {
+            if (!self.super.flags.has_export) return SfsError.NotExportable;
             const ref = try self.export_table.get(num - 1);
-            _ = ref;
-            return error{TODO}.TODO;
+            const meta = MetadataReader(T).init(
+                self.alloc,
+                self.super.comp,
+                self.rdr,
+                self.super.inode_start + ref.block,
+            );
+            try meta.skip(ref.offset);
+            return .init(meta, self.alloc, self.super.block_size);
         }
     };
 }

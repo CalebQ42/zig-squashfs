@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const TableError = error{
+pub const TableError = error{
     InvalidIndex,
 };
 

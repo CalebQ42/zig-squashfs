@@ -1,5 +1,6 @@
 const std = @import("std");
 
+const PRead = @import("p_read.zig").PRead;
 const Compression = @import("../superblock.zig").Compression;
 
 const MetaHeader = packed struct {
@@ -14,36 +15,44 @@ pub fn MetadataReader(comptime T: type) type {
 
         alloc: std.mem.Allocator,
         comp: Compression,
-        rdr: T,
+        rdr: PRead(T),
+        offset: u64,
 
         block: [8192]u8 = undefined,
         block_size: usize = 0,
         block_offset: u32 = 0,
 
-        pub fn init(alloc: std.mem.Allocator, comp: Compression, rdr: T) !Self {
-            var out: Self = .{
+        pub fn init(alloc: std.mem.Allocator, comp: Compression, rdr: PRead(T), offset: u64) Self {
+            return .{
                 .alloc = alloc,
                 .comp = comp,
                 .rdr = rdr,
+                .offset = offset,
             };
-            try out.readNextBlock();
-            return out;
         }
 
         fn readNextBlock(self: *Self) !void {
             const hdr: MetaHeader = undefined;
-            _ = try self.rdr.read(std.mem.asBytes(hdr));
+            _ = try self.rdr.pread(std.mem.asBytes(hdr), self.offset);
+            self.offset += 2;
             self.block_size = try self.comp.decompress(
                 8192,
                 self.alloc,
-                std.io.limitedReader(self.rdr, hdr.size),
+                std.io.limitedReader(self.rdr.readerAt(self.offset), hdr.size),
                 self.block,
             );
+            self.offset += hdr.size;
             self.block_offset = 0;
         }
 
         pub fn skip(self: *Self, offset: u32) !void {
             var skipped = 0;
+            const hdr: MetaHeader = undefined;
+            while (offset - skipped >= 8192) {
+                _ = try self.rdr.pread(std.mem.asBytes(hdr), self.offset);
+                self.offset += 2 + hdr.size;
+                skipped += 8192;
+            }
             var to_skip = 0;
             while (skipped < offset) {
                 if (self.block_offset >= self.block_size) try self.readNextBlock();

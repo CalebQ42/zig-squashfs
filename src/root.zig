@@ -1,6 +1,6 @@
 const std = @import("std");
 
-pub const Reader = @import("reader.zig").Reader;
+pub const SfsReader = @import("reader.zig").SfsReader;
 pub const ExtractionOptions = @import("extract_options.zig");
 
-pub const FileReader = Reader(std.fs.File);
+pub const FileReader = SfsReader(std.fs.File);
