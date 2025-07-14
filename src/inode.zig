@@ -94,5 +94,6 @@ pub fn deinit(self: Self, alloc: std.mem.Allocator) void {
         .ext_file => |f| alloc.free(f.block_sizes),
         .symlink => |s| alloc.free(s.target),
         .ext_symlink => |s| alloc.free(s.target),
+        else => {},
     }
 }

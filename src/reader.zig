@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const Inode = @import("inode.zig");
+const File = @import("file.zig").File;
 const Table = @import("table.zig").Table;
 const PRead = @import("reader/p_read.zig").PRead;
 const FragEntry = @import("fragment.zig").FragEntry;
@@ -28,7 +29,7 @@ pub fn SfsReader(comptime T: type) type {
         /// Export table. Each element is an inode referce.
         /// If accessing directly, keep in mind, the table starts at inode 1, as such it's recommended to use the InodeAt function instead.
         export_table: Table(Inode.Ref, T) = undefined,
-        root: ?Inode = null,
+        root: ?File(T) = null,
 
         pub fn init(alloc: std.mem.Allocator, rdr: T, offset: u64) !Self {
             var out: Self = .{
@@ -45,7 +46,31 @@ pub fn SfsReader(comptime T: type) type {
             self.id_table.deinit();
             self.frag_table.deinit();
             self.export_table.deinit();
-            // if (self.root != null) self.root.?.deinit();
+            if (self.root != null) self.root.?.deinit();
+        }
+
+        fn populateRoot(self: *Self) !void {
+            if (self.root != null) return;
+            const meta = MetadataReader(T).init(
+                self.alloc,
+                self.super.comp,
+                self.rdr,
+                self.super.inode_start + self.super.root_ref.block,
+            );
+            try meta.skip(self.super.root_ref.offset);
+            const root_inode: Inode = try .init(meta, self.alloc, self.super.block_size);
+            self.root = try .init(self, root_inode, "");
+        }
+
+        pub fn archiveRoot(self: *Self) !File {
+            if (self.root == null) try self.populateRoot();
+            return self.root.?;
+        }
+        pub fn open(self: *Self, path: []const u8) !File {
+            if (self.root == null) try self.populateRoot();
+            _ = path;
+            // return self.root.?.open(path);
+            return error{TODO}.TODO;
         }
 
         /// Returns the inode with the given Inode Number.

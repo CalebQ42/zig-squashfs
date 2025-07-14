@@ -36,10 +36,9 @@ pub fn MetadataReader(comptime T: type) type {
             _ = try self.rdr.pread(std.mem.asBytes(hdr), self.offset);
             self.offset += 2;
             self.block_size = try self.comp.decompress(
-                8192,
                 self.alloc,
                 std.io.limitedReader(self.rdr.readerAt(self.offset), hdr.size),
-                self.block,
+                &self.block,
             );
             self.offset += hdr.size;
             self.block_offset = 0;
