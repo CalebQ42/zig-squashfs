@@ -4,12 +4,6 @@ const dir = @import("inode/dir.zig");
 const file = @import("inode/file.zig");
 const misc = @import("inode/misc.zig");
 
-const Reader = @import("reader.zig");
-const DirEntry = @import("directory.zig").Entry;
-const ToRead = @import("reader/to_read.zig").ToRead;
-const Compression = @import("superblock.zig").Compression;
-const MetadataReader = @import("reader/metadata.zig").MetadataReader;
-
 pub const Ref = packed struct {
     offset: u16,
     block: u32,
@@ -67,21 +61,21 @@ data: Data,
 pub fn init(rdr: anytype, alloc: std.mem.Allocator, block_size: u32) !Self {
     var hdr: Header = undefined;
     _ = try rdr.read(std.mem.asBytes(&hdr));
-    const data = switch (hdr.type) {
-        .dir => .{ .dir = .init(rdr) },
-        .file => .{ .file = .init(rdr, alloc, block_size) },
-        .symlink => .{ .symlink = .init(rdr, alloc) },
-        .block_dev => .{ .block_dev = .init(rdr) },
-        .char_dev => .{ .char_dev = .init(rdr) },
-        .fifo => .{ .fifo = .init(rdr) },
-        .socket => .{ .socket = .init(rdr) },
-        .ext_dir => .{ .ext_dir = .init(rdr) },
-        .ext_file => .{ .ext_file = .init(rdr, alloc, block_size) },
-        .ext_symlink => .{ .ext_symlink = .init(rdr, alloc) },
-        .ext_block_dev => .{ .ext_block_dev = .init(rdr) },
-        .ext_char_dev => .{ .ext_char_dev = .init(rdr) },
-        .ext_fifo => .{ .ext_fifo = .init(rdr) },
-        .ext_socket => .{ .ext_socket = .init(rdr) },
+    const data: Data = switch (hdr.type) {
+        .dir => .{ .dir = try .init(rdr) },
+        .file => .{ .file = try .init(rdr, alloc, block_size) },
+        .symlink => .{ .symlink = try .init(rdr, alloc) },
+        .block_dev => .{ .block_dev = try .init(rdr) },
+        .char_dev => .{ .char_dev = try .init(rdr) },
+        .fifo => .{ .fifo = try .init(rdr) },
+        .socket => .{ .socket = try .init(rdr) },
+        .ext_dir => .{ .ext_dir = try .init(rdr) },
+        .ext_file => .{ .ext_file = try .init(rdr, alloc, block_size) },
+        .ext_symlink => .{ .ext_symlink = try .init(rdr, alloc) },
+        .ext_block_dev => .{ .ext_block_dev = try .init(rdr) },
+        .ext_char_dev => .{ .ext_char_dev = try .init(rdr) },
+        .ext_fifo => .{ .ext_fifo = try .init(rdr) },
+        .ext_socket => .{ .ext_socket = try .init(rdr) },
     };
     return .{
         .hdr = hdr,

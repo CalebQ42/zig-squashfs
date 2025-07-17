@@ -8,8 +8,8 @@ pub const Dir = packed struct {
     parent_num: u32,
 
     pub fn init(rdr: anytype) !Dir {
-        const out: Dir = undefined;
-        _ = rdr.read(std.mem.asBytes(&out));
+        var out: Dir = undefined;
+        _ = try rdr.read(std.mem.asBytes(&out));
         return out;
     }
 };
@@ -24,8 +24,8 @@ pub const ExtDir = packed struct {
     xattr_idx: u32,
 
     pub fn init(rdr: anytype) !ExtDir {
-        const out: ExtDir = undefined;
-        _ = rdr.read(std.mem.asBytes(&out));
+        var out: ExtDir = undefined;
+        _ = try rdr.read(std.mem.asBytes(&out));
         return out;
     }
 };

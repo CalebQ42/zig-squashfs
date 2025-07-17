@@ -7,6 +7,7 @@ const Inode = @import("inode.zig");
 const SfsReader = @import("reader.zig").SfsReader;
 const ToReader = @import("reader/to_read.zig").ToRead;
 const ExtractionOptions = @import("extract_options.zig");
+const DataReader = @import("reader/data.zig").DataReader;
 const Compression = @import("superblock.zig").Compression;
 const MetadataReader = @import("reader/metadata.zig").MetadataReader;
 
@@ -27,7 +28,7 @@ pub fn File(comptime T: type) type {
         /// Directory entries. Only populated on directories.
         entries: ?[]DirEntry = null,
         /// File reader. Only populated on regular files.
-        // data_reader: ?DataReader
+        data_reader: ?DataReader(T) = null,
 
         pub fn init(rdr: *SfsReader(T), inode: Inode, name: []const u8) !Self {
             var out = Self{
@@ -37,33 +38,60 @@ pub fn File(comptime T: type) type {
             };
             switch (inode.data) {
                 .dir => |d| {
-                    const meta = MetadataReader(T).init(
+                    var meta = MetadataReader(T).init(
                         rdr.alloc,
                         rdr.super.comp,
                         rdr.rdr,
                         d.block + rdr.super.dir_start,
                     );
                     try meta.skip(d.offset);
-                    out.entries = try dir.readDirectory(rdr.alloc, meta, d.size);
+                    out.entries = try dir.readDirectory(rdr.alloc, &meta, d.size);
                 },
                 .ext_dir => |d| {
-                    const meta = MetadataReader(T).init(
+                    var meta = MetadataReader(T).init(
                         rdr.alloc,
                         rdr.super.comp,
                         rdr.rdr,
                         d.block + rdr.super.dir_start,
                     );
                     try meta.skip(d.offset);
-                    out.entries = try dir.readDirectory(rdr.alloc, meta, d.size);
+                    out.entries = try dir.readDirectory(rdr.alloc, &meta, d.size);
                 },
                 .file => |f| {
-                    _ = f;
-                    //TODO
+                    out.data_reader = try .init(
+                        rdr.alloc,
+                        rdr.rdr,
+                        rdr.super.comp,
+                        f.block,
+                        f.size,
+                        f.block_sizes,
+                        rdr.super.block_size,
+                    );
+                    if (f.hasFragment()) {
+                        try out.data_reader.?.addFragment(
+                            try rdr.frag_table.get(f.frag_idx),
+                            f.frag_offset,
+                        );
+                    }
                 },
                 .ext_file => |f| {
-                    _ = f;
-                    //TODO
+                    out.data_reader = try .init(
+                        rdr.alloc,
+                        rdr.rdr,
+                        rdr.super.comp,
+                        f.block,
+                        f.size,
+                        f.block_sizes,
+                        rdr.super.block_size,
+                    );
+                    if (f.hasFragment()) {
+                        try out.data_reader.?.addFragment(
+                            try rdr.frag_table.get(f.frag_idx),
+                            f.frag_offset,
+                        );
+                    }
                 },
+                else => {},
             }
             return out;
         }
@@ -76,9 +104,13 @@ pub fn File(comptime T: type) type {
                 }
                 self.rdr.alloc.free(self.entries.?);
             }
-            // if(self.data_reader != null){
-            //     self.data_reader.?.deinit();
-            // }
+            if (self.data_reader != null) {
+                self.data_reader.?.deinit();
+            }
+        }
+
+        pub fn iter(self: Self) !void {
+            _ = self;
         }
     };
 }

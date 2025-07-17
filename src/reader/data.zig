@@ -27,8 +27,8 @@ pub fn DataReader(comptime T: type) type {
 
         frag: []u8 = &[0]u8{},
 
-        read_block: []u8,
-        read_offset: u64,
+        read_block: []u8 = &[0]u8{},
+        read_offset: u64 = 0,
         read_idx: u32 = 0,
 
         pub fn init(
@@ -41,7 +41,7 @@ pub fn DataReader(comptime T: type) type {
             block_size: u32,
         ) !Self {
             var cur_offset = init_offset;
-            const offsets = alloc.alloc(u64, sizes.len);
+            const offsets = try alloc.alloc(u64, sizes.len);
             for (0..sizes.len) |i| {
                 offsets[i] = cur_offset;
                 cur_offset += sizes[i].size;
@@ -74,10 +74,7 @@ pub fn DataReader(comptime T: type) type {
             defer self.alloc.free(block);
             _ = try self.comp.decompress(
                 self.alloc,
-                std.io.limitedReader(
-                    self.rdr.readerAt(entry.block),
-                    entry.size.size,
-                ),
+                self.rdr.readerAt(entry.block).reader(),
                 block,
             );
             @memcpy(self.frag, block[offset..]);
@@ -106,10 +103,7 @@ pub fn DataReader(comptime T: type) type {
             }
             _ = try self.comp.decompress(
                 self.alloc,
-                std.io.limitedReader(
-                    self.rdr.readerAt(self.offsets[idx]),
-                    self.sizes[idx].size,
-                ),
+                self.rdr.readerAt(self.offsets[idx]).reader(),
                 block,
             );
             return block;

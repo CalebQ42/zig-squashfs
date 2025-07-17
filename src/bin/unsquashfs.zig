@@ -119,7 +119,7 @@ pub fn main() !void {
         return;
     }
     const fil = try std.fs.cwd().openFile(filename, .{});
-    var rdr = squashfs.FileReader.init(
+    var rdr = squashfs.SfsFile.init(
         alloc.allocator(),
         fil,
         offset,

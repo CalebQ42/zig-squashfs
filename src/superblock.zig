@@ -54,24 +54,24 @@ pub const Compression = enum(u16) {
     pub fn decompress(self: Compression, alloc: std.mem.Allocator, source: anytype, dest: []u8) !usize {
         switch (self) {
             .gzip => {
-                const decomp = std.compress.zlib.decompressor(source);
+                var decomp = std.compress.zlib.decompressor(source);
                 return decomp.read(dest);
             },
             .lzma => {
-                const decomp = try std.compress.lzma.decompress(alloc, source);
+                var decomp = try std.compress.lzma.decompress(alloc, source);
                 defer decomp.deinit();
                 return decomp.read(dest);
             },
             .lzo => return DecompressError.LzoUnavailable,
             .xz => {
-                const decomp = try std.compress.xz.decompress(alloc, source);
+                var decomp = try std.compress.xz.decompress(alloc, source);
                 defer decomp.deinit();
                 return decomp.read(dest);
             },
             .lz4 => return DecompressError.Lz4Unavailable,
             .zstd => {
-                const window: [@min(std.compress.zstd.DecompressorOptions.default_window_buffer_len, dest.len)]u8 = undefined;
-                const decomp = std.compress.zstd.decompressor(source, .{ .window_buffer = window });
+                var window: [std.compress.zstd.DecompressorOptions.default_window_buffer_len]u8 = undefined;
+                var decomp = std.compress.zstd.decompressor(source, .{ .window_buffer = &window });
                 return decomp.read(dest);
             },
         }

@@ -32,12 +32,12 @@ pub fn MetadataReader(comptime T: type) type {
         }
 
         fn readNextBlock(self: *Self) !void {
-            const hdr: MetaHeader = undefined;
-            _ = try self.rdr.pread(std.mem.asBytes(hdr), self.offset);
+            var hdr: MetaHeader = undefined;
+            _ = try self.rdr.pread(std.mem.asBytes(&hdr), self.offset);
             self.offset += 2;
             self.block_size = try self.comp.decompress(
                 self.alloc,
-                std.io.limitedReader(self.rdr.readerAt(self.offset), hdr.size),
+                self.rdr.readerAt(self.offset).reader(),
                 &self.block,
             );
             self.offset += hdr.size;
@@ -45,14 +45,14 @@ pub fn MetadataReader(comptime T: type) type {
         }
 
         pub fn skip(self: *Self, offset: u32) !void {
-            var skipped = 0;
-            const hdr: MetaHeader = undefined;
+            var skipped: u32 = 0;
+            var hdr: MetaHeader = undefined;
             while (offset - skipped >= 8192) {
-                _ = try self.rdr.pread(std.mem.asBytes(hdr), self.offset);
+                _ = try self.rdr.pread(std.mem.asBytes(&hdr), self.offset);
                 self.offset += 2 + hdr.size;
                 skipped += 8192;
             }
-            var to_skip = 0;
+            var to_skip: u32 = 0;
             while (skipped < offset) {
                 if (self.block_offset >= self.block_size) try self.readNextBlock();
                 to_skip = @min(self.block_size - self.block_offset, offset - skipped);
@@ -69,7 +69,7 @@ pub fn MetadataReader(comptime T: type) type {
                 to_read = @min(buf.len - cur_red, self.block_size - self.block_offset);
                 @memcpy(buf[cur_red .. cur_red + to_read], self.block[self.block_offset .. self.block_offset + to_read]);
                 cur_red += to_read;
-                self.block_offset += to_read;
+                self.block_offset += @truncate(to_read);
             }
             return cur_red;
         }

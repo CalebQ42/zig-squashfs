@@ -9,7 +9,7 @@ pub const Symlink = struct {
         var fixed: [8]u8 = undefined;
         _ = try rdr.read(&fixed);
         const size = std.mem.readInt(u32, fixed[4..8], .little);
-        const target = alloc.alloc(u8, size);
+        const target = try alloc.alloc(u8, size);
         errdefer alloc.free(target);
         _ = try rdr.read(target);
         return .{
@@ -29,7 +29,7 @@ pub const ExtSymlink = struct {
         var fixed: [8]u8 = undefined;
         _ = try rdr.read(&fixed);
         const size = std.mem.readInt(u32, fixed[4..8], .little);
-        const target = alloc.alloc(u8, size);
+        const target = try alloc.alloc(u8, size);
         errdefer alloc.free(target);
         _ = try rdr.read(target);
         var xattr_idx: u32 = 0;
@@ -47,7 +47,7 @@ pub const Dev = packed struct {
     device: u32,
 
     pub fn init(rdr: anytype) !Dev {
-        const out: Dev = undefined;
+        var out: Dev = undefined;
         _ = try rdr.read(std.mem.asBytes(&out));
         return out;
     }
@@ -59,7 +59,7 @@ pub const ExtDev = packed struct {
     xattr_idx: u32,
 
     pub fn init(rdr: anytype) !ExtDev {
-        const out: ExtDev = undefined;
+        var out: ExtDev = undefined;
         _ = try rdr.read(std.mem.asBytes(&out));
         return out;
     }
@@ -69,7 +69,7 @@ pub const IPC = packed struct {
     hard_link: u32,
 
     pub fn init(rdr: anytype) !IPC {
-        const out: IPC = undefined;
+        var out: IPC = undefined;
         _ = try rdr.read(std.mem.asBytes(&out));
         return out;
     }
@@ -80,7 +80,7 @@ pub const ExtIPC = packed struct {
     xattr_idx: u32,
 
     pub fn init(rdr: anytype) !ExtIPC {
-        const out: ExtIPC = undefined;
+        var out: ExtIPC = undefined;
         _ = try rdr.read(std.mem.asBytes(&out));
         return out;
     }
