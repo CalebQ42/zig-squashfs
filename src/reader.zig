@@ -47,22 +47,14 @@ pub fn SfsReader(comptime T: type) type {
             self.export_table.deinit();
         }
 
-        pub fn archiveRoot(self: *Self) !File(T) {
-            var meta = MetadataReader(T).init(
-                self.alloc,
-                self.super.comp,
-                self.rdr,
-                self.super.inode_start + self.super.root_ref.block,
-            );
-            try meta.skip(self.super.root_ref.offset);
-            const root_inode: Inode = try .init(&meta, self.alloc, self.super.block_size);
-            return try .init(self, root_inode, "");
+        pub fn root(self: *Self) !File(T) {
+            return .initFromRef(self, self.super.root_ref, "");
         }
         pub fn open(self: *Self, path: []const u8) !File(T) {
-            _ = self;
-            _ = path;
-            // return self.root.?.open(path);
-            return error{TODO}.TODO;
+            var rt = try self.root();
+            if (path.len == 0 or (path.len == 1 and path[0] == '/')) return rt;
+            defer rt.deinit();
+            return rt.open(path);
         }
 
         /// Returns the inode with the given Inode Number.

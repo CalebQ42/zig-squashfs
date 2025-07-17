@@ -14,6 +14,7 @@ const MetadataReader = @import("reader/metadata.zig").MetadataReader;
 pub const FileError = error{
     NotRegular,
     NotDirectory,
+    NotFound,
 };
 
 pub fn File(comptime T: type) type {
@@ -95,8 +96,19 @@ pub fn File(comptime T: type) type {
             }
             return out;
         }
+        pub fn initFromRef(rdr: *SfsReader(T), ref: Inode.Ref, name: []const u8) !Self {
+            var meta: MetadataReader(T) = .init(rdr.alloc, rdr.super.comp, rdr.rdr, ref.block + rdr.super.inode_start);
+            try meta.skip(ref.offset);
+            const inode: Inode = try .init(&meta, rdr.alloc, rdr.super.block_size);
+            return .init(rdr, inode, name);
+        }
+        pub fn initFromEntry(rdr: *SfsReader(T), ent: DirEntry) !Self {
+            var meta: MetadataReader(T) = .init(rdr.alloc, rdr.super.comp, rdr.rdr, ent.block + rdr.super.inode_start);
+            try meta.skip(ent.offset);
+            const inode: Inode = try .init(&meta, rdr.alloc, rdr.super.block_size);
+            return .init(rdr, inode, ent.name);
+        }
         pub fn deinit(self: Self) void {
-            self.rdr.alloc.free(self.name);
             self.inode.deinit(self.rdr.alloc);
             if (self.entries != null) {
                 for (self.entries.?) |e| {
@@ -109,8 +121,44 @@ pub fn File(comptime T: type) type {
             }
         }
 
-        pub fn iter(self: Self) !void {
-            _ = self;
+        pub fn open(self: Self, path: []const u8) !Self {
+            if (self.entries == null) return FileError.NotDirectory;
+            if (path.len == 0) return self;
+            const idx = std.mem.indexOf(u8, path, "/") orelse path.len;
+            if (idx == 0) return self.open(path[1..]);
+            const name = path[0..idx];
+            for (self.entries.?) |e| {
+                if (std.mem.eql(u8, e.name, name)) {
+                    var fil: Self = try .initFromEntry(self.rdr, e);
+                    if (idx >= path.len - 1) return fil;
+                    defer fil.deinit();
+                    return fil.open(path[idx + 1 ..]);
+                }
+            }
+            return FileError.NotFound;
         }
+        pub fn iterate(self: Self) Iterator {
+            return .{
+                .rdr = self.rdr,
+                .entries = self.entries.?,
+            };
+        }
+
+        const Iterator = struct {
+            rdr: *SfsReader(T),
+            entries: []DirEntry,
+
+            idx: u32 = 0,
+
+            pub fn next(self: *Iterator) !?File(T) {
+                if (self.idx >= self.entries.len) return null;
+                const out = try Self.initFromEntry(self.rdr, self.entries[self.idx]);
+                self.idx += 1;
+                return out;
+            }
+            pub fn reset(self: *Iterator) void {
+                self.idx = 0;
+            }
+        };
     };
 }
