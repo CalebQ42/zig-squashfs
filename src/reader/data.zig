@@ -59,6 +59,7 @@ pub fn DataReader(comptime T: type) type {
         pub fn deinit(self: Self) void {
             self.alloc.free(self.offsets);
             self.alloc.free(self.frag);
+            if (self.read_idx < self.sizes.len) self.alloc.free(self.read_block);
         }
 
         pub fn addFragment(self: *Self, entry: FragEntry, offset: u32) !void {
@@ -115,6 +116,8 @@ pub fn DataReader(comptime T: type) type {
             return out;
         }
 
+        const Reader = std.io.GenericReader(*Self, anyerror, read);
+
         pub fn read(self: *Self, buf: []u8) !usize {
             var cur_red: usize = 0;
             var to_read: usize = 0;
@@ -135,6 +138,9 @@ pub fn DataReader(comptime T: type) type {
                 self.read_offset += to_read;
             }
             return cur_red;
+        }
+        pub fn reader(self: *Self) Reader {
+            return .{ .context = self };
         }
 
         /// Write the entire file's contents to the writer.
@@ -165,12 +171,14 @@ pub fn DataReader(comptime T: type) type {
                     },
                 );
             }
+            std.Thread.yield();
             wg.wait();
             if (completed.items.len > 0) {
                 return completed.items.get(0);
             }
             return self.file_size;
         }
+        pub fn writeToThreaded(self: Self, errs: *std.ArrayList(anyerror), wg: *std.Thread.WaitGroup, writer: anytype) void {}
         fn extractThreaded(
             self: Self,
             mut: *std.Thread.Mutex,

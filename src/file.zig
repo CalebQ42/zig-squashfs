@@ -121,6 +121,17 @@ pub fn File(comptime T: type) type {
             }
         }
 
+        const Reader = std.io.GenericReader(*DataReader(T), anyerror, DataReader(T).read);
+
+        pub fn read(self: *Self, buf: []u8) !usize {
+            if (self.data_reader == null) return FileError.NotRegular;
+            return self.data_reader.?.read(buf);
+        }
+        pub fn reader(self: *Self) !Reader {
+            if (self.data_reader == null) return FileError.NotRegular;
+            return self.data_reader.?.reader();
+        }
+
         pub fn open(self: Self, path: []const u8) !Self {
             if (self.entries == null) return FileError.NotDirectory;
             if (path.len == 0) return self;
@@ -160,5 +171,60 @@ pub fn File(comptime T: type) type {
                 self.idx = 0;
             }
         };
+
+        pub fn extract(self: Self, op: *ExtractionOptions, path: []const u8) !void {
+            if(op.verbose and op.verbose_logger == null){
+                op.verbose_logger = std.io.getStdOut().writer().any();
+            }
+            var wg: std.Thread.WaitGroup = .{};
+            var pol: std.Thread.Pool = undefined;
+            try pol.init(.{
+                .n_jobs = op.thread_count,
+                .allocator = self.rdr.alloc,
+            });
+        }
+        fn extractReal(self: Self, op: *ExtractionOptions, path: []const u8) !void{
+            switch (self.inode.hdr.type) {
+                .dir, .ext_dir => self.extractDir(path),
+                .file, .ext_file => self.extractReg(op, path),
+                .symlink, .ext_symlink => self.extractSymlink(op, path),
+                .block_dev,
+                .ext_block_dev,
+                .char_dev,
+                .ext_char_dev,
+                .fifo,
+                .ext_fifo,
+                => self.extractDev(path),
+                else => {
+                    if(op.verbose){
+                        std.fmt.format(op.verbose_logger.?, "inode {} \"{}\" is a socket. Ignoring.\n");
+                        return;
+                    }
+                }
+            }
+        }
+        fn extractDir(self: Self, op: *ExtractionOptions, path: []const u8) !void {}
+        fn extractReg(self: Self, op: *ExtractionOptions, path: []const u8) !void {}
+        fn extractSymlink(self: Self, op: *ExtractionOptions, path: []const u8) !void {}
+        fn extractDev(self: Self, op: *ExtractionOptions, path: []const u8) !void {
+            if (exists) return ExtractError.FileExists;
+            comptime if (builtin.os.tag != .linux) {
+                if(op.ver)
+                return;
+            }
+            const mode: u32 = switch (self.inode.header.inode_type) {
+                .block, .ext_block => std.posix.S.IFBLK,
+                .char, .ext_char => std.posix.S.IFCHR,
+                .fifo, .ext_fifo => std.posix.S.IFIFO,
+                else => unreachable,
+            };
+            const dev = switch (self.inode.data) {
+                .block, .char => |b| b.device,
+                .ext_block, .ext_char => |b| b.device,
+                .fifo, .ext_fifo => 0,
+                else => unreachable,
+            };
+            _ = std.os.linux.mknod(@ptrCast(real_path), mode, dev);
+        }
     };
 }

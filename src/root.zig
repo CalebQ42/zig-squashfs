@@ -20,8 +20,10 @@ test "OpenFile" {
         defer f.deinit();
         std.debug.print("{s}\n", .{f.name});
     }
-    const start = try root.open("Start.exe");
+    var start = try root.open("Start.exe");
     defer start.deinit();
+    const startReader = try start.reader();
+    _ = startReader;
 }
 
 test "ReadFile" {

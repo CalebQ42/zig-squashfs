@@ -9,16 +9,15 @@ dereference_symlinks: bool = false,
 unbreak_symlinks: bool = false,
 /// Do not set file's permissions & owner when extracted.
 ignore_permissions: bool = false,
+/// Verbose logging
+verbose: bool = false,
+/// Verbose logging writer. If not set, stdout is used.
+verbose_logger: ?std.io.AnyWriter = null,
+/// Number of threads used during extraction. Defualts to std.Thread.getCpuCount().
+thread_count: u32,
 
-// max_memory: u64,
-
-pol: std.Thread.Pool = undefined,
-
-pub fn init(alloc: std.mem.Allocator, thread_count: u16) !Self {
-    var out: Self = .{};
-    out.pol.init(.{
-        .allocator = alloc,
-        .n_jobs = thread_count,
-    });
-    return out;
+pub fn init() !Self {
+    return .{
+        .thread_count = try std.Thread.getCpuCount(),
+    };
 }
