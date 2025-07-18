@@ -6,6 +6,7 @@ const Table = @import("table.zig").Table;
 const PRead = @import("reader/p_read.zig").PRead;
 const FragEntry = @import("fragment.zig").FragEntry;
 const Superblock = @import("superblock.zig").Superblock;
+const ExtractionOptions = @import("extract_options.zig");
 const MetadataReader = @import("reader/metadata.zig").MetadataReader;
 
 pub const SfsError = error{
@@ -47,17 +48,26 @@ pub fn SfsReader(comptime T: type) type {
             self.export_table.deinit();
         }
 
+        /// A representation of the archives root folder.
         pub fn root(self: *Self) !File(T) {
             return .initFromRef(self, self.super.root_ref, "");
         }
+        /// Get the file at path. Equivelent to calling open on the root File.
         pub fn open(self: *Self, path: []const u8) !File(T) {
             var rt = try self.root();
-            if (path.len == 0 or (path.len == 1 and path[0] == '/')) return rt;
+            if (path.len == 0 or (path.len == 1 and path[0] == '/') or path.len == 1 and path[0] == '.') return rt;
             defer rt.deinit();
             return rt.open(path);
         }
+        /// Extract the entire archive to the given path & with the given options.
+        /// Equivelent to calling extract on the root File.
+        pub fn extract(self: *Self, op: *ExtractionOptions, path: []const u8) !void {
+            var rt = try self.root();
+            defer rt.deinit();
+            return rt.extract(op, path);
+        }
 
-        /// Returns the inode with the given Inode Number.
+        /// Returns the Inode with the given Inode Number.
         /// Requires the archive to have an export table.
         pub fn inodeAt(self: Self, num: u32) !Inode {
             if (!self.super.flags.has_export) return SfsError.NotExportable;

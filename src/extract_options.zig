@@ -14,7 +14,7 @@ verbose: bool = false,
 /// Verbose logging writer. If not set, stdout is used.
 verbose_logger: ?std.io.AnyWriter = null,
 /// Number of threads used during extraction. Defualts to std.Thread.getCpuCount().
-thread_count: u32,
+thread_count: usize,
 
 pub fn init() !Self {
     return .{

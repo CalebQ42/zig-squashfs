@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 const dir = @import("directory.zig");
 
@@ -11,14 +12,14 @@ const DataReader = @import("reader/data.zig").DataReader;
 const Compression = @import("superblock.zig").Compression;
 const MetadataReader = @import("reader/metadata.zig").MetadataReader;
 
-pub const FileError = error{
-    NotRegular,
-    NotDirectory,
-    NotFound,
-};
-
 pub fn File(comptime T: type) type {
     return struct {
+        pub const FileError = error{
+            NotRegular,
+            NotDirectory,
+            NotFound,
+        };
+
         const Self = @This();
 
         rdr: *SfsReader(T),
@@ -32,10 +33,12 @@ pub fn File(comptime T: type) type {
         data_reader: ?DataReader(T) = null,
 
         pub fn init(rdr: *SfsReader(T), inode: Inode, name: []const u8) !Self {
+            const name_cpy: []u8 = try rdr.alloc.alloc(u8, name.len);
+            @memcpy(name_cpy, name);
             var out = Self{
                 .rdr = rdr,
                 .inode = inode,
-                .name = name,
+                .name = name_cpy,
             };
             switch (inode.data) {
                 .dir => |d| {
@@ -109,6 +112,7 @@ pub fn File(comptime T: type) type {
             return .init(rdr, inode, ent.name);
         }
         pub fn deinit(self: Self) void {
+            self.rdr.alloc.free(self.name);
             self.inode.deinit(self.rdr.alloc);
             if (self.entries != null) {
                 for (self.entries.?) |e| {
@@ -119,6 +123,13 @@ pub fn File(comptime T: type) type {
             if (self.data_reader != null) {
                 self.data_reader.?.deinit();
             }
+        }
+
+        pub fn uid(self: Self) !u32 {
+            return self.rdr.id_table.get(self.inode.hdr.uid_idx);
+        }
+        pub fn gid(self: Self) !u32 {
+            return self.rdr.id_table.get(self.inode.hdr.uid_idx);
         }
 
         const Reader = std.io.GenericReader(*DataReader(T), anyerror, DataReader(T).read);
@@ -172,59 +183,136 @@ pub fn File(comptime T: type) type {
             }
         };
 
+        const WaitGroup = std.Thread.WaitGroup;
+        const Pool = std.Thread.Pool;
+
+        pub const ExtractError = error{FileExists};
+
         pub fn extract(self: Self, op: *ExtractionOptions, path: []const u8) !void {
-            if(op.verbose and op.verbose_logger == null){
+            if (op.verbose and op.verbose_logger == null) {
                 op.verbose_logger = std.io.getStdOut().writer().any();
             }
-            var wg: std.Thread.WaitGroup = .{};
-            var pol: std.Thread.Pool = undefined;
+            var exists = true;
+            var stat: ?std.fs.File.Stat = null;
+            if (std.fs.cwd().statFile(path)) |s| {
+                stat = s;
+            } else |err| {
+                if (err == std.fs.File.OpenError.FileNotFound) {
+                    exists = false;
+                } else {
+                    return err;
+                }
+            }
+            switch (self.inode.hdr.type) {
+                .dir, .ext_dir => {
+                    if (exists and stat.?.kind != .directory) {
+                        return ExtractError.FileExists;
+                    } else if (!exists) {
+                        try std.fs.cwd().makeDir(path);
+                    }
+                },
+                else => if (exists) return ExtractError.FileExists,
+            }
+            var wg: WaitGroup = .{};
+            var pol: Pool = undefined;
             try pol.init(.{
                 .n_jobs = op.thread_count,
                 .allocator = self.rdr.alloc,
             });
+            defer pol.deinit();
+            var errs: std.ArrayList(anyerror) = .init(self.rdr.alloc);
+            defer errs.deinit();
+            try self.extractReal(op, &errs, &wg, &pol, path);
+            wg.wait();
+            if (errs.items.len > 0) return errs.items[0];
         }
-        fn extractReal(self: Self, op: *ExtractionOptions, path: []const u8) !void{
-            switch (self.inode.hdr.type) {
-                .dir, .ext_dir => self.extractDir(path),
-                .file, .ext_file => self.extractReg(op, path),
-                .symlink, .ext_symlink => self.extractSymlink(op, path),
+        fn extractReal(
+            self: Self,
+            op: *ExtractionOptions,
+            errs: *std.ArrayList(anyerror),
+            wg: *WaitGroup,
+            pol: *Pool,
+            path: []const u8,
+        ) !void {
+            return switch (self.inode.hdr.type) {
+                .dir, .ext_dir => self.extractDir(op, errs, wg, pol, path),
+                .file, .ext_file => self.extractReg(op, errs, wg, pol, path),
+                .symlink, .ext_symlink => self.extractSymlink(op, errs, wg, pol, path),
                 .block_dev,
                 .ext_block_dev,
                 .char_dev,
                 .ext_char_dev,
                 .fifo,
                 .ext_fifo,
-                => self.extractDev(path),
+                => self.extractDev(op, path),
                 else => {
-                    if(op.verbose){
-                        std.fmt.format(op.verbose_logger.?, "inode {} \"{}\" is a socket. Ignoring.\n");
-                        return;
+                    if (op.verbose) {
+                        std.fmt.format(
+                            op.verbose_logger.?,
+                            "inode {} \"{s}\" is a socket file. Ignoring.\n",
+                            .{ self.inode.hdr.num, self.name },
+                        ) catch {};
                     }
-                }
-            }
+                },
+            };
         }
-        fn extractDir(self: Self, op: *ExtractionOptions, path: []const u8) !void {}
-        fn extractReg(self: Self, op: *ExtractionOptions, path: []const u8) !void {}
-        fn extractSymlink(self: Self, op: *ExtractionOptions, path: []const u8) !void {}
+        fn extractDir(self: Self, op: *ExtractionOptions, errs: *std.ArrayList(anyerror), wg: *WaitGroup, pol: *Pool, path: []const u8) !void {
+            if (errs.items.len > 0) return;
+            _ = self;
+            _ = op;
+            _ = wg;
+            _ = pol;
+            _ = path;
+            return error{TODO}.TODO;
+        }
+        fn extractReg(self: Self, op: *ExtractionOptions, errs: *std.ArrayList(anyerror), wg: *WaitGroup, pol: *Pool, path: []const u8) !void {
+            if (errs.items.len > 0) return;
+            const fil = try std.fs.cwd().createFile(path, .{});
+            @constCast(&self.data_reader.?).setPool(pol);
+            wg.start();
+            try self.data_reader.?.writeToNoBlock(errs, fil, wg, extractRegFinish, .{ self, fil });
+            _ = op;
+            //TODO: add some way of verbose logging of the errors for this file in particular.
+            return;
+        }
+        fn extractRegFinish(self: Self, fil: std.fs.File) void {
+            defer fil.close();
+            //TODO: set owners & permissions. Check if we need to call self.deinit();
+            _ = self;
+        }
+        fn extractSymlink(self: Self, op: *ExtractionOptions, errs: *std.ArrayList(anyerror), wg: *WaitGroup, pol: *Pool, path: []const u8) !void {
+            if (errs.items.len > 0) return;
+            _ = self;
+            _ = op;
+            _ = wg;
+            _ = pol;
+            _ = path;
+            return error{TODO}.TODO;
+        }
         fn extractDev(self: Self, op: *ExtractionOptions, path: []const u8) !void {
-            if (exists) return ExtractError.FileExists;
-            comptime if (builtin.os.tag != .linux) {
-                if(op.ver)
+            if (comptime builtin.os.tag != .linux) {
+                if (op.verbose) {
+                    std.fmt.format(
+                        op.verbose_logger.?,
+                        "inode {} \"{s}\" is a device/fifo file and the OS is not Linux. Ignoring.\n",
+                        .{ self.inode.hdr.num, self.name },
+                    ) catch {};
+                }
                 return;
             }
-            const mode: u32 = switch (self.inode.header.inode_type) {
-                .block, .ext_block => std.posix.S.IFBLK,
-                .char, .ext_char => std.posix.S.IFCHR,
+            const mode: u32 = switch (self.inode.hdr.type) {
+                .block_dev, .ext_block_dev => std.posix.S.IFBLK,
+                .char_dev, .ext_char_dev => std.posix.S.IFCHR,
                 .fifo, .ext_fifo => std.posix.S.IFIFO,
                 else => unreachable,
             };
             const dev = switch (self.inode.data) {
-                .block, .char => |b| b.device,
-                .ext_block, .ext_char => |b| b.device,
+                .block_dev, .char_dev => |b| b.device,
+                .ext_block_dev, .ext_char_dev => |b| b.device,
                 .fifo, .ext_fifo => 0,
                 else => unreachable,
             };
-            _ = std.os.linux.mknod(@ptrCast(real_path), mode, dev);
+            _ = std.os.linux.mknod(@ptrCast(path), mode, dev);
         }
     };
 }

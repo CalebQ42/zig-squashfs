@@ -19,7 +19,7 @@ pub const File = struct {
         const frag_idx = std.mem.readInt(u32, fixed[4..8], .little);
         const size = std.mem.readInt(u32, fixed[12..16], .little);
         var blocks: u32 = size / block_size;
-        if (size % block_size > 0 and frag_idx != 0xffffffff) {
+        if (size % block_size > 0 and frag_idx == 0xffffffff) {
             blocks += 1;
         }
         const block_sizes = try alloc.alloc(BlockSize, blocks);
