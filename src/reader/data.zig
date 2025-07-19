@@ -184,7 +184,6 @@ pub fn DataReader(comptime T: type) type {
             self: Self,
             errs: *std.ArrayList(anyerror),
             writer: anytype,
-            wg: *std.Thread.WaitGroup,
             comptime on_finish: anytype,
             on_finish_args: anytype,
         ) !void {
@@ -208,9 +207,9 @@ pub fn DataReader(comptime T: type) type {
                     },
                     blk: {
                         if (comptime std.meta.hasFn(@TypeOf(writer), "pwrite")) {
-                            break :blk .{ self, &block_wg, errs, i, writer, wg, &finish_mut, on_finish, on_finish_args };
+                            break :blk .{ self, &block_wg, errs, i, writer, &finish_mut, on_finish, on_finish_args };
                         } else {
-                            break :blk .{ self, &block_wg, &mut, &cur_idx, errs, &completed.?, i, writer, wg, &finish_mut, on_finish, on_finish_args };
+                            break :blk .{ self, &block_wg, &mut, &cur_idx, errs, &completed.?, i, writer, &finish_mut, on_finish, on_finish_args };
                         }
                     },
                 );
@@ -326,18 +325,16 @@ pub fn DataReader(comptime T: type) type {
             completed: *std.AutoArrayHashMap(usize, anyerror![]u8),
             idx: usize,
             writer: anytype,
-            finish_wg: *std.Thread.WaitGroup,
             finish_mut: *std.Thread.Mutex,
             comptime on_finish: anytype,
             on_finish_args: anytype,
         ) void {
             self.writeBlockTo(mut, cur_idx, errs, completed, idx, writer);
-            block_wg.finish();
             finish_mut.lock();
+            block_wg.finish();
             defer finish_mut.unlock();
             if (block_wg.isDone()) {
                 @call(.auto, on_finish, on_finish_args);
-                finish_wg.finish();
                 completed.deinit();
             }
         }
@@ -347,18 +344,16 @@ pub fn DataReader(comptime T: type) type {
             errs: *std.ArrayList(anyerror),
             idx: usize,
             writer: anytype,
-            finish_wg: *std.Thread.WaitGroup,
             finish_mut: *std.Thread.Mutex,
             comptime on_finish: anytype,
             on_finish_args: anytype,
         ) void {
             self.writeBlockToPWrite(errs, idx, writer);
-            block_wg.finish();
             finish_mut.lock();
+            block_wg.finish();
             defer finish_mut.unlock();
             if (block_wg.isDone()) {
                 @call(.auto, on_finish, on_finish_args);
-                finish_wg.finish();
             }
         }
     };

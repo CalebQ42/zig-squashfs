@@ -1,5 +1,9 @@
 const std = @import("std");
 
+const PRead = @import("reader/p_read.zig").PRead;
+const Compression = @import("superblock.zig").Compression;
+const MetadataReader = @import("reader/metadata.zig").MetadataReader;
+
 pub const TableError = error{
     InvalidIndex,
 };
@@ -10,7 +14,8 @@ pub fn Table(comptime T: type, comptime R: type) type {
         const Self = @This();
 
         alloc: std.mem.Allocator,
-        rdr: R,
+        rdr: PRead(R),
+        comp: Compression,
 
         offset: u64,
         table_count: u32,
@@ -18,10 +23,11 @@ pub fn Table(comptime T: type, comptime R: type) type {
 
         table: []T = &[0]T{},
 
-        pub fn init(alloc: std.mem.Allocator, rdr: R, offset: u64, table_count: u32) Self {
+        pub fn init(alloc: std.mem.Allocator, rdr: PRead(R), comp: Compression, offset: u64, table_count: u32) Self {
             return .{
                 .alloc = alloc,
                 .rdr = rdr,
+                .comp = comp,
                 .offset = offset,
                 .table_count = table_count,
             };
@@ -60,7 +66,8 @@ pub fn Table(comptime T: type, comptime R: type) type {
                 try self.resize(to_read);
                 _ = try self.rdr.pread(std.mem.asBytes(&offset), self.offset);
                 self.offset += 8;
-                _ = try self.rdr.pread(std.mem.sliceAsBytes(self.table[self.table.len - to_read ..]), offset);
+                var meta: MetadataReader(R) = .init(self.alloc, self.comp, self.rdr, offset);
+                _ = try meta.read(std.mem.sliceAsBytes(self.table[self.table.len - to_read ..]));
             }
             return self.table[idx];
         }

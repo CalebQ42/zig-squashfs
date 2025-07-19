@@ -37,9 +37,9 @@ pub fn SfsReader(comptime T: type) type {
                 .rdr = .init(rdr, offset),
             };
             _ = try rdr.pread(std.mem.asBytes(&out.super), 0);
-            out.frag_table = .init(alloc, rdr, out.super.frag_start, out.super.frag_count);
-            out.id_table = .init(alloc, rdr, out.super.id_start, out.super.id_count);
-            out.export_table = .init(alloc, rdr, out.super.export_start, out.super.inode_count);
+            out.frag_table = .init(alloc, out.rdr, out.super.comp, out.super.frag_start, out.super.frag_count);
+            out.id_table = .init(alloc, out.rdr, out.super.comp, out.super.id_start, out.super.id_count);
+            out.export_table = .init(alloc, out.rdr, out.super.comp, out.super.export_start, out.super.inode_count);
             return out;
         }
         pub fn deinit(self: *Self) void {

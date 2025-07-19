@@ -54,7 +54,7 @@ pub const ExtFile = struct {
         const size = std.mem.readInt(u64, fixed[8..16], .little);
         const frag_idx = std.mem.readInt(u32, fixed[28..32], .little);
         var blocks: u32 = @truncate(size / block_size);
-        if (size % block_size > 0 and frag_idx != 0xffffffff) {
+        if (size % block_size > 0 and frag_idx == 0xffffffff) {
             blocks += 1;
         }
         const block_sizes = try alloc.alloc(BlockSize, blocks);

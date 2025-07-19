@@ -35,11 +35,15 @@ pub fn MetadataReader(comptime T: type) type {
             var hdr: MetaHeader = undefined;
             _ = try self.rdr.pread(std.mem.asBytes(&hdr), self.offset);
             self.offset += 2;
-            self.block_size = try self.comp.decompress(
-                self.alloc,
-                self.rdr.readerAt(self.offset).reader(),
-                &self.block,
-            );
+            if (hdr.uncompressed) {
+                self.block_size = try self.rdr.pread(self.block[0..hdr.size], self.offset);
+            } else {
+                self.block_size = try self.comp.decompress(
+                    self.alloc,
+                    self.rdr.readerAt(self.offset).reader(),
+                    &self.block,
+                );
+            }
             self.offset += hdr.size;
             self.block_offset = 0;
         }
