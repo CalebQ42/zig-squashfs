@@ -152,7 +152,7 @@ pub fn DataReader(comptime T: type) type {
             var mut: std.Thread.Mutex = .{};
             var cur_idx: usize = 0;
             var wg: std.Thread.WaitGroup = .{};
-            var completed: std.AutoArrayHashMap(usize, anyerror![]u8) = .init(self.alloc);
+            var completed: std.AutoHashMap(usize, []u8) = .init(self.alloc);
             defer completed.deinit();
             var errs: std.ArrayList(anyerror) = .init(self.alloc);
             defer errs.deinit();
@@ -169,7 +169,7 @@ pub fn DataReader(comptime T: type) type {
                         if (comptime std.meta.hasFn(@TypeOf(writer), "pwrite")) {
                             break :blk .{ self, &wg, &errs, i, writer };
                         }
-                        break :blk .{ self, &wg, &mut, &cur_idx, &completed, i, writer };
+                        break :blk .{ self, &wg, &mut, &cur_idx, &errs, &completed, i, writer };
                     },
                 );
             }
@@ -188,7 +188,7 @@ pub fn DataReader(comptime T: type) type {
             on_finish_args: anytype,
         ) !void {
             if (self.pool == null) return DataReaderError.ThreadPoolNotSet;
-            const mut: std.Thread.Mutex = .{};
+            var mut: std.Thread.Mutex = .{};
             var cur_idx: usize = 0;
             var block_wg: std.Thread.WaitGroup = .{};
             var finish_mut: std.Thread.Mutex = .{};
@@ -224,7 +224,7 @@ pub fn DataReader(comptime T: type) type {
             completed: *std.AutoHashMap(usize, []u8),
             idx: usize,
             writer: anytype,
-        ) !void {
+        ) void {
             //TODO: We can marginally reduce memory usage if we don't store sparse blocks in completed.
             if (errs.items.len > 0) return; // Indicates an error has occured in another thread.
             const block = self.blockAt(idx) catch |err| {
@@ -298,7 +298,7 @@ pub fn DataReader(comptime T: type) type {
             mut: *std.Thread.Mutex,
             cur_idx: *usize,
             errs: *std.ArrayList(anyerror),
-            completed: *std.AutoArrayHashMap(usize, anyerror![]u8),
+            completed: *std.AutoHashMap(usize, []u8),
             idx: usize,
             writer: anytype,
         ) void {
@@ -308,7 +308,7 @@ pub fn DataReader(comptime T: type) type {
         fn writeToThreadPWrite(
             self: Self,
             wg: *std.Thread.WaitGroup,
-            errs: *std.ArrayList(anyerror),
+            errs: std.ArrayList(anyerror),
             idx: usize,
             writer: anytype,
         ) void {
@@ -322,7 +322,7 @@ pub fn DataReader(comptime T: type) type {
             mut: *std.Thread.Mutex,
             cur_idx: *usize,
             errs: *std.ArrayList(anyerror),
-            completed: *std.AutoArrayHashMap(usize, anyerror![]u8),
+            completed: *std.AutoHashMap(usize, []u8),
             idx: usize,
             writer: anytype,
             finish_mut: *std.Thread.Mutex,

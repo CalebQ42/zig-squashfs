@@ -23,6 +23,7 @@ pub fn File(comptime T: type) type {
         const Self = @This();
 
         rdr: *SfsReader(T),
+        // parent: *File(T),
 
         inode: Inode,
         name: []const u8,
@@ -220,36 +221,125 @@ pub fn File(comptime T: type) type {
             defer pol.deinit();
             var errs: std.ArrayList(anyerror) = .init(self.rdr.alloc);
             defer errs.deinit();
-            try self.extractReal(op, &errs, &wg, &pol, path, true);
+            try self.extractReal(op, path, &errs, &wg, &pol, true);
             wg.wait();
             if (errs.items.len > 0) return errs.items[0];
         }
         fn extractReal(
             self: Self,
             op: ExtractionOptions,
+            path: []const u8,
             errs: *std.ArrayList(anyerror),
             wg: *WaitGroup,
             pol: *Pool,
-            path: []const u8,
             first: bool,
         ) !void {
+            if (errs.items.len > 0) return;
             if (op.verbose) {
                 std.fmt.format(op.verbose_logger, "extracting inode {} \"{s}\" to {s}...\n", .{ self.inode.hdr.num, self.name, path }) catch {};
             }
             return switch (self.inode.hdr.type) {
-                .dir, .ext_dir => {},
-                .file, .ext_file => {},
+                .dir, .ext_dir => {
+                    wg.start();
+                    errdefer wg.finish();
+                    for (self.entries.?) |ent| {
+                        var fil = initFromEntry(self.rdr, ent) catch |err| {
+                            continue;
+                        };
+                    }
+                },
+                .file, .ext_file => {
+                    wg.start();
+                    errdefer wg.finish();
+                    var ext_fil = try std.fs.cwd().createFile(path, .{});
+                    errdefer ext_fil.close();
+                    var fil_errs: std.ArrayList(anyerror) = .init(self.rdr.alloc);
+                    errdefer fil_errs.deinit();
+                    @constCast(&self.data_reader.?).setPool(pol);
+                    try self.data_reader.?.writeToNoBlock(errs, ext_fil, filExtractFinish, .{
+                        self,
+                        op,
+                        path,
+                        &fil_errs,
+                        errs,
+                        wg,
+                        ext_fil,
+                        first,
+                    });
+                },
                 .symlink, .ext_symlink => {},
-                .block_dev, .ext_block_dev, .char_dev, .ext_char_dev, .fifo, .ext_fifo => {},
+                .block_dev, .ext_block_dev, .char_dev, .ext_char_dev, .fifo, .ext_fifo => {
+                    //TODO: check for all oses that accept unix permissions.
+                },
                 else => {
                     if (op.verbose) {
                         std.fmt.format(
                             op.verbose_logger,
                             "inode {} \"{s}\" is a socket file. Ignoring.\n",
-                            .{ self.inode.hdr.num, self.name },
+                            .{ self.inode.hdr.num, path },
                         ) catch {};
                     }
                 },
+            };
+        }
+        fn filExtractFinish(
+            self: Self,
+            op: ExtractionOptions,
+            path: []const u8,
+            fil_errs: *std.ArrayList(anyerror),
+            errs: *std.ArrayList(anyerror),
+            wg: *WaitGroup,
+            fil: std.fs.File,
+            first: bool,
+        ) void {
+            defer wg.finish();
+            defer fil.close();
+            defer if (!first) self.deinit();
+            if (fil_errs.items.len > 0) {
+                if (op.verbose) {
+                    for (fil_errs.items) |err| {
+                        std.fmt.format(
+                            op.verbose_logger,
+                            "error extracting inode {} to \"{s}\": {}\n",
+                            .{ self.inode.hdr.num, path, err },
+                        ) catch {};
+                    }
+                }
+                errs.append(fil_errs.items[0]) catch {};
+                return;
+            }
+            if (op.ignore_permissions) return;
+            const fil_uid = self.uid() catch |err| {
+                std.fmt.format(
+                    op.verbose_logger,
+                    "error getting uid for inode {} \"{s}\": {}\n",
+                    .{ self.inode.hdr.num, path, err },
+                ) catch {};
+                return;
+            };
+            const fil_gid = self.gid() catch |err| {
+                std.fmt.format(
+                    op.verbose_logger,
+                    "error getting gid for inode {} \"{s}\": {}\n",
+                    .{ self.inode.hdr.num, path, err },
+                ) catch {};
+                return;
+            };
+            fil.chmod(self.inode.hdr.perm) catch |err| {
+                std.fmt.format(
+                    op.verbose_logger,
+                    "error setting permissions for inode {} \"{s}\": {}\n",
+                    .{ self.inode.hdr.num, path, err },
+                ) catch {};
+                return;
+            };
+            fil.chown(fil_uid, fil_gid) catch |err| {
+                std.fmt.format(
+                    op.verbose_logger,
+                    "error setting owner for inode {} \"{s}\": {}\n",
+                    .{ self.inode.hdr.num, path, err },
+                ) catch {};
+                return;
             };
         }
     };
