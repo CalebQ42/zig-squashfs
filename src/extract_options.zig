@@ -12,7 +12,7 @@ ignore_permissions: bool = false,
 /// Verbose logging
 verbose: bool = false,
 /// Verbose logging writer. If not set, stdout is used.
-verbose_logger: ?std.io.AnyWriter = null,
+verbose_logger: std.io.AnyWriter = std.io.getStdOut().writer().any(),
 /// Number of threads used during extraction. Defualts to std.Thread.getCpuCount().
 thread_count: usize,
 

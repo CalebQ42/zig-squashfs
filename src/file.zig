@@ -185,13 +185,11 @@ pub fn File(comptime T: type) type {
 
         const WaitGroup = std.Thread.WaitGroup;
         const Pool = std.Thread.Pool;
+        const Mutex = std.Thread.Mutex;
 
         pub const ExtractError = error{FileExists};
 
-        pub fn extract(self: Self, op: *ExtractionOptions, path: []const u8) !void {
-            if (op.verbose and op.verbose_logger == null) {
-                op.verbose_logger = std.io.getStdOut().writer().any();
-            }
+        pub fn extract(self: Self, op: ExtractionOptions, path: []const u8) !void {
             var exists = true;
             var stat: ?std.fs.File.Stat = null;
             if (std.fs.cwd().statFile(path)) |s| {
@@ -222,33 +220,43 @@ pub fn File(comptime T: type) type {
             defer pol.deinit();
             var errs: std.ArrayList(anyerror) = .init(self.rdr.alloc);
             defer errs.deinit();
-            try self.extractReal(op, &errs, &wg, &pol, path);
+            try self.extractReal(op, &errs, &wg, &pol, path, true);
             wg.wait();
             if (errs.items.len > 0) return errs.items[0];
         }
         fn extractReal(
             self: Self,
-            op: *ExtractionOptions,
+            op: ExtractionOptions,
             errs: *std.ArrayList(anyerror),
             wg: *WaitGroup,
             pol: *Pool,
             path: []const u8,
+            first: bool,
+            comptime on_finish: anytype,
+            finish_args: anytype,
         ) !void {
+            if (op.verbose) {
+                std.fmt.format(op.verbose_logger, "extracting inode {} \"{s}\" to {s}...\n", .{ self.inode.hdr.num, self.name, path }) catch {};
+            }
             return switch (self.inode.hdr.type) {
-                .dir, .ext_dir => self.extractDir(op, errs, wg, pol, path),
-                .file, .ext_file => self.extractReg(op, errs, wg, pol, path),
-                .symlink, .ext_symlink => self.extractSymlink(op, errs, wg, pol, path),
+                .dir, .ext_dir => self.extractDir(op, errs, wg, pol, path, first),
+                .file, .ext_file => self.extractReg(op, errs, wg, pol, path, first),
+                .symlink, .ext_symlink => self.extractSymlink(op, errs, wg, pol, path, first),
                 .block_dev,
                 .ext_block_dev,
                 .char_dev,
                 .ext_char_dev,
                 .fifo,
                 .ext_fifo,
-                => self.extractDev(op, path),
+                => {
+                    try self.extractDev(op, path);
+                    if (!first) self.deinit();
+                    return;
+                },
                 else => {
                     if (op.verbose) {
                         std.fmt.format(
-                            op.verbose_logger.?,
+                            op.verbose_logger,
                             "inode {} \"{s}\" is a socket file. Ignoring.\n",
                             .{ self.inode.hdr.num, self.name },
                         ) catch {};
@@ -256,31 +264,104 @@ pub fn File(comptime T: type) type {
                 },
             };
         }
-        fn extractDir(self: Self, op: *ExtractionOptions, errs: *std.ArrayList(anyerror), wg: *WaitGroup, pol: *Pool, path: []const u8) !void {
+        fn extractDir(
+            self: Self,
+            op: ExtractionOptions,
+            errs: *std.ArrayList(anyerror),
+            wg: *WaitGroup,
+            pol: *Pool,
+            path: []const u8,
+            comptime on_finish: anytype,
+            finish_args: anytype,
+        ) !void {
             if (errs.items.len > 0) return;
-            _ = self;
-            _ = op;
-            _ = wg;
-            _ = pol;
-            _ = path;
+            wg.start();
+            var dir_wg: WaitGroup = .{};
+            dir_wg.startMany(self.entries.?.len);
+            for (self.entries.?) |e| {
+                const fil: Self = try .initFromEntry(self.rdr, e);
+            }
             return error{TODO}.TODO;
         }
-        fn extractReg(self: Self, op: *ExtractionOptions, errs: *std.ArrayList(anyerror), wg: *WaitGroup, pol: *Pool, path: []const u8) !void {
+        fn extractReg(
+            self: Self,
+            op: ExtractionOptions,
+            errs: *std.ArrayList(anyerror),
+            wg: *WaitGroup,
+            pol: *Pool,
+            path: []const u8,
+            first: bool,
+            comptime on_finish: anytype,
+            finish_args: anytype,
+        ) !void {
             if (errs.items.len > 0) return;
             const fil = try std.fs.cwd().createFile(path, .{});
             @constCast(&self.data_reader.?).setPool(pol);
             wg.start();
-            try self.data_reader.?.writeToNoBlock(errs, fil, wg, extractRegFinish, .{ self, fil });
-            _ = op;
-            //TODO: add some way of verbose logging of the errors for this file in particular.
+            var fil_errs: std.ArrayList(anyerror) = .init(self.rdr.alloc);
+            try self.data_reader.?.writeToNoBlock(fil_errs, fil, wg, extractRegFinish, .{ self, op, fil, &fil_errs, first });
             return;
         }
-        fn extractRegFinish(self: Self, fil: std.fs.File) void {
+        fn extractRegFinish(
+            self: Self,
+            op: ExtractionOptions,
+            fil: std.fs.File,
+            errs: *std.ArrayList(anyerror),
+            fil_errs: *std.ArrayList(anyerror),
+            first: bool,
+            comptime on_finish: anytype,
+            finish_args: anytype,
+        ) void {
             defer fil.close();
-            //TODO: set owners & permissions. Check if we need to call self.deinit();
-            _ = self;
+            defer fil_errs.deinit();
+            defer if (!first) self.deinit();
+            if (fil_errs.items.len > 0) {
+                if (op.verbose) {
+                    for (fil_errs.items) |err| {
+                        std.fmt.format(op.verbose_logger, "error extracting inode {} \"{s}\": {}\n", .{ self.inode.num, self.name, err }) catch {};
+                    }
+                }
+                errs.append(fil_errs.items[0]) catch {};
+                return;
+            }
+            if (!op.ignore_permissions) {
+                const fil_uid = self.uid() catch |err| {
+                    if (op.verbose) {
+                        std.fmt.format(op.verbose_logger, "error getting uid: {}\n", .{err}) catch {};
+                        return;
+                    }
+                };
+                const fil_gid = self.gid() catch |err| {
+                    if (op.verbose) {
+                        std.fmt.format(op.verbose_logger, "error getting gid: {}\n", .{err}) catch {};
+                        return;
+                    }
+                };
+                fil.chmod(self.inode.hdr.perm) catch |err| {
+                    if (op.verbose) {
+                        std.fmt.format(op.verbose_logger, "error setting permissions: {}\n", .{err}) catch {};
+                        return;
+                    }
+                };
+                fil.chown(fil_uid, fil_gid) catch |err| {
+                    if (op.verbose) {
+                        std.fmt.format(op.verbose_logger, "error setting owners: {}\n", .{err}) catch {};
+                        return;
+                    }
+                };
+            }
         }
-        fn extractSymlink(self: Self, op: *ExtractionOptions, errs: *std.ArrayList(anyerror), wg: *WaitGroup, pol: *Pool, path: []const u8) !void {
+        fn extractSymlink(
+            self: Self,
+            op: ExtractionOptions,
+            errs: *std.ArrayList(anyerror),
+            wg: *WaitGroup,
+            pol: *Pool,
+            path: []const u8,
+            first: bool,
+            comptime on_finish: anytype,
+            finish_args: anytype,
+        ) !void {
             if (errs.items.len > 0) return;
             _ = self;
             _ = op;
@@ -289,11 +370,17 @@ pub fn File(comptime T: type) type {
             _ = path;
             return error{TODO}.TODO;
         }
-        fn extractDev(self: Self, op: *ExtractionOptions, path: []const u8) !void {
+        fn extractDev(
+            self: Self,
+            op: ExtractionOptions,
+            path: []const u8,
+            comptime on_finish: anytype,
+            finish_args: anytype,
+        ) !void {
             if (comptime builtin.os.tag != .linux) {
                 if (op.verbose) {
                     std.fmt.format(
-                        op.verbose_logger.?,
+                        op.verbose_logger,
                         "inode {} \"{s}\" is a device/fifo file and the OS is not Linux. Ignoring.\n",
                         .{ self.inode.hdr.num, self.name },
                     ) catch {};

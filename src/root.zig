@@ -34,5 +34,5 @@ test "ExtractFile" {
     defer fil.deinit();
     var op: ExtractionOptions = try .init();
     op.verbose = true;
-    try fil.extract(&op, file_extr_loc);
+    try fil.extract(op, file_extr_loc);
 }
