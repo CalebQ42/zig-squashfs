@@ -206,8 +206,6 @@ pub fn File(comptime T: type) type {
                 .dir, .ext_dir => {
                     if (exists and stat.?.kind != .directory) {
                         return ExtractError.FileExists;
-                    } else if (!exists) {
-                        try std.fs.cwd().makeDir(path);
                     }
                 },
                 else => if (exists) return ExtractError.FileExists,
@@ -236,31 +234,85 @@ pub fn File(comptime T: type) type {
         ) !void {
             if (errs.items.len > 0) return;
             if (op.verbose) {
-                std.fmt.format(op.verbose_logger, "extracting inode {} \"{s}\" to {s}...\n", .{ self.inode.hdr.num, self.name, path }) catch {};
+                std.fmt.format(
+                    op.verbose_logger,
+                    "extracting inode {} \"{s}\" to {s}...\n",
+                    .{ self.inode.hdr.num, self.name, path },
+                ) catch {};
             }
             return switch (self.inode.hdr.type) {
                 .dir, .ext_dir => {
                     wg.start();
+                    defer std.debug.print("{}\n", .{wg.state.raw});
                     errdefer wg.finish();
+                    std.fs.cwd().makeDir(path) catch |err| {
+                        if (err != std.fs.Dir.MakeError.PathAlreadyExists) {
+                            return err;
+                        }
+                    };
+                    var dir_wg = try self.rdr.alloc.create(WaitGroup);
+                    dir_wg.* = .{};
                     for (self.entries.?) |ent| {
                         var fil = initFromEntry(self.rdr, ent) catch |err| {
+                            std.fmt.format(
+                                op.verbose_logger,
+                                "error extracting inode {} \"{s}\": {}\n",
+                                .{ ent.num, path, err },
+                            ) catch {};
+                            continue;
+                        };
+                        const ext_path = blk: {
+                            if (path[path.len - 1] == '/') {
+                                var new = self.rdr.alloc.alloc(u8, path.len + ent.name.len) catch |err| {
+                                    break :blk err;
+                                };
+                                @memcpy(new[0..path.len], path);
+                                @memcpy(new[path.len..], ent.name);
+                                break :blk new;
+                            }
+                            var new = self.rdr.alloc.alloc(u8, path.len + ent.name.len + 1) catch |err| {
+                                break :blk err;
+                            };
+                            @memcpy(new[0..path.len], path);
+                            new[path.len] = '/';
+                            @memcpy(new[path.len + 1 ..], ent.name);
+                            break :blk new;
+                        } catch |err| {
+                            std.fmt.format(
+                                op.verbose_logger,
+                                "error extracting inode {} \"{s}\": {}\n",
+                                .{ ent.num, path, err },
+                            ) catch {};
+                            continue;
+                        };
+                        fil.extractReal(op, ext_path, errs, dir_wg, pol, false) catch |err| {
+                            std.fmt.format(
+                                op.verbose_logger,
+                                "error extracting inode {} \"{s}\": {}\n",
+                                .{ ent.num, path, err },
+                            ) catch {};
                             continue;
                         };
                     }
+                    dir_wg.wait();
+                    wg.finish();
+                    std.debug.print("finished: {s}\n", .{path});
                 },
                 .file, .ext_file => {
                     wg.start();
                     errdefer wg.finish();
                     var ext_fil = try std.fs.cwd().createFile(path, .{});
                     errdefer ext_fil.close();
-                    var fil_errs: std.ArrayList(anyerror) = .init(self.rdr.alloc);
+                    var fil_errs = try self.rdr.alloc.create(std.ArrayList(anyerror));
+                    errdefer self.rdr.alloc.destroy(fil_errs);
+                    fil_errs.* = .init(self.rdr.alloc);
                     errdefer fil_errs.deinit();
                     @constCast(&self.data_reader.?).setPool(pol);
-                    try self.data_reader.?.writeToNoBlock(errs, ext_fil, filExtractFinish, .{
+                    try self.data_reader.?.writeToNoBlock(errs, ext_fil, extractRegFinish, .{
                         self,
                         op,
                         path,
-                        &fil_errs,
+                        fil_errs,
                         errs,
                         wg,
                         ext_fil,
@@ -282,7 +334,15 @@ pub fn File(comptime T: type) type {
                 },
             };
         }
-        fn filExtractFinish(
+        // fn extractFileFinish(
+        //     self: Self,
+        //     op: ExtractionOptions,
+        //     path: []const u8,
+        //     dir_wg: *WaitGroup,
+        //     dir_wg_mut: *Mutex,
+        //     wg: *WaitGroup,
+        // ) void {}
+        fn extractRegFinish(
             self: Self,
             op: ExtractionOptions,
             path: []const u8,
@@ -292,18 +352,19 @@ pub fn File(comptime T: type) type {
             fil: std.fs.File,
             first: bool,
         ) void {
+            defer std.debug.print("{}\n", .{wg.state.raw});
             defer wg.finish();
             defer fil.close();
+            defer self.rdr.alloc.destroy(fil_errs);
             defer if (!first) self.deinit();
+            defer if (!first) self.rdr.alloc.free(path);
             if (fil_errs.items.len > 0) {
                 if (op.verbose) {
-                    for (fil_errs.items) |err| {
-                        std.fmt.format(
-                            op.verbose_logger,
-                            "error extracting inode {} to \"{s}\": {}\n",
-                            .{ self.inode.hdr.num, path, err },
-                        ) catch {};
-                    }
+                    std.fmt.format(
+                        op.verbose_logger,
+                        "error extracting inode {} to \"{s}\": {}\n",
+                        .{ self.inode.hdr.num, path, fil_errs.items[0] },
+                    ) catch {};
                 }
                 errs.append(fil_errs.items[0]) catch {};
                 return;

@@ -190,8 +190,10 @@ pub fn DataReader(comptime T: type) type {
             if (self.pool == null) return DataReaderError.ThreadPoolNotSet;
             var mut: std.Thread.Mutex = .{};
             var cur_idx: usize = 0;
-            var block_wg: std.Thread.WaitGroup = .{};
-            var finish_mut: std.Thread.Mutex = .{};
+            var block_wg = try self.alloc.create(std.Thread.WaitGroup);
+            block_wg.* = .{};
+            const finish_mut = try self.alloc.create(std.Thread.Mutex);
+            finish_mut.* = .{};
             var completed: ?std.AutoHashMap(usize, []u8) = null;
             if (!comptime std.meta.hasFn(@TypeOf(writer), "pwrite")) {
                 completed = std.AutoHashMap(usize, []u8).init(self.alloc);
@@ -207,9 +209,9 @@ pub fn DataReader(comptime T: type) type {
                     },
                     blk: {
                         if (comptime std.meta.hasFn(@TypeOf(writer), "pwrite")) {
-                            break :blk .{ self, &block_wg, errs, i, writer, &finish_mut, on_finish, on_finish_args };
+                            break :blk .{ self, block_wg, errs, i, writer, finish_mut, on_finish, on_finish_args };
                         } else {
-                            break :blk .{ self, &block_wg, &mut, &cur_idx, errs, &completed.?, i, writer, &finish_mut, on_finish, on_finish_args };
+                            break :blk .{ self, block_wg, &mut, &cur_idx, errs, &completed.?, i, writer, finish_mut, on_finish, on_finish_args };
                         }
                     },
                 );
@@ -267,7 +269,7 @@ pub fn DataReader(comptime T: type) type {
             writer: anytype,
         ) void {
             if (errs.items.len > 0) return;
-            if (self.sizes[idx].size == 0) {
+            if (idx < self.sizes.len and self.sizes[idx].size == 0) {
                 var pos = idx * self.block_size;
                 if (self.frag.len == 0 and idx == self.sizes.len - 1) {
                     pos += self.file_size % self.block_size;
@@ -351,8 +353,13 @@ pub fn DataReader(comptime T: type) type {
             self.writeBlockToPWrite(errs, idx, writer);
             finish_mut.lock();
             block_wg.finish();
-            defer finish_mut.unlock();
+            defer {
+                const done = block_wg.isDone();
+                finish_mut.unlock();
+                if (done) self.alloc.destroy(finish_mut);
+            }
             if (block_wg.isDone()) {
+                self.alloc.destroy(block_wg);
                 @call(.auto, on_finish, on_finish_args);
             }
         }

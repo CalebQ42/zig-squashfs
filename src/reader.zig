@@ -61,7 +61,7 @@ pub fn SfsReader(comptime T: type) type {
         }
         /// Extract the entire archive to the given path & with the given options.
         /// Equivelent to calling extract on the root File.
-        pub fn extract(self: *Self, op: *ExtractionOptions, path: []const u8) !void {
+        pub fn extract(self: *Self, op: ExtractionOptions, path: []const u8) !void {
             var rt = try self.root();
             defer rt.deinit();
             return rt.extract(op, path);
