@@ -188,6 +188,10 @@ pub fn DataReader(comptime T: type) type {
             on_finish_args: anytype,
         ) !void {
             if (self.pool == null) return DataReaderError.ThreadPoolNotSet;
+            if (self.numBlocks() == 0) {
+                @call(.auto, on_finish, on_finish_args);
+                return;
+            }
             var mut: std.Thread.Mutex = .{};
             var cur_idx: usize = 0;
             var block_wg = try self.alloc.create(std.Thread.WaitGroup);
@@ -200,7 +204,8 @@ pub fn DataReader(comptime T: type) type {
             }
             block_wg.startMany(self.numBlocks());
             for (0..self.numBlocks()) |i| {
-                try self.pool.?.spawn(
+                var thr = try std.Thread.spawn(
+                    .{ .allocator = self.alloc },
                     comptime blk: {
                         if (std.meta.hasFn(@TypeOf(writer), "pwrite")) {
                             break :blk noBlockThreadPWrite;
@@ -215,6 +220,7 @@ pub fn DataReader(comptime T: type) type {
                         }
                     },
                 );
+                thr.detach();
             }
         }
 
@@ -353,12 +359,12 @@ pub fn DataReader(comptime T: type) type {
             self.writeBlockToPWrite(errs, idx, writer);
             finish_mut.lock();
             block_wg.finish();
+            const isDone = block_wg.isDone();
             defer {
-                const done = block_wg.isDone();
                 finish_mut.unlock();
-                if (done) self.alloc.destroy(finish_mut);
+                if (isDone) self.alloc.destroy(finish_mut);
             }
-            if (block_wg.isDone()) {
+            if (isDone) {
                 self.alloc.destroy(block_wg);
                 @call(.auto, on_finish, on_finish_args);
             }

@@ -31,7 +31,7 @@ pub fn build(b: *std.Build) !void {
     exe_mod.addOptions("config", opt);
     const exe = b.addExecutable(.{
         .linkage = .static,
-        .name = "zig-unsquashfs",
+        .name = "unsquashfs",
         .root_module = exe_mod,
         .version = sem_ver,
     });

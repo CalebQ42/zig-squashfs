@@ -26,8 +26,8 @@ test "OpenFile" {
 }
 
 test "ExtractSingleFile" {
-    const single_file = "Start.exe";
-    const single_file_extr_loc = "testing/Start.exe";
+    const single_file = "PortableApps/Notepad++Portable/App/Notepad++/doLocalConf.xml";
+    const single_file_extr_loc = "testing/doLocalConf.xml";
 
     std.fs.cwd().deleteFile(single_file_extr_loc) catch {};
     const sfs_fil = try std.fs.cwd().openFile(test_archive, .{});
@@ -49,7 +49,7 @@ test "ExtractAll" {
     defer sfs_fil.close();
     var rdr: SfsFile = try .init(std.testing.allocator, sfs_fil, 0);
     defer rdr.deinit();
-    var op: ExtractionOptions = try .init();
-    op.verbose = true;
+    const op: ExtractionOptions = try .init();
+    // op.verbose = true;
     try rdr.extract(op, extr_dir);
 }

@@ -51,10 +51,10 @@ const ListTypes = enum {
 };
 
 pub fn main() !void {
-    var alloc: std.heap.GeneralPurposeAllocator(.{}) = .init;
-    extr_files = .init(alloc.allocator());
+    const alloc = std.heap.smp_allocator;
+    extr_files = .init(alloc);
     defer extr_files.deinit();
-    var args = std.process.argsWithAllocator(alloc.allocator()) catch {
+    var args = std.process.argsWithAllocator(alloc) catch {
         _ = try stdout.writeAll("Unable to allocate memory");
         return;
     };
@@ -119,8 +119,10 @@ pub fn main() !void {
         return;
     }
     const fil = try std.fs.cwd().openFile(filename, .{});
+    defer fil.close();
+    var th_alloc: std.heap.ThreadSafeAllocator = .{ .child_allocator = std.heap.smp_allocator };
     var rdr = squashfs.SfsFile.init(
-        alloc.allocator(),
+        th_alloc.allocator(),
         fil,
         offset,
     ) catch |err| {
@@ -128,5 +130,17 @@ pub fn main() !void {
         return;
     };
     defer rdr.deinit();
-    //TODO
+    //TODO: list and extr_files;
+    var op: squashfs.ExtractionOptions = squashfs.ExtractionOptions.init() catch |err| {
+        try std.fmt.format(stdout.writer(), "Error setting extraction options: {any}\n", .{err});
+        return;
+    };
+    op.verbose = verbose;
+    op.dereference_symlinks = deref;
+    op.unbreak_symlinks = unbreak;
+    if (processors != 0) op.thread_count = processors;
+    rdr.extract(op, extr_location) catch |err| {
+        try std.fmt.format(stdout.writer(), "Error extracting archive: {any}\n", .{err});
+        return;
+    };
 }
