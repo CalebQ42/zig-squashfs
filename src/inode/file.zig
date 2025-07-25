@@ -1,76 +1,77 @@
 const std = @import("std");
-const io = std.io;
 
 pub const BlockSize = packed struct {
     size: u24,
-    not_compressed: bool,
+    uncompressed: bool,
     _: u7,
 };
 
-pub const FileInode = struct {
-    data_start: u32,
+pub const File = struct {
+    block: u32,
     frag_idx: u32,
     frag_offset: u32,
     size: u32,
-    blocks: []const BlockSize,
+    block_sizes: []BlockSize,
 
-    pub fn init(alloc: std.mem.Allocator, rdr: io.AnyReader, block_size: u32) !FileInode {
-        var fixed_buf: [16]u8 = undefined;
-        _ = try rdr.readAll(&fixed_buf);
-        const frag_idx = std.mem.bytesToValue(u32, fixed_buf[4..8]);
-        const size = std.mem.bytesToValue(u32, fixed_buf[12..16]);
-        var block_num = size / block_size;
-        if (frag_idx == 0xFFFFFFFF and size % block_size > 0) {
-            block_num += 1;
+    pub fn init(rdr: anytype, alloc: std.mem.Allocator, block_size: u32) !File {
+        var fixed: [16]u8 = undefined;
+        _ = try rdr.read(&fixed);
+        const frag_idx = std.mem.readInt(u32, fixed[4..8], .little);
+        const size = std.mem.readInt(u32, fixed[12..16], .little);
+        var blocks: u32 = size / block_size;
+        if (size % block_size > 0 and frag_idx == 0xffffffff) {
+            blocks += 1;
         }
-        const blocks = try alloc.alloc(BlockSize, block_num);
-        _ = try rdr.readAll(@ptrCast(blocks));
+        const block_sizes = try alloc.alloc(BlockSize, blocks);
+        errdefer alloc.free(block_sizes);
+        _ = try rdr.read(std.mem.sliceAsBytes(block_sizes));
         return .{
-            .data_start = std.mem.bytesToValue(u32, fixed_buf[0..4]),
+            .block = std.mem.readInt(u32, fixed[0..4], .little),
             .frag_idx = frag_idx,
-            .frag_offset = std.mem.bytesToValue(u32, fixed_buf[8..12]),
+            .frag_offset = std.mem.readInt(u32, fixed[8..12], .little),
             .size = size,
-            .blocks = blocks,
+            .block_sizes = block_sizes,
         };
     }
-    pub fn deinit(self: FileInode, alloc: std.mem.Allocator) void {
-        alloc.free(self.blocks);
+    pub fn hasFragment(self: File) bool {
+        return self.frag_idx != 0xffffffff;
     }
 };
 
-pub const ExtFileInode = struct {
-    data_start: u64,
+pub const ExtFile = struct {
+    block: u64,
     size: u64,
     sparse: u64,
-    hard_links: u32,
+    hard_link: u32,
     frag_idx: u32,
     frag_offset: u32,
     xattr_idx: u32,
-    blocks: []const BlockSize,
+    block_sizes: []BlockSize,
 
-    pub fn init(alloc: std.mem.Allocator, rdr: io.AnyReader, block_size: u32) !ExtFileInode {
-        var fixed_buf = [1]u8{0} ** 40;
-        _ = try rdr.readAll(&fixed_buf);
-        const size = std.mem.bytesToValue(u64, fixed_buf[8..16]);
-        const frag_idx = std.mem.bytesToValue(u32, fixed_buf[28..32]);
-        var block_num = size / block_size;
-        if (frag_idx == 0xFFFFFFFF and size % block_size > 0) {
-            block_num += 1;
+    pub fn init(rdr: anytype, alloc: std.mem.Allocator, block_size: u32) !ExtFile {
+        var fixed: [40]u8 = undefined;
+        _ = try rdr.read(&fixed);
+        const size = std.mem.readInt(u64, fixed[8..16], .little);
+        const frag_idx = std.mem.readInt(u32, fixed[28..32], .little);
+        var blocks: u32 = @truncate(size / block_size);
+        if (size % block_size > 0 and frag_idx == 0xffffffff) {
+            blocks += 1;
         }
-        const blocks = try alloc.alloc(BlockSize, block_num);
-        _ = try rdr.readAll(@ptrCast(blocks));
+        const block_sizes = try alloc.alloc(BlockSize, blocks);
+        errdefer alloc.free(block_sizes);
+        _ = try rdr.read(std.mem.sliceAsBytes(block_sizes));
         return .{
-            .data_start = std.mem.bytesToValue(u64, fixed_buf[0..8]),
+            .block = std.mem.readInt(u64, fixed[0..8], .little),
             .size = size,
-            .sparse = std.mem.bytesToValue(u64, fixed_buf[16..24]),
-            .hard_links = std.mem.bytesToValue(u32, fixed_buf[24..28]),
+            .sparse = std.mem.readInt(u64, fixed[16..24], .little),
+            .hard_link = std.mem.readInt(u32, fixed[24..28], .little),
             .frag_idx = frag_idx,
-            .frag_offset = std.mem.bytesToValue(u32, fixed_buf[32..36]),
-            .xattr_idx = std.mem.bytesToValue(u32, fixed_buf[36..40]),
-            .blocks = blocks,
+            .frag_offset = std.mem.readInt(u32, fixed[32..36], .little),
+            .xattr_idx = std.mem.readInt(u32, fixed[36..40], .little),
+            .block_sizes = block_sizes,
         };
     }
-    pub fn deinit(self: ExtFileInode, alloc: std.mem.Allocator) void {
-        alloc.free(self.blocks);
+    pub fn hasFragment(self: ExtFile) bool {
+        return self.frag_idx != 0xffffffff;
     }
 };

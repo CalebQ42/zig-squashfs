@@ -1,56 +1,75 @@
 const std = @import("std");
 
-const Reader = @import("reader.zig").Reader;
-const DecompressType = @import("decompress.zig").DecompressType;
-const FileHolder = @import("readers/file_holder.zig").FileHolder;
-const FileOffsetReader = @import("readers/file_holder.zig").FileOffsetReader;
-const MetadataReader = @import("readers/metadata.zig").MetadataReader;
+const PRead = @import("reader/p_read.zig").PRead;
+const Compression = @import("superblock.zig").Compression;
+const MetadataReader = @import("reader/metadata.zig").MetadataReader;
 
-const TableError = error{InvalidIndex};
+pub const TableError = error{
+    InvalidIndex,
+};
 
-/// A lazily read squashfs table.
-pub fn Table(
-    comptime T: type,
-) type {
+pub fn Table(comptime T: type, comptime R: type) type {
+    comptime std.debug.assert(std.meta.hasFn(R, "pread"));
     return struct {
-        decomp: DecompressType,
-        table: []T = &[0]T{},
-        offset: u64,
-        item_count: u32,
+        const Self = @This();
 
-        pub fn init(read: *Reader, offset: u64, item_count: u32) Self {
+        alloc: std.mem.Allocator,
+        rdr: PRead(R),
+        comp: Compression,
+
+        offset: u64,
+        table_count: u32,
+        mut: std.Thread.RwLock = .{},
+
+        table: []T = &[0]T{},
+
+        pub fn init(alloc: std.mem.Allocator, rdr: PRead(R), comp: Compression, offset: u64, table_count: u32) Self {
             return .{
-                .decomp = read.super.decomp,
+                .alloc = alloc,
+                .rdr = rdr,
+                .comp = comp,
                 .offset = offset,
-                .item_count = item_count,
+                .table_count = table_count,
             };
         }
-        pub fn deinit(self: *Self, alloc: std.mem.Allocator) void {
-            if (self.table.len != 0) alloc.free(self.table);
+        pub fn deinit(self: Self) void {
+            self.alloc.free(self.table);
         }
 
-        pub fn getValue(self: *Self, read: *Reader, i: u64) !T {
-            if (i >= self.item_count) return TableError.InvalidIndex;
-            if (self.table.len > i) return self.table[i];
-            var offset_rdr: FileOffsetReader = undefined;
-            var meta_rdr: MetadataReader = undefined;
-            var meta_buf: [8]u8 = [1]u8{0} ** 8;
-            const meta_offset = std.mem.bytesAsValue(u64, &meta_buf);
-            var to_read: u32 = 0;
-            while (self.table.len <= i) {
-                _ = try read.holder.file.preadAll(&meta_buf, self.offset);
-                self.offset += 8;
-                offset_rdr = read.holder.readerAt(meta_offset.*);
-                meta_rdr = .init(read.alloc, self.decomp, offset_rdr.any());
-                defer meta_rdr.deinit();
-                to_read = @min(self.item_count - self.table.len, comptime 8192 / @sizeOf(T));
-                const alloc_size = self.table.len + to_read;
-                if (self.table.len != 0) read.alloc.free(self.table);
-                self.table = try read.alloc.alloc(T, alloc_size);
-                _ = try meta_rdr.any().readAll(@ptrCast(self.table[self.table.len - to_read ..]));
+        fn resize(self: *Self, to_add: usize) !void {
+            if (!self.alloc.resize(self.table, self.table.len + to_add)) {
+                const new_table = try self.alloc.alloc(T, self.table.len + to_add);
+                @memcpy(new_table[0..self.table.len], self.table);
+                self.alloc.free(self.table);
+                self.table = new_table;
             }
-            return self.table[i];
         }
-        const Self: type = @This();
+
+        pub fn get(self: *Self, idx: u32) !T {
+            if (idx >= self.table_count) return TableError.InvalidIndex;
+            self.mut.lockShared();
+            defer self.mut.unlockShared();
+            if (idx >= self.table.len) {
+                return self.getAndFill(idx);
+            }
+            return self.table[idx];
+        }
+        fn getAndFill(self: *Self, idx: u32) !T {
+            self.mut.unlockShared();
+            defer self.mut.lockShared();
+            self.mut.lock();
+            defer self.mut.unlock();
+            var to_read: usize = 0;
+            var offset: u64 = 0;
+            while (idx >= self.table.len) {
+                to_read = @min(self.table_count - self.table.len, comptime 8192 / @sizeOf(T));
+                try self.resize(to_read);
+                _ = try self.rdr.pread(std.mem.asBytes(&offset), self.offset);
+                self.offset += 8;
+                var meta: MetadataReader(R) = .init(self.alloc, self.comp, self.rdr, offset);
+                _ = try meta.read(std.mem.sliceAsBytes(self.table[self.table.len - to_read ..]));
+            }
+            return self.table[idx];
+        }
     };
 }
