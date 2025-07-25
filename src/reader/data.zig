@@ -11,6 +11,11 @@ const DataReaderError = error{
     InvalidIndex,
 };
 
+const DataBlock = struct {
+    data: [1024 * 1024]u8, // Blocks can be up to 1MB in size.
+    len: usize,
+};
+
 pub fn DataReader(comptime T: type) type {
     return struct {
         const Self = @This();
@@ -26,9 +31,9 @@ pub fn DataReader(comptime T: type) type {
         block_size: u32,
         sizes: []BlockSize,
 
-        frag: []u8 = &[0]u8{},
+        frag: DataBlock = DataBlock{ .data = &[0]u8, .len = 0 },
 
-        read_block: []u8 = &[0]u8{},
+        read_block: DataBlock = DataBlock{ .data = &[0]u8, .len = 0 },
         read_offset: u64 = 0,
         read_idx: u32 = 0,
 
@@ -64,52 +69,53 @@ pub fn DataReader(comptime T: type) type {
         }
 
         pub fn addFragment(self: *Self, entry: FragEntry, offset: u32) !void {
-            self.frag = try self.alloc.alloc(u8, self.file_size % self.block_size);
+            self.frag.len = self.file_size % self.block_size;
+            errdefer self.frag.len = 0;
             if (entry.size.size == 0) {
-                @memset(self.frag, 0);
+                @memset(self.frag.data, 0);
                 return;
             } else if (entry.size.uncompressed) {
-                _ = try self.rdr.pread(self.frag, entry.block + offset);
+                _ = try self.rdr.pread(self.frag.data, entry.block + offset);
                 return;
             }
-            const block = try self.alloc.alloc(u8, offset + self.frag.len);
-            defer self.alloc.free(block);
+            const block: [1024 * 1024]u8 = undefined;
             _ = try self.comp.decompress(
+                1024 * 1024,
                 self.alloc,
                 self.rdr.readerAt(entry.block).reader(),
                 block,
             );
-            @memcpy(self.frag, block[offset..]);
+            @memcpy(self.frag.data, block[offset..]);
         }
 
         pub fn setPool(self: *Self, pool: *std.Thread.Pool) void {
             self.pool = pool;
         }
 
-        fn blockAt(self: Self, idx: usize) ![]u8 {
+        fn blockAt(self: Self, idx: usize) !DataBlock {
             if (self.frag.len > 0 and idx == self.sizes.len) return self.frag;
             if (idx >= self.sizes.len) return DataReaderError.InvalidIndex;
-            const size = blk: {
+            const out: DataBlock = undefined;
+            out.len = blk: {
                 if (idx == self.sizes.len - 1 and self.frag.len == 0) {
                     break :blk self.file_size % self.block_size;
                 }
                 break :blk self.block_size;
             };
-            const block = try self.alloc.alloc(u8, size);
-            errdefer self.alloc.free(block);
             if (self.sizes[idx].size == 0) {
-                @memset(block, 0);
-                return block;
+                @memset(out.data[0..out.len], 0);
+                return out;
             } else if (self.sizes[idx].uncompressed) {
-                _ = try self.rdr.pread(block, self.offsets[idx]);
-                return block;
+                _ = try self.rdr.pread(out.data[0..out.len], self.offsets[idx]);
+                return out;
             }
             _ = try self.comp.decompress(
+                1024 * 1024,
                 self.alloc,
                 self.rdr.readerAt(self.offsets[idx]).reader(),
-                block,
+                out.data[0..out.len],
             );
-            return block;
+            return out;
         }
 
         fn numBlocks(self: Self) usize {
@@ -135,7 +141,7 @@ pub fn DataReader(comptime T: type) type {
                     self.read_idx += 1;
                 }
                 to_read = @min(buf.len - cur_red, self.block_size - self.read_offset);
-                @memcpy(buf[cur_red .. cur_red + to_read], self.read_block[self.read_offset .. self.read_offset + to_read]);
+                @memcpy(buf[cur_red .. cur_red + to_read], self.read_block.data[self.read_offset .. self.read_offset + to_read]);
                 cur_red += to_read;
                 self.read_offset += to_read;
             }
@@ -152,7 +158,7 @@ pub fn DataReader(comptime T: type) type {
             var mut: std.Thread.Mutex = .{};
             var cur_idx: usize = 0;
             var wg: std.Thread.WaitGroup = .{};
-            var completed: std.AutoHashMap(usize, []u8) = .init(self.alloc);
+            var completed: std.AutoHashMap(usize, DataBlock) = .init(self.alloc);
             defer completed.deinit();
             var errs: std.ArrayList(anyerror) = .init(self.alloc);
             defer errs.deinit();
@@ -178,8 +184,7 @@ pub fn DataReader(comptime T: type) type {
             return self.file_size;
         }
         /// Similiar to writeTo, but does not block until finished.
-        /// When all blocks have been written, on_finish and wg.finish() (in that order) will be called.
-        /// NOTE: wg.start() is not called;
+        /// Calls on_finish when all blocks have been written.
         pub fn writeToNoBlock(
             self: Self,
             errs: *std.ArrayList(anyerror),
@@ -198,9 +203,9 @@ pub fn DataReader(comptime T: type) type {
             block_wg.* = .{};
             const finish_mut = try self.alloc.create(std.Thread.Mutex);
             finish_mut.* = .{};
-            var completed: ?std.AutoHashMap(usize, []u8) = null;
+            var completed: ?std.AutoHashMap(usize, DataBlock) = null;
             if (!comptime std.meta.hasFn(@TypeOf(writer), "pwrite")) {
-                completed = std.AutoHashMap(usize, []u8).init(self.alloc);
+                completed = std.AutoHashMap(usize, DataBlock).init(self.alloc);
             }
             block_wg.startMany(self.numBlocks());
             for (0..self.numBlocks()) |i| {
@@ -229,7 +234,7 @@ pub fn DataReader(comptime T: type) type {
             mut: *std.Thread.Mutex,
             cur_idx: *usize,
             errs: *std.ArrayList(anyerror),
-            completed: *std.AutoHashMap(usize, []u8),
+            completed: *std.AutoHashMap(usize, DataBlock),
             idx: usize,
             writer: anytype,
         ) void {
@@ -306,7 +311,7 @@ pub fn DataReader(comptime T: type) type {
             mut: *std.Thread.Mutex,
             cur_idx: *usize,
             errs: *std.ArrayList(anyerror),
-            completed: *std.AutoHashMap(usize, []u8),
+            completed: *std.AutoHashMap(usize, DataBlock),
             idx: usize,
             writer: anytype,
         ) void {
@@ -330,7 +335,7 @@ pub fn DataReader(comptime T: type) type {
             mut: *std.Thread.Mutex,
             cur_idx: *usize,
             errs: *std.ArrayList(anyerror),
-            completed: *std.AutoHashMap(usize, []u8),
+            completed: *std.AutoHashMap(usize, DataBlock),
             idx: usize,
             writer: anytype,
             finish_mut: *std.Thread.Mutex,

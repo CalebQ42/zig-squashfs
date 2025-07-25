@@ -39,6 +39,7 @@ pub fn MetadataReader(comptime T: type) type {
                 self.block_size = try self.rdr.pread(self.block[0..hdr.size], self.offset);
             } else {
                 self.block_size = try self.comp.decompress(
+                    8192,
                     self.alloc,
                     self.rdr.readerAt(self.offset).reader(),
                     &self.block,

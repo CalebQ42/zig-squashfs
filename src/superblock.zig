@@ -51,7 +51,7 @@ pub const Compression = enum(u16) {
     lz4,
     zstd,
 
-    pub fn decompress(self: Compression, alloc: std.mem.Allocator, source: anytype, dest: []u8) !usize {
+    pub fn decompress(self: Compression, comptime max_size: u32, alloc: std.mem.Allocator, source: anytype, dest: []u8) !usize {
         switch (self) {
             .gzip => {
                 var decomp = std.compress.zlib.decompressor(source);
@@ -70,7 +70,7 @@ pub const Compression = enum(u16) {
             },
             .lz4 => return DecompressError.Lz4Unavailable,
             .zstd => {
-                var window: [std.compress.zstd.DecompressorOptions.default_window_buffer_len]u8 = undefined;
+                var window: [max_size]u8 = undefined;
                 var decomp = std.compress.zstd.decompressor(source, .{ .window_buffer = &window });
                 return decomp.read(dest);
             },
