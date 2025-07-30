@@ -36,6 +36,7 @@ pub fn File(comptime T: type) type {
         pub fn init(rdr: *SfsReader(T), inode: Inode, name: []const u8) !Self {
             const name_cpy: []u8 = try rdr.alloc.alloc(u8, name.len);
             @memcpy(name_cpy, name);
+            std.debug.print("init: {s}\n", .{name});
             var out = Self{
                 .rdr = rdr,
                 .inode = inode,
@@ -105,6 +106,7 @@ pub fn File(comptime T: type) type {
             return .init(rdr, inode, ent.name);
         }
         pub fn deinit(self: Self) void {
+            std.debug.print("deinit: {s}\n", .{self.name});
             self.rdr.alloc.free(self.name);
             self.inode.deinit(self.rdr.alloc);
             if (self.entries != null) {
