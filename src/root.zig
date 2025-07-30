@@ -15,7 +15,6 @@ test "OpenFile" {
     _ = try rdr.frag_table.get(rdr.super.frag_count - 1);
     _ = try rdr.id_table.get(rdr.super.id_count - 1);
     _ = try rdr.export_table.get(rdr.super.inode_count - 1);
-    std.debug.print("{}\n", .{rdr.super});
     const root = try rdr.root();
     defer root.deinit();
     var iter = root.iterate();

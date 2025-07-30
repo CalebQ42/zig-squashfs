@@ -14,13 +14,16 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
+        .link_libc = true,
     });
     const lib = b.addLibrary(.{
-        .linkage = .static,
+        .linkage = .dynamic,
         .name = "zig_squashfs",
         .root_module = lib_mod,
         .version = sem_ver,
     });
+    lib.linkSystemLibrary("zstd");
+    lib.linkLibC();
 
     const exe_mod = b.createModule(.{
         .root_source_file = b.path("src/bin/unsquashfs.zig"),
@@ -30,11 +33,12 @@ pub fn build(b: *std.Build) !void {
     exe_mod.addImport("squashfs", lib_mod);
     exe_mod.addOptions("config", opt);
     const exe = b.addExecutable(.{
-        .linkage = .static,
+        .linkage = .dynamic,
         .name = "unsquashfs",
         .root_module = exe_mod,
         .version = sem_ver,
     });
+    // exe.linkLibC();
 
     b.installArtifact(lib);
     b.installArtifact(exe);

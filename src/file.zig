@@ -63,38 +63,30 @@ pub fn File(comptime T: type) type {
                     out.entries = try dir.readDirectory(rdr.alloc, &meta, d.size);
                 },
                 .file => |f| {
+                    _ = f;
                     out.data_reader = try .init(
-                        rdr.alloc,
-                        rdr.rdr,
-                        rdr.super.comp,
-                        f.block,
-                        f.size,
-                        f.block_sizes,
-                        rdr.super.block_size,
+                        rdr,
+                        inode,
                     );
-                    if (f.hasFragment()) {
-                        try out.data_reader.?.addFragment(
-                            try rdr.frag_table.get(f.frag_idx),
-                            f.frag_offset,
-                        );
-                    }
+                    // if (f.hasFragment()) {
+                    //     try out.data_reader.?.addFragment(
+                    //         try rdr.frag_table.get(f.frag_idx),
+                    //         f.frag_offset,
+                    //     );
+                    // }
                 },
                 .ext_file => |f| {
+                    _ = f;
                     out.data_reader = try .init(
-                        rdr.alloc,
-                        rdr.rdr,
-                        rdr.super.comp,
-                        f.block,
-                        f.size,
-                        f.block_sizes,
-                        rdr.super.block_size,
+                        rdr,
+                        inode,
                     );
-                    if (f.hasFragment()) {
-                        try out.data_reader.?.addFragment(
-                            try rdr.frag_table.get(f.frag_idx),
-                            f.frag_offset,
-                        );
-                    }
+                    // if (f.hasFragment()) {
+                    //     try out.data_reader.?.addFragment(
+                    //         try rdr.frag_table.get(f.frag_idx),
+                    //         f.frag_offset,
+                    //     );
+                    // }
                 },
                 else => {},
             }
@@ -365,9 +357,8 @@ pub fn File(comptime T: type) type {
                     defer if (!complete) self.rdr.alloc.destroy(fil_errs);
                     fil_errs.* = .init(self.rdr.alloc);
                     defer if (!complete) fil_errs.deinit();
-                    @constCast(&self.data_reader.?).setPool(pol);
+                    // @constCast(&self.data_reader.?).setPool(pol);
                     self.data_reader.?.writeToNoBlock(
-                        errs,
                         ext_fil,
                         extractRegFinish,
                         .{

@@ -38,10 +38,12 @@ pub fn MetadataReader(comptime T: type) type {
             if (hdr.uncompressed) {
                 self.block_size = try self.rdr.pread(self.block[0..hdr.size], self.offset);
             } else {
+                var uncomp_data: [8192]u8 = undefined;
+                const read_size = try self.rdr.pread(uncomp_data[0..hdr.size], self.offset);
                 self.block_size = try self.comp.decompress(
                     8192,
                     self.alloc,
-                    self.rdr.readerAt(self.offset).reader(),
+                    @as([]const u8, uncomp_data[0..read_size]),
                     &self.block,
                 );
             }

@@ -48,8 +48,11 @@ pub fn DataReader(comptime T: type) type {
                 },
                 else => unreachable,
             }
-            for (1..offsets.len) |i| {
-                offsets[i] = offsets[i - 1] + sizes[i - 1].size;
+            std.debug.print("{any}\n", .{offsets.len});
+            if (offsets.len > 1) {
+                for (1..offsets.len) |i| {
+                    offsets[i] = offsets[i - 1] + sizes[i - 1].size;
+                }
             }
             return .{
                 .alloc = rdr.alloc,
@@ -58,7 +61,7 @@ pub fn DataReader(comptime T: type) type {
                 .block_size = rdr.super.block_size,
                 .sizes = sizes,
                 .offsets = offsets,
-                .files_size = file_size,
+                .file_size = file_size,
             };
         }
         pub fn deinit(self: Self) void {
@@ -69,7 +72,7 @@ pub fn DataReader(comptime T: type) type {
             self.frag = data;
         }
 
-        pub fn writeTo(self: Self, wrt: anytype) !void {
+        pub fn writeTo(self: Self, pool: *std.Thread.Pool, wrt: anytype) !void {
             comptime std.debug.assert(std.meta.hasFn(@TypeOf(wrt), "write") or std.meta.hasFn(@TypeOf(wrt), "pwrite"));
             var wg: std.Thread.WaitGroup = .{};
             wg.startMany(self.numBlocks());
@@ -78,7 +81,10 @@ pub fn DataReader(comptime T: type) type {
             var mut: std.Thread.Mutex = .{};
             var cond: std.Thread.Condition = .{};
             std.Thread.spawn(.{ .allocator = self.alloc }, writeThread, .{ self, wrt, &map, &mut, &cond, null, null });
-            for (0..self.numBlocks()) |i| {}
+            for (0..self.numBlocks()) |i| {
+                _ = pool;
+                _ = i;
+            }
             wg.wait();
         }
         pub fn writeToNoBlock(self: Self, wrt: anytype, comptime finish: anytype, finish_args: anytype) !void {
@@ -174,6 +180,12 @@ pub fn DataReader(comptime T: type) type {
             map: *CompletionMap,
             mut: *std.Thread.Mutex,
             cond: *std.Thread.Condition,
-        ) void {}
+        ) void {
+            _ = self;
+            _ = idx;
+            _ = map;
+            _ = mut;
+            _ = cond;
+        }
     };
 }

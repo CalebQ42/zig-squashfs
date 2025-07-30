@@ -42,6 +42,7 @@ pub const DecompressError = error{
     LzoUnavailable,
     Lz4Unavailable,
 };
+const c = @cImport(@cInclude("zstd.h"));
 
 pub const Compression = enum(u16) {
     gzip = 1,
@@ -52,28 +53,38 @@ pub const Compression = enum(u16) {
     zstd,
 
     pub fn decompress(self: Compression, comptime max_size: u32, alloc: std.mem.Allocator, source: anytype, dest: []u8) !usize {
+        _ = alloc;
         switch (self) {
-            .gzip => {
-                var decomp = std.compress.zlib.decompressor(source);
-                return decomp.read(dest);
-            },
-            .lzma => {
-                var decomp = try std.compress.lzma.decompress(alloc, source);
-                defer decomp.deinit();
-                return decomp.read(dest);
-            },
-            .lzo => return DecompressError.LzoUnavailable,
-            .xz => {
-                var decomp = try std.compress.xz.decompress(alloc, source);
-                defer decomp.deinit();
-                return decomp.read(dest);
-            },
-            .lz4 => return DecompressError.Lz4Unavailable,
+            // .gzip => {
+            //     var decomp = std.compress.zlib.decompressor(source);
+            //     return decomp.read(dest);
+            // },
+            // .lzma => {
+            //     var decomp = try std.compress.lzma.decompress(alloc, source);
+            //     defer decomp.deinit();
+            //     return decomp.read(dest);
+            // },
+            // .lzo => return DecompressError.LzoUnavailable,
+            // .xz => {
+            //     var decomp = try std.compress.xz.decompress(alloc, source);
+            //     defer decomp.deinit();
+            //     return decomp.read(dest);
+            // },
+            // .lz4 => return DecompressError.Lz4Unavailable,
             .zstd => {
+                if (@TypeOf(source) == []const u8) {
+                    const res = c.ZSTD_decompress(dest.ptr, dest.len, source.ptr, source.len);
+                    if (c.ZSTD_isError(res) == 1) {
+                        //TODO: find proper error
+                        return error{ZSTD_Error}.ZSTD_Error;
+                    }
+                    return res;
+                }
                 var window: [max_size]u8 = undefined;
                 var decomp = std.compress.zstd.decompressor(source, .{ .window_buffer = &window });
                 return decomp.read(dest);
             },
+            else => unreachable,
         }
     }
 };
