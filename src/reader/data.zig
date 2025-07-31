@@ -7,11 +7,23 @@ const FragEntry = @import("../fragment.zig").FragEntry;
 const BlockSize = @import("../inode/file.zig").BlockSize;
 const Compression = @import("../superblock.zig").Compression;
 
-const CompletionMap = std.ArrayHashMap(usize, []u8);
-
 const DataReaderError = error{
     EOF,
     InvalidIndex,
+};
+
+const CompletionMap = struct{
+    errs: std.ArrayList(anyerror),
+    map: std.ArrayHashMap(usize, []u8),
+    mut: std.Thread.Mutex = .{},
+    cond: std.Thread.Condition = .{},
+
+    fn init(alloc: std.mem.Allocator) CompletionMap{
+        return .{
+            .errs = .init(alloc),
+            .map = .init(alloc)
+        }
+    }
 };
 
 pub fn DataReader(comptime T: type) type {
@@ -28,6 +40,8 @@ pub fn DataReader(comptime T: type) type {
         file_size: u64,
 
         frag: ?[]u8 = null,
+
+        mut: std.Thread.Mutex = .{},
 
         pub fn init(rdr: *SfsReader(T), inode: Inode) !Self {
             var sizes: []BlockSize = undefined;
@@ -95,6 +109,7 @@ pub fn DataReader(comptime T: type) type {
             write_thr.join();
             if (errs.items.len > 0) return errs.items[0];
         }
+
         pub fn writeToNoBlock(self: Self, wrt: anytype, comptime finish: anytype, finish_args: anytype) !void {
             comptime std.debug.assert(std.meta.hasFn(@TypeOf(wrt), "write") or std.meta.hasFn(@TypeOf(wrt), "pwrite"));
             var map: CompletionMap = .init(self.alloc);
