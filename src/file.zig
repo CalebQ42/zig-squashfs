@@ -64,21 +64,25 @@ pub fn File(comptime T: type) type {
                 },
                 .file => |f| {
                     out.data_reader = try .init(rdr, inode);
-                    if (f.hasFragment()) {
-                        try out.data_reader.?.addFragment(
-                            try rdr.frag_table.get(f.frag_idx),
-                            f.frag_offset,
-                        );
-                    }
+                    _ = f;
+                    //TODO: fragments
+                    // if (f.hasFragment()) {
+                    //     try out.data_reader.?.addFragment(
+                    //         try rdr.frag_table.get(f.frag_idx),
+                    //         f.frag_offset,
+                    //     );
+                    // }
                 },
                 .ext_file => |f| {
                     out.data_reader = try .init(rdr, inode);
-                    if (f.hasFragment()) {
-                        try out.data_reader.?.addFragment(
-                            try rdr.frag_table.get(f.frag_idx),
-                            f.frag_offset,
-                        );
-                    }
+                    _ = f;
+                    //TODO: Fragments
+                    // if (f.hasFragment()) {
+                    //     try out.data_reader.?.addFragment(
+                    //         try rdr.frag_table.get(f.frag_idx),
+                    //         f.frag_offset,
+                    //     );
+                    // }
                 },
                 else => {},
             }
@@ -274,7 +278,7 @@ pub fn File(comptime T: type) type {
                             continue;
                         };
                         var thr = std.Thread.spawn(.{ .allocator = self.rdr.alloc }, extractReal, .{
-                            fil,
+                            &fil,
                             op,
                             ext_path,
                             errs,
@@ -451,7 +455,7 @@ pub fn File(comptime T: type) type {
             };
         }
         fn extractRegFinish(
-            self: Self,
+            self: *Self,
             op: ExtractionOptions,
             path: []const u8,
             fil_errs: *std.ArrayList(anyerror),

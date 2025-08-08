@@ -61,7 +61,7 @@ const DecompCompletion = struct {
         return self.errs.items.len > 0;
     }
     fn condWait(self: *DecompCompletion) void {
-        self.cond.wait(self.mut);
+        self.cond.wait(&self.mut);
     }
 };
 
@@ -148,7 +148,7 @@ pub fn DataReader(comptime T: type) type {
 
         pub fn writeToNoBlock(self: *Self, wrt: anytype, comptime finish: anytype, finish_args: anytype) !void {
             comptime std.debug.assert(std.meta.hasFn(@TypeOf(wrt), "write") or std.meta.hasFn(@TypeOf(wrt), "pwrite"));
-            errdefer self.completions.clear();
+            errdefer self.completion.clear();
             var write_thr = try std.Thread.spawn(
                 .{ .allocator = self.alloc },
                 writeThread,
@@ -161,7 +161,8 @@ pub fn DataReader(comptime T: type) type {
                     decompThread,
                     .{ self, i },
                 ) catch |err| {
-                    self.completion.addErr(err) catch {};
+                    self.completion.addErr(err);
+                    continue;
                 };
                 thr.detach();
             }
@@ -184,11 +185,11 @@ pub fn DataReader(comptime T: type) type {
             });
             if (idx == self.sizes.len and self.frag != null) {
                 @memcpy(block, self.frag.?);
-                return;
+                return block;
             }
             if (size.uncompressed) {
                 _ = try self.rdr.pread(block, self.offsets[idx]);
-                return;
+                return block;
             }
             _ = try self.comp.decompress(
                 1024 * 1024,
