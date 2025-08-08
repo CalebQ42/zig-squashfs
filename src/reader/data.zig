@@ -115,7 +115,7 @@ pub fn DataReader(comptime T: type) type {
                 .completion = .init(rdr.alloc),
             };
         }
-        pub fn deinit(self: *Self) void {
+        pub fn deinit(self: Self) void {
             self.alloc.free(self.offsets);
             self.completion.deinit();
         }

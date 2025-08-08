@@ -96,7 +96,7 @@ pub fn File(comptime T: type) type {
             const inode: Inode = try .init(&meta, rdr.alloc, rdr.super.block_size);
             return .init(rdr, inode, ent.name);
         }
-        pub fn deinit(self: *Self) void {
+        pub fn deinit(self: Self) void {
             self.rdr.alloc.free(self.name);
             self.inode.deinit(self.rdr.alloc);
             if (self.entries != null) {
