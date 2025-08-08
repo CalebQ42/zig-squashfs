@@ -16,10 +16,10 @@ test "OpenFile" {
     _ = try rdr.id_table.get(rdr.super.id_count - 1);
     _ = try rdr.export_table.get(rdr.super.inode_count - 1);
     std.debug.print("{}\n", .{rdr.super});
-    const root = try rdr.root();
+    var root = try rdr.root();
     defer root.deinit();
     var iter = root.iterate();
-    while (try iter.next()) |f| {
+    while (try iter.next()) |*f| {
         defer f.deinit();
         std.debug.print("{s}\n", .{f.name});
     }
@@ -34,7 +34,7 @@ test "ExtractSingleFile" {
     defer sfs_fil.close();
     var rdr: SfsFile = try .init(std.testing.allocator, sfs_fil, 0);
     defer rdr.deinit();
-    const fil = try rdr.open(single_file);
+    var fil = try rdr.open(single_file);
     defer fil.deinit();
     var op: ExtractionOptions = try .init();
     op.verbose = true;

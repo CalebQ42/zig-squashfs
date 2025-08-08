@@ -63,15 +63,7 @@ pub fn File(comptime T: type) type {
                     out.entries = try dir.readDirectory(rdr.alloc, &meta, d.size);
                 },
                 .file => |f| {
-                    out.data_reader = try .init(
-                        rdr.alloc,
-                        rdr.rdr,
-                        rdr.super.comp,
-                        f.block,
-                        f.size,
-                        f.block_sizes,
-                        rdr.super.block_size,
-                    );
+                    out.data_reader = try .init(rdr, inode);
                     if (f.hasFragment()) {
                         try out.data_reader.?.addFragment(
                             try rdr.frag_table.get(f.frag_idx),
@@ -80,15 +72,7 @@ pub fn File(comptime T: type) type {
                     }
                 },
                 .ext_file => |f| {
-                    out.data_reader = try .init(
-                        rdr.alloc,
-                        rdr.rdr,
-                        rdr.super.comp,
-                        f.block,
-                        f.size,
-                        f.block_sizes,
-                        rdr.super.block_size,
-                    );
+                    out.data_reader = try .init(rdr, inode);
                     if (f.hasFragment()) {
                         try out.data_reader.?.addFragment(
                             try rdr.frag_table.get(f.frag_idx),
@@ -112,7 +96,7 @@ pub fn File(comptime T: type) type {
             const inode: Inode = try .init(&meta, rdr.alloc, rdr.super.block_size);
             return .init(rdr, inode, ent.name);
         }
-        pub fn deinit(self: Self) void {
+        pub fn deinit(self: *Self) void {
             self.rdr.alloc.free(self.name);
             self.inode.deinit(self.rdr.alloc);
             if (self.entries != null) {
@@ -190,7 +174,7 @@ pub fn File(comptime T: type) type {
 
         pub const ExtractError = error{FileExists};
 
-        pub fn extract(self: Self, op: ExtractionOptions, path: []const u8) !void {
+        pub fn extract(self: *Self, op: ExtractionOptions, path: []const u8) !void {
             var exists = true;
             var stat: ?std.fs.File.Stat = null;
             if (std.fs.cwd().statFile(path)) |s| {
@@ -224,7 +208,7 @@ pub fn File(comptime T: type) type {
             if (errs.items.len > 0) return errs.items[0];
         }
         fn extractReal(
-            self: Self,
+            self: *Self,
             op: ExtractionOptions,
             path: []const u8,
             errs: *std.ArrayList(anyerror),
@@ -365,9 +349,7 @@ pub fn File(comptime T: type) type {
                     defer if (!complete) self.rdr.alloc.destroy(fil_errs);
                     fil_errs.* = .init(self.rdr.alloc);
                     defer if (!complete) fil_errs.deinit();
-                    @constCast(&self.data_reader.?).setPool(pol);
                     self.data_reader.?.writeToNoBlock(
-                        errs,
                         ext_fil,
                         extractRegFinish,
                         .{
@@ -409,7 +391,7 @@ pub fn File(comptime T: type) type {
             };
         }
         fn extractDirWait(
-            self: Self,
+            self: *Self,
             op: ExtractionOptions,
             path: []const u8,
             dir_wg: *WaitGroup,
