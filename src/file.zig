@@ -100,7 +100,7 @@ pub fn File(comptime T: type) type {
             const inode: Inode = try .init(&meta, rdr.alloc, rdr.super.block_size);
             return .init(rdr, inode, ent.name);
         }
-        pub fn deinit(self: Self) void {
+        pub fn deinit(self: *Self) void {
             self.rdr.alloc.free(self.name);
             self.inode.deinit(self.rdr.alloc);
             if (self.entries != null) {
@@ -179,25 +179,6 @@ pub fn File(comptime T: type) type {
         pub const ExtractError = error{FileExists};
 
         pub fn extract(self: *Self, op: ExtractionOptions, path: []const u8) !void {
-            var exists = true;
-            var stat: ?std.fs.File.Stat = null;
-            if (std.fs.cwd().statFile(path)) |s| {
-                stat = s;
-            } else |err| {
-                if (err == std.fs.File.OpenError.FileNotFound) {
-                    exists = false;
-                } else {
-                    return err;
-                }
-            }
-            switch (self.inode.hdr.type) {
-                .dir, .ext_dir => {
-                    if (exists and stat.?.kind != .directory) {
-                        return ExtractError.FileExists;
-                    }
-                },
-                else => if (exists) return ExtractError.FileExists,
-            }
             var wg: WaitGroup = .{};
             var pol: Pool = undefined;
             try pol.init(.{
@@ -207,316 +188,65 @@ pub fn File(comptime T: type) type {
             defer pol.deinit();
             var errs: std.ArrayList(anyerror) = .init(self.rdr.alloc);
             defer errs.deinit();
-            self.extractReal(op, path, &errs, &wg, &pol, true);
+            try self.extractInode(op, &wg, &errs, &pol, self.inode, path);
             wg.wait();
             if (errs.items.len > 0) return errs.items[0];
         }
-        fn extractReal(
+        fn extractInode(
             self: *Self,
             op: ExtractionOptions,
-            path: []const u8,
-            errs: *std.ArrayList(anyerror),
             wg: *WaitGroup,
+            errs: *std.ArrayList(anyerror),
             pol: *Pool,
-            first: bool,
-        ) void {
-            if (errs.items.len > 0) return;
-            if (op.verbose) {
-                std.fmt.format(
-                    op.verbose_logger,
-                    "extracting inode {} \"{s}\" to {s}...\n",
-                    .{ self.inode.hdr.num, self.name, path },
-                ) catch {};
-            }
-            return switch (self.inode.hdr.type) {
-                .dir, .ext_dir => {
-                    var complete = false;
-                    wg.start();
-                    defer if (!complete) wg.finish();
-                    std.fs.cwd().makeDir(path) catch |err| {
-                        if (err != std.fs.Dir.MakeError.PathAlreadyExists) {
-                            errs.append(err) catch {};
-                            return;
-                        }
-                    };
-                    const dir_wg = self.rdr.alloc.create(WaitGroup) catch |err| {
-                        errs.append(err) catch {};
-                        return;
-                    };
-                    dir_wg.* = .{};
-                    for (self.entries.?) |ent| {
-                        const fil = initFromEntry(self.rdr, ent) catch |err| {
-                            std.fmt.format(
-                                op.verbose_logger,
-                                "error extracting inode {} \"{s}\": {}\n",
-                                .{ ent.num, path, err },
-                            ) catch {};
-                            continue;
-                        };
-                        const ext_path = blk: {
-                            if (path[path.len - 1] == '/') {
-                                var new = self.rdr.alloc.alloc(u8, path.len + ent.name.len) catch |err| {
-                                    break :blk err;
-                                };
-                                @memcpy(new[0..path.len], path);
-                                @memcpy(new[path.len..], ent.name);
-                                break :blk new;
-                            }
-                            var new = self.rdr.alloc.alloc(u8, path.len + ent.name.len + 1) catch |err| {
-                                break :blk err;
-                            };
-                            @memcpy(new[0..path.len], path);
-                            new[path.len] = '/';
-                            @memcpy(new[path.len + 1 ..], ent.name);
-                            break :blk new;
-                        } catch |err| {
-                            std.fmt.format(
-                                op.verbose_logger,
-                                "error extracting inode {} \"{s}\": {}\n",
-                                .{ ent.num, path, err },
-                            ) catch {};
-                            continue;
-                        };
-                        var thr = std.Thread.spawn(.{ .allocator = self.rdr.alloc }, extractReal, .{
-                            &fil,
-                            op,
-                            ext_path,
-                            errs,
-                            dir_wg,
-                            pol,
-                            false,
-                        }) catch |err| {
-                            self.rdr.alloc.free(ext_path);
-                            if (op.verbose) {
-                                std.fmt.format(
-                                    op.verbose_logger,
-                                    "error extracting inode {} \"{s}\": {}\n",
-                                    .{ ent.num, path, err },
-                                ) catch {};
-                            }
-                            continue;
-                        };
-                        thr.detach();
-                    }
-                    var thr = std.Thread.spawn(
-                        .{ .allocator = self.rdr.alloc },
-                        extractDirWait,
-                        .{
-                            self,
-                            op,
-                            path,
-                            dir_wg,
-                            wg,
-                            first,
-                        },
-                    ) catch |err| {
+            inode: Inode,
+            path: []const u8,
+        ) !void {
+            _ = errs;
+            _ = pol;
+
+            wg.start();
+            defer wg.finish(); //TODO: When everthing is threaded, this will need to be handled by the threads, not here.
+            switch (inode.hdr.type) {
+                .file => {
+                    var fil = try std.fs.cwd().createFile(path, .{});
+                    defer fil.close();
+                    var data: DataReader(T) = try .init(self.rdr, inode);
+                    defer data.deinit();
+                    try data.writeTo(fil); // TODO: Thread
+                    const fil_uid = self.rdr.id_table.get(inode.hdr.uid_idx) catch |err| {
                         if (op.verbose) {
-                            std.fmt.format(
-                                op.verbose_logger,
-                                "error spawning wait thread for \"{s}\": {}\n",
-                                .{ path, err },
-                            ) catch {};
+                            std.fmt.format(op.verbose_logger, "error getting uid {} from table: {}\n", .{ inode.hdr.uid_idx, err }) catch {};
                         }
-                        self.extractDirWait(op, path, dir_wg, wg, first);
                         return;
                     };
-                    thr.detach();
-                    complete = true;
+                    const fil_gid = self.rdr.id_table.get(inode.hdr.gid_idx) catch |err| {
+                        if (op.verbose) {
+                            std.fmt.format(op.verbose_logger, "error getting gid {} from table: {}\n", .{ inode.hdr.gid_idx, err }) catch {};
+                        }
+                        return;
+                    };
+                    fil.chmod(inode.hdr.perm) catch |err| {
+                        if (op.verbose) {
+                            std.fmt.format(op.verbose_logger, "error chmod {s}: {}\n", .{ path, err }) catch {};
+                        }
+                        return;
+                    };
+                    fil.chown(fil_uid, fil_gid) catch |err| {
+                        if (op.verbose) {
+                            std.fmt.format(op.verbose_logger, "error chmod {s}: {}\n", .{ path, err }) catch {};
+                        }
+                        return;
+                    };
+                    //TODO: update mtime.
                 },
-                .file, .ext_file => {
-                    var complete = false;
-                    wg.start();
-                    defer if (!complete) wg.finish();
-                    var ext_fil = std.fs.cwd().createFile(path, .{}) catch |err| {
-                        if (op.verbose) {
-                            std.fmt.format(
-                                op.verbose_logger,
-                                "error creating file \"{s}\": {}\n",
-                                .{ path, err },
-                            ) catch {};
-                        }
-                        errs.append(err) catch {};
-                        return;
-                    };
-                    defer if (!complete) ext_fil.close();
-                    var fil_errs = self.rdr.alloc.create(std.ArrayList(anyerror)) catch |err| {
-                        if (op.verbose) {
-                            std.fmt.format(
-                                op.verbose_logger,
-                                "error allocating memory: {}\n",
-                                .{err},
-                            ) catch {};
-                        }
-                        errs.append(err) catch {};
-                        return;
-                    };
-                    defer if (!complete) self.rdr.alloc.destroy(fil_errs);
-                    fil_errs.* = .init(self.rdr.alloc);
-                    defer if (!complete) fil_errs.deinit();
-                    self.data_reader.?.writeToNoBlock(
-                        ext_fil,
-                        extractRegFinish,
-                        .{
-                            self,
-                            op,
-                            path,
-                            fil_errs,
-                            errs,
-                            wg,
-                            ext_fil,
-                            first,
-                        },
-                    ) catch |err| {
-                        if (op.verbose) {
-                            std.fmt.format(
-                                op.verbose_logger,
-                                "error extracting file \"{s}\": {}\n",
-                                .{ path, err },
-                            ) catch {};
-                        }
-                        errs.append(err) catch {};
-                        return;
-                    };
-                    complete = true;
+                .dir => {
+                    std.fs.cwd().makeDir(path); //TODO: Check existence
                 },
-                .symlink, .ext_symlink => {},
-                .block_dev, .ext_block_dev, .char_dev, .ext_char_dev, .fifo, .ext_fifo => {
-                    //TODO: check for all oses that accept unix permissions.
-                },
+                .symlink => {},
                 else => {
-                    if (op.verbose) {
-                        std.fmt.format(
-                            op.verbose_logger,
-                            "inode {} \"{s}\" is a socket file. Ignoring.\n",
-                            .{ self.inode.hdr.num, path },
-                        ) catch {};
-                    }
+                    std.debug.print("TODO: {}\n", .{inode.hdr.type});
                 },
-            };
-        }
-        fn extractDirWait(
-            self: *Self,
-            op: ExtractionOptions,
-            path: []const u8,
-            dir_wg: *WaitGroup,
-            wg: *WaitGroup,
-            first: bool,
-        ) void {
-            dir_wg.wait();
-            self.rdr.alloc.destroy(dir_wg);
-            defer {
-                wg.finish();
-                if (!first) {
-                    self.rdr.alloc.free(path);
-                    self.deinit();
-                }
             }
-            if (op.ignore_permissions) return;
-            const dir_uid = self.uid() catch |err| {
-                std.fmt.format(
-                    op.verbose_logger,
-                    "error getting uid for inode {} \"{s}\": {}\n",
-                    .{ self.inode.hdr.num, path, err },
-                ) catch {};
-                return;
-            };
-            const dir_gid = self.gid() catch |err| {
-                std.fmt.format(
-                    op.verbose_logger,
-                    "error getting gid for inode {} \"{s}\": {}\n",
-                    .{ self.inode.hdr.num, path, err },
-                ) catch {};
-                return;
-            };
-            var ext_dir = std.fs.cwd().openFile(path, .{}) catch |err| {
-                std.fmt.format(
-                    op.verbose_logger,
-                    "error setting owner & permissions for \"{s}\": {}\n",
-                    .{ path, err },
-                ) catch {};
-                return;
-            };
-            defer ext_dir.close();
-            ext_dir.chmod(self.inode.hdr.perm) catch |err| {
-                std.fmt.format(
-                    op.verbose_logger,
-                    "error setting permissions for inode {} \"{s}\": {}\n",
-                    .{ self.inode.hdr.num, path, err },
-                ) catch {};
-                return;
-            };
-            ext_dir.chown(dir_uid, dir_gid) catch |err| {
-                std.fmt.format(
-                    op.verbose_logger,
-                    "error setting owner for inode {} \"{s}\": {}\n",
-                    .{ self.inode.hdr.num, path, err },
-                ) catch {};
-                return;
-            };
-        }
-        fn extractRegFinish(
-            self: *Self,
-            op: ExtractionOptions,
-            path: []const u8,
-            fil_errs: *std.ArrayList(anyerror),
-            errs: *std.ArrayList(anyerror),
-            wg: *WaitGroup,
-            fil: std.fs.File,
-            first: bool,
-        ) void {
-            defer {
-                wg.finish();
-                fil.close();
-                self.rdr.alloc.destroy(fil_errs);
-                if (!first) {
-                    self.deinit();
-                    self.rdr.alloc.free(path);
-                }
-            }
-            if (fil_errs.items.len > 0) {
-                if (op.verbose) {
-                    std.fmt.format(
-                        op.verbose_logger,
-                        "error extracting inode {} to \"{s}\": {}\n",
-                        .{ self.inode.hdr.num, path, fil_errs.items[0] },
-                    ) catch {};
-                }
-                errs.append(fil_errs.items[0]) catch {};
-                return;
-            }
-            if (op.ignore_permissions) return;
-            const fil_uid = self.uid() catch |err| {
-                std.fmt.format(
-                    op.verbose_logger,
-                    "error getting uid for inode {} \"{s}\": {}\n",
-                    .{ self.inode.hdr.num, path, err },
-                ) catch {};
-                return;
-            };
-            const fil_gid = self.gid() catch |err| {
-                std.fmt.format(
-                    op.verbose_logger,
-                    "error getting gid for inode {} \"{s}\": {}\n",
-                    .{ self.inode.hdr.num, path, err },
-                ) catch {};
-                return;
-            };
-            fil.chmod(self.inode.hdr.perm) catch |err| {
-                std.fmt.format(
-                    op.verbose_logger,
-                    "error setting permissions for inode {} \"{s}\": {}\n",
-                    .{ self.inode.hdr.num, path, err },
-                ) catch {};
-                return;
-            };
-            fil.chown(fil_uid, fil_gid) catch |err| {
-                std.fmt.format(
-                    op.verbose_logger,
-                    "error setting owner for inode {} \"{s}\": {}\n",
-                    .{ self.inode.hdr.num, path, err },
-                ) catch {};
-                return;
-            };
         }
     };
 }

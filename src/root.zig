@@ -19,10 +19,13 @@ test "OpenFile" {
     var root = try rdr.root();
     defer root.deinit();
     var iter = root.iterate();
-    while (try iter.next()) |*f| {
-        defer f.deinit();
-        std.debug.print("{s}\n", .{f.name});
+    while (true) {
+        var f = try iter.next();
+        if (f == null) break;
+        defer f.?.deinit();
+        std.debug.print("{s}\n", .{f.?.name});
     }
+    std.debug.print("Finished OpenFile test", .{});
 }
 
 test "ExtractSingleFile" {
@@ -39,6 +42,8 @@ test "ExtractSingleFile" {
     var op: ExtractionOptions = try .init();
     op.verbose = true;
     try fil.extract(op, single_file_extr_loc);
+
+    std.debug.print("Finished ExtractSingleFile test\n", .{});
 }
 
 test "ExtractAll" {
@@ -52,4 +57,6 @@ test "ExtractAll" {
     const op: ExtractionOptions = try .init();
     // op.verbose = true;
     try rdr.extract(op, extr_dir);
+
+    std.debug.print("Finished ExtractAll test\n", .{});
 }

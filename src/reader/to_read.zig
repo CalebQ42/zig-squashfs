@@ -33,7 +33,8 @@ pub fn ToRead(comptime T: type) type {
             }
             return cur_red;
         }
-        pub fn reader(self: anytype) std.io.Reader(*Self, anyerror, read) {
+        const Reader = std.io.GenericReader(*Self, anyerror, read);
+        pub fn reader(self: anytype) Reader {
             return .{
                 .context = @constCast(self),
             };

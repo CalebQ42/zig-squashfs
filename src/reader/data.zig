@@ -101,8 +101,10 @@ pub fn DataReader(comptime T: type) type {
                 },
                 else => unreachable,
             }
-            for (1..offsets.len) |i| {
-                offsets[i] = offsets[i - 1] + sizes[i - 1].size;
+            if (offsets.len > 1) {
+                for (1..offsets.len) |i| {
+                    offsets[i] = offsets[i - 1] + sizes[i - 1].size;
+                }
             }
             return .{
                 .alloc = rdr.alloc,
@@ -115,7 +117,7 @@ pub fn DataReader(comptime T: type) type {
                 .completion = .init(rdr.alloc),
             };
         }
-        pub fn deinit(self: Self) void {
+        pub fn deinit(self: *Self) void {
             self.alloc.free(self.offsets);
             self.completion.deinit();
         }
@@ -139,6 +141,7 @@ pub fn DataReader(comptime T: type) type {
                     .{ self, i },
                 ) catch |err| {
                     self.completion.addErr(err);
+                    continue;
                 };
                 thr.detach();
             }
@@ -194,7 +197,7 @@ pub fn DataReader(comptime T: type) type {
             _ = try self.comp.decompress(
                 1024 * 1024,
                 self.alloc,
-                self.rdr.readerAt(self.offsets[idx]),
+                self.rdr.readerAt(self.offsets[idx]).reader(),
                 block,
             );
             return block;
