@@ -201,13 +201,10 @@ pub fn File(comptime T: type) type {
             inode: Inode,
             path: []const u8,
         ) !void {
-            _ = errs;
-            _ = pol;
-
             wg.start();
             defer wg.finish(); //TODO: When everthing is threaded, this will need to be handled by the threads, not here.
             switch (inode.hdr.type) {
-                .file => {
+                .file, .ext_file => {
                     var fil = try std.fs.cwd().createFile(path, .{});
                     defer fil.close();
                     var data: DataReader(T) = try .init(self.rdr, inode);
@@ -239,10 +236,116 @@ pub fn File(comptime T: type) type {
                     };
                     //TODO: update mtime.
                 },
-                .dir => {
-                    std.fs.cwd().makeDir(path); //TODO: Check existence
+                .dir, .ext_dir => {
+                    std.fs.cwd().makeDir(path) catch |err| {
+                        if (err != std.fs.Dir.MakeError.PathAlreadyExists) {
+                            return err;
+                        }
+                    };
+                    var dir_block: u32 = 0;
+                    var dir_offset: u16 = 0;
+                    var dir_size: u32 = 0;
+                    switch (inode.data) {
+                        .dir => |d| {
+                            dir_block = d.block;
+                            dir_offset = d.offset;
+                            dir_size = d.size;
+                        },
+                        .ext_dir => |d| {
+                            dir_block = d.block;
+                            dir_offset = d.offset;
+                            dir_size = d.size;
+                        },
+                        else => unreachable,
+                    }
+                    var meta: MetadataReader(T) = .init(self.rdr.alloc, self.rdr.super.comp, self.rdr.rdr, dir_block + self.rdr.super.dir_start);
+                    try meta.skip(dir_offset);
+                    const entries = try dir.readDirectory(self.rdr.alloc, &meta, dir_size);
+                    defer self.rdr.alloc.free(entries);
+                    for (entries) |ent| {
+                        defer ent.deinit(self.rdr.alloc);
+                        var new_path: []u8 = undefined;
+                        if (path[path.len - 1] == '/') {
+                            new_path = self.rdr.alloc.alloc(u8, path.len + ent.name.len) catch |err| {
+                                if (op.verbose) {
+                                    std.fmt.format(op.verbose_logger, "error allocating memory: {}\n", .{err}) catch {};
+                                }
+                                errs.append(err) catch {};
+                                continue;
+                            };
+                            @memcpy(new_path[0..path.len], path);
+                            @memcpy(new_path[path.len..], ent.name);
+                        } else {
+                            new_path = self.rdr.alloc.alloc(u8, path.len + ent.name.len + 1) catch |err| {
+                                if (op.verbose) {
+                                    std.fmt.format(op.verbose_logger, "error allocating memory: {}\n", .{err}) catch {};
+                                }
+                                errs.append(err) catch {};
+                                continue;
+                            };
+                            @memcpy(new_path[0..path.len], path);
+                            new_path[path.len] = '/';
+                            @memcpy(new_path[path.len + 1 ..], ent.name);
+                        }
+                        defer self.rdr.alloc.free(new_path);
+
+                        meta = .init(self.rdr.alloc, self.rdr.super.comp, self.rdr.rdr, ent.block + self.rdr.super.inode_start);
+                        meta.skip(ent.offset) catch |err| {
+                            if (op.verbose) {
+                                std.fmt.format(op.verbose_logger, "error reading inode: {}\n", .{err}) catch {};
+                            }
+                            errs.append(err) catch {};
+                            continue;
+                        };
+                        const new_inode = Inode.init(&meta, self.rdr.alloc, self.rdr.super.block_size) catch |err| {
+                            if (op.verbose) {
+                                std.fmt.format(op.verbose_logger, "error reading inode: {}\n", .{err}) catch {};
+                            }
+                            errs.append(err) catch {};
+                            continue;
+                        };
+                        defer new_inode.deinit(self.rdr.alloc);
+                        self.extractInode(op, wg, errs, pol, new_inode, new_path) catch |err| {
+                            if (op.verbose) {
+                                std.fmt.format(op.verbose_logger, "error extracting {s}: {}\n", .{ new_path, err }) catch {};
+                            }
+                            errs.append(err) catch {};
+                            continue;
+                        };
+                    }
+
+                    var fil = std.fs.cwd().openDir(path, .{ .iterate = true }) catch |err| {
+                        if (op.verbose) {
+                            std.fmt.format(op.verbose_logger, "error openning {s} to set permissions: {}\n", .{ path, err }) catch {};
+                        }
+                        return;
+                    };
+                    const fil_uid = self.rdr.id_table.get(inode.hdr.uid_idx) catch |err| {
+                        if (op.verbose) {
+                            std.fmt.format(op.verbose_logger, "error getting uid {} from table: {}\n", .{ inode.hdr.uid_idx, err }) catch {};
+                        }
+                        return;
+                    };
+                    const fil_gid = self.rdr.id_table.get(inode.hdr.gid_idx) catch |err| {
+                        if (op.verbose) {
+                            std.fmt.format(op.verbose_logger, "error getting gid {} from table: {}\n", .{ inode.hdr.gid_idx, err }) catch {};
+                        }
+                        return;
+                    };
+                    fil.chmod(inode.hdr.perm) catch |err| {
+                        if (op.verbose) {
+                            std.fmt.format(op.verbose_logger, "error chmod {s}: {}\n", .{ path, err }) catch {};
+                        }
+                        return;
+                    };
+                    fil.chown(fil_uid, fil_gid) catch |err| {
+                        if (op.verbose) {
+                            std.fmt.format(op.verbose_logger, "error chmod {s}: {}\n", .{ path, err }) catch {};
+                        }
+                        return;
+                    };
                 },
-                .symlink => {},
+                // .symlink, .ext_symlink => {},
                 else => {
                     std.debug.print("TODO: {}\n", .{inode.hdr.type});
                 },

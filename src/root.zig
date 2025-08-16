@@ -25,7 +25,7 @@ test "OpenFile" {
         defer f.?.deinit();
         std.debug.print("{s}\n", .{f.?.name});
     }
-    std.debug.print("Finished OpenFile test", .{});
+    std.debug.print("Finished OpenFile test\n", .{});
 }
 
 test "ExtractSingleFile" {

@@ -51,8 +51,6 @@ const DecompCompletion = struct {
     }
 
     fn getBlock(self: *DecompCompletion, idx: usize) ?[]u8 {
-        self.mut.lock();
-        defer self.mut.unlock();
         const res = self.map.fetchSwapRemove(idx);
         if (res == null) return null;
         return res.?.value;
@@ -216,7 +214,8 @@ pub fn DataReader(comptime T: type) type {
                 self.completion.condWait();
                 if (self.completion.hasErrs()) break;
                 if (comptime std.meta.hasFn(@TypeOf(wrt), "pwrite")) {
-                    for (self.completion.map.keys()) |k| {
+                    for (self.completion.map.keys()) |_| {
+                        const k = self.completion.map.keys()[0];
                         const blk = self.completion.getBlock(k).?;
                         defer self.alloc.free(blk);
                         if (blk.len > 0) {
