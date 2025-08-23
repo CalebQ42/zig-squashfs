@@ -117,7 +117,7 @@ pub fn init(alloc: std.mem.Allocator, comp: CompType, thread_count: usize) !Mgr 
 pub fn deinit(self: *Mgr) void {
     self.closed = true;
     self.cond.broadcast();
-    for (self.threads) |*t| {
+    for (self.threads[self.to_start..]) |*t| {
         t.data.atom.store(1, .release);
         t.data.thr.join();
     }

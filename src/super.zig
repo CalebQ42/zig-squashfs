@@ -1,7 +1,7 @@
 const InodeRef = @import("inode.zig").Ref;
-const CompType = @import("decomp.zig").CompType;
+const CompType = @import("util/decomp.zig").CompType;
 
-const Superblock = packed struct {
+pub const Superblock = packed struct {
     magic: u32,
     inode_count: u32,
     mod_time: u32,
