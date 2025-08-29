@@ -15,6 +15,7 @@ test "BasicInit" {
     defer fil.close();
     var rdr = try openFile(std.testing.allocator, fil, 0);
     defer rdr.deinit();
+    std.debug.print("HELLO {*}\n", .{&rdr.decomp});
     // TODO: assert correct reading of the superblock.
     std.debug.print("{}\n", .{rdr.super});
     std.debug.print("{any}\n", .{try rdr.export_table.get(2973)});
