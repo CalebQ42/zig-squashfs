@@ -1,5 +1,13 @@
+const math = @import("std").math;
+
 const InodeRef = @import("inode.zig").Ref;
 const CompType = @import("util/decomp.zig").CompType;
+
+pub const SuperblockErr = error{
+    invalidMagic,
+    invalidBlockLog,
+    invalidVersion,
+};
 
 pub const Superblock = packed struct {
     magic: u32,
@@ -35,4 +43,10 @@ pub const Superblock = packed struct {
     dir_start: u64,
     frag_start: u64,
     export_start: u64,
+
+    pub fn validate(self: Superblock) !void {
+        if (self.magic != 0x73717368) return SuperblockErr.invalidMagic;
+        if (self.ver_maj != 4 or self.ver_min != 0) return SuperblockErr.invalidVersion;
+        if (math.log2(self.block_size) != self.block_log) return SuperblockErr.invalidBlockLog;
+    }
 };

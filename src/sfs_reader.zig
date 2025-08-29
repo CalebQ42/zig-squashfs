@@ -12,6 +12,8 @@ pub const FragEntry = packed struct {
     _: u32,
 };
 
+/// A squashfs archive read from a reader of type T.
+/// The reader must implement pread([]u8, u64) (such as std.fs.File).
 pub fn SfsReader(comptime T: type) type {
     return struct {
         const Self = @This();
@@ -26,14 +28,14 @@ pub fn SfsReader(comptime T: type) type {
         frag_table: Table(FragEntry, T) = undefined,
         export_table: Table(InodeRef, T) = undefined,
 
-        /// Initialize an SfsReader. rdr must have the function pread([]u8, u64).
-        /// If thread_count is 0, std.Thread.getCpuCount() is used.
+        /// Initialize an SfsReader(T). If thread_count is 0, std.Thread.getCpuCount() is used.
         pub fn init(alloc: std.mem.Allocator, rdr: T, offset: u64, thread_count: usize) !Self {
             var out: Self = .{
                 .alloc = alloc,
                 .rdr = .init(rdr, offset),
             };
             _ = try out.rdr.pread(std.mem.asBytes(&out.super), 0);
+            try out.super.validate();
             out.decomp = try .init(alloc, out.super.comp, if (thread_count == 0) thread_count else try std.Thread.getCpuCount());
             out.id_table = .init(alloc, .init(rdr, offset), out.super.id_start, &out.decomp, out.super.id_count);
             out.frag_table = .init(alloc, .init(rdr, offset), out.super.frag_start, &out.decomp, out.super.frag_count);

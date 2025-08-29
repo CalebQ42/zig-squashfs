@@ -35,7 +35,7 @@ pub fn Table(comptime T: type, comptime R: type) type {
         pub fn get(self: *Self, idx: usize) !T {
             if (idx >= self.num) return TableErr.invalidIndex;
             self.mut.lockShared();
-            if (self.table.len < idx) {
+            if (self.table.len > idx) {
                 defer self.mut.unlockShared();
                 return self.table[idx];
             }
@@ -47,13 +47,14 @@ pub fn Table(comptime T: type, comptime R: type) type {
                 if (!self.alloc.resize(self.table, self.table.len + to_read)) {
                     var new_tab = try self.alloc.alloc(T, self.table.len + to_read);
                     @memcpy(new_tab[0..self.table.len], self.table);
+                    self.alloc.free(self.table);
                     self.table = new_tab;
                 }
                 var offset: u64 = undefined;
                 _ = try self.rdr.pread(std.mem.asBytes(&offset), self.offset);
                 self.offset += 8;
                 var meta_rdr: MetadataReader(R) = .init(self.rdr, offset, self.decomp);
-                _ = try meta_rdr.read(std.mem.sliceAsBytes(&self.table[self.table.len - to_read ..]));
+                _ = try meta_rdr.read(std.mem.sliceAsBytes(self.table[self.table.len - to_read ..]));
             }
             return self.table[idx];
         }

@@ -37,14 +37,18 @@ const Thread = struct {
         self.thr = try std.Thread.spawn(.{}, thread, .{ self, mgr });
     }
 
-    fn submitWork(self: *Thread, wrk: []u8, out: []u8) void {
+    fn submitWork(self: *Thread, wrk: []u8, out: []u8) !void {
+        if (self.atom.raw == 2) return MgrErr.closed;
         self.wrk = wrk;
         self.out = out;
         self.finish_atom.store(0, .release);
+        if (self.atom.raw == 2) return MgrErr.closed;
+        self.atom.store(1, .release);
         Futex.wake(&self.atom, 1);
     }
     fn finishWork(self: *Thread, mgr: *Mgr) void {
         self.wrk = &[0]u8{};
+        self.finish_atom.store(0, .unordered);
         mgr.mut.lock();
         mgr.queue.append(&mgr.threads[self.idx]);
         mgr.mut.unlock();
@@ -52,26 +56,33 @@ const Thread = struct {
     }
 
     fn thread(self: *Thread, mgr: *Mgr) void {
-        while (self.atom.raw == 0) {
-            Futex.wait(&self.atom);
-            if (self.wrk.len == 0 or self.atom.raw != 0) continue;
-            defer self.finish_atom.store(1, .release);
+        while (self.atom.raw != 2) {
+            Futex.wait(&self.atom, 0);
+            if (self.atom.raw != 1) continue;
+            defer {
+                self.finish_atom.store(1, .unordered);
+                Futex.wake(&self.finish_atom, 1); // setting finish_atom should be enough, but it doesn't seem to always work.
+                self.atom.store(0, .release);
+            }
             switch (mgr.comp) {
                 .gzip => {
-                    var decomp = zlib.decompressor(std.io.fixedBufferStream(self.wrk));
+                    var rdr = std.io.fixedBufferStream(self.wrk);
+                    var decomp = zlib.decompressor(rdr.reader());
                     self.siz = decomp.read(self.out);
                 },
                 .lzma => {
-                    var decomp = lzma.decompress(mgr.alloc, std.io.fixedBufferStream(self.wrk)) catch |err| {
+                    var rdr = std.io.fixedBufferStream(self.wrk);
+                    var decomp = lzma.decompress(mgr.alloc, rdr.reader()) catch |err| {
                         self.siz = err;
                         continue;
                     };
                     defer decomp.deinit();
-                    decomp.read(self.out);
+                    self.siz = decomp.read(self.out);
                 },
                 .lzo => self.siz = MgrErr.lzoUnsupported,
                 .xz => {
-                    var decomp = xz.decompress(mgr.alloc, std.io.fixedBufferStream(self.wrk)) catch |err| {
+                    var rdr = std.io.fixedBufferStream(self.wrk);
+                    var decomp = xz.decompress(mgr.alloc, rdr.reader()) catch |err| {
                         self.siz = err;
                         continue;
                     };
@@ -81,7 +92,8 @@ const Thread = struct {
                 .lz4 => self.siz = MgrErr.lz4Unsupported,
                 .zstd => {
                     var win: [1024 * 1024]u8 = undefined;
-                    var decomp = zstd.decompressor(std.io.fixedBufferStream(self.wrk), .{ .window_buffer = &win });
+                    var rdr = std.io.fixedBufferStream(self.wrk);
+                    var decomp = zstd.decompressor(rdr.reader(), .{ .window_buffer = &win });
                     self.siz = decomp.read(self.out);
                 },
             }
@@ -144,10 +156,13 @@ pub fn decompress(self: *Mgr, dat: []u8, out: []u8) !usize {
         }
         self.cond.wait(&self.mut);
     }
+    defer thr.finishWork(self);
     self.mut.unlock();
     if (self.closed) return MgrErr.closed;
-    defer thr.finishWork(self);
-    thr.submitWork(dat, out);
+    try thr.submitWork(
+        dat,
+        out,
+    );
     while (thr.finish_atom.raw == 0) {
         Futex.wait(&thr.finish_atom, 0);
     }

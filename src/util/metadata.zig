@@ -65,11 +65,11 @@ pub fn MetadataReader(comptime T: type) type {
             self.offset += @sizeOf(Header);
             defer self.offset += hdr.size;
             if (hdr.uncompressed) {
-                self.block_size = try self.rdr.pread(&self.block[0..hdr.size], self.offset);
+                self.block_size = try self.rdr.pread(self.block[0..hdr.size], self.offset);
             } else {
                 var tmp: [8192]u8 = undefined;
-                _ = try self.rdr.pread(&tmp[0..hdr.size], self.offset);
-                self.block_size = try self.decomp.decompress(&tmp[0..hdr.size], self.block);
+                _ = try self.rdr.pread(tmp[0..hdr.size], self.offset);
+                self.block_size = try self.decomp.decompress(tmp[0..hdr.size], &self.block);
             }
         }
     };
