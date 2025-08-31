@@ -4,6 +4,8 @@ pub const SfsReader = @import("sfs_reader.zig").SfsReader;
 pub const SfsFile = SfsReader(std.fs.File);
 
 pub fn openFile(alloc: std.mem.Allocator, file: std.fs.File, offset: u64) !SfsFile {
+    var buf: [1024 * 1024]u8 = undefined;
+    var rdr = file.readerStreaming(&buf);
     return .init(alloc, file, offset, try std.Thread.getCpuCount());
 }
 
@@ -18,7 +20,7 @@ test "BasicInit" {
     std.debug.print("HELLO {*}\n", .{&rdr.decomp});
     // TODO: assert correct reading of the superblock.
     std.debug.print("{}\n", .{rdr.super});
-    std.debug.print("{any}\n", .{try rdr.export_table.get(2973)});
+    std.debug.print("{any}\n", .{try rdr.exportTable(2973)});
     // TODO: test the 3 tables. Check boundries & extent.
     std.debug.print("completed BasicInit\n", .{});
 }

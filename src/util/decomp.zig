@@ -130,8 +130,11 @@ pub fn deinit(self: *Mgr) void {
     self.closed = true;
     self.cond.broadcast();
     for (self.threads[self.to_start..]) |*t| {
-        t.data.atom.store(1, .release);
+        t.data.atom.store(2, .unordered);
+        Futex.wake(&t.data.atom, 1);
+        // std.debug.print("stopping {}....\n", .{t.data.idx});
         t.data.thr.join();
+        // std.debug.print("stopped {}\n", .{t.data.idx});
     }
     self.alloc.free(self.threads);
 }
