@@ -38,6 +38,10 @@ pub fn Table(T: anytype) type {
         }
 
         pub fn deinit(self: *This) void {
+            var iter = self.tab.valueIterator();
+            for (iter.next()) |s| {
+                self.alloc.free(s);
+            }
             self.tab.deinit();
         }
 
@@ -65,8 +69,7 @@ pub fn Table(T: anytype) type {
             rdr = try self.fil.readerAt(offset, &[0]u8{});
             var meta: MetadataReader = .init(&rdr.interface, self.decomp);
             try meta.interface.readSliceAll(@ptrCast(slice));
-            //TODO: read & decompress block.
-            self.tab.put(block_num, slice);
+            try self.tab.put(block_num, slice);
         }
     };
 }
