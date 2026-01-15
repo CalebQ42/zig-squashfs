@@ -14,6 +14,7 @@ decomp: *DecompMgr,
 buf: [8192]u8 = undefined,
 
 interface: Reader,
+err: anyerror = 0,
 
 pub fn init(rdr: Reader, decomp: *DecompMgr) This {
     return .{
@@ -23,12 +24,16 @@ pub fn init(rdr: Reader, decomp: *DecompMgr) This {
             .buffer = &[0]u8{},
             .end = 0,
             .seek = 0,
-            .vtable = &{
+            .vtable = &.{
                 .stream = stream,
             },
         },
     };
 }
 
-fn stream(rdr: *Reader, wrt: *Writer, limit: Limit) StreamError!usize{
+fn advance(self: *This) !void {}
+
+fn stream(rdr: *Reader, wrt: *Writer, limit: Limit) StreamError!usize {
+    const this: *This = @fieldParentPtr("interface", rdr);
+    if (rdr.end == rdr.seek) try this.advance();
 }
