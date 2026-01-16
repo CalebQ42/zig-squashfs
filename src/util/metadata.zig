@@ -14,7 +14,7 @@ const BlockHeader = packed struct {
 const This = @This();
 
 alloc: std.mem.Allocator,
-rdr: Reader,
+rdr: *Reader,
 decomp: *DecompMgr,
 
 buf: [8192]u8 = undefined,
@@ -22,7 +22,7 @@ buf: [8192]u8 = undefined,
 interface: Reader,
 err: anyerror = 0,
 
-pub fn init(alloc: std.mem.Allocator, rdr: Reader, decomp: *DecompMgr) This {
+pub fn init(alloc: std.mem.Allocator, rdr: *Reader, decomp: *DecompMgr) This {
     return .{
         .alloc = alloc,
         .rdr = rdr,
@@ -43,9 +43,9 @@ pub fn init(alloc: std.mem.Allocator, rdr: Reader, decomp: *DecompMgr) This {
 fn advance(self: *This) !void {
     self.interface.seek = 0;
     var hdr: BlockHeader = undefined;
-    try self.rdr.readSliceAll(@ptrCast(&hdr));
+    try self.rdr.readSliceEndian(BlockHeader, @ptrCast(&hdr), .little);
     if (hdr.uncompressed) {
-        try self.rdr.readSliceAll(&self.buf[0..hdr.size]);
+        try self.rdr.readSliceEndian(u8, &self.buf[0..hdr.size], .little);
         self.interface.end = hdr.size;
         self.interface.buffer = self.buf[0..hdr.size];
         return;

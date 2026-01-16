@@ -93,7 +93,7 @@ pub const DecompThread = struct {
             self.res_size = blk: switch (comp_type) {
                 .gzip => {
                     var decomp_rdr = compress.flate.Decompress.init(rdr, .zlib, self.buf);
-                    break :blk decomp_rdr.reader.readSliceAll(self.res);
+                    break :blk decomp_rdr.reader.readSliceEndian(u8, self.res, .little);
                 },
                 .lzma => {
                     var decomp_rdr = compress.lzma.decompress(self.mgr.alloc, rdr.adaptToOldInterface()) catch |err| {
@@ -109,7 +109,7 @@ pub const DecompThread = struct {
                 },
                 .zstd => {
                     var decomp_rdr = compress.zstd.Decompress.init(rdr, self.buf, .{});
-                    break :blk decomp_rdr.reader.readSliceAll(self.res);
+                    break :blk decomp_rdr.reader.readSliceEndian(u8, self.res, .little);
                 },
                 else => unreachable,
             };

@@ -11,7 +11,7 @@ const TableError = error{
 
 pub fn Table(T: anytype) type {
     return struct {
-        const This = @This();
+        const Self = @This();
 
         const VALS_PER_BLOCK = 8192 / @sizeOf(T);
 
@@ -20,12 +20,12 @@ pub fn Table(T: anytype) type {
         decomp: *DecompMgr,
         tab_start: u64,
 
-        mut: Mutex = .{},
-
         tab: std.AutoHashMap(u32, []T),
         values: u32,
 
-        pub fn init(alloc: std.mem.Allocator, fil: OffsetFile, decomp: *DecompMgr, tab_start: u64, values: u32) !This {
+        mut: Mutex = .{},
+
+        pub fn init(alloc: std.mem.Allocator, fil: OffsetFile, decomp: *DecompMgr, tab_start: u64, values: u32) !Self {
             return .{
                 .alloc = alloc,
                 .fil = fil,
@@ -37,15 +37,15 @@ pub fn Table(T: anytype) type {
             };
         }
 
-        pub fn deinit(self: *This) void {
+        pub fn deinit(self: *Self) void {
             var iter = self.tab.valueIterator();
-            for (iter.next()) |s| {
-                self.alloc.free(s);
+            while (iter.next()) |s| {
+                self.alloc.free(s.*);
             }
             self.tab.deinit();
         }
 
-        pub fn get(self: *This, idx: u32) !T {
+        pub fn get(self: *Self, idx: u32) !T {
             if (idx >= self.values) return TableError.InvalidIndex;
             const block_num = idx / VALS_PER_BLOCK;
             const idx_offset = idx - (block_num * VALS_PER_BLOCK);
@@ -65,11 +65,12 @@ pub fn Table(T: anytype) type {
             const slice = try self.alloc.alloc(slice_size);
             var rdr = try self.fil.readerAt(self.tab_start + (8 * block_num), &[0]u8{});
             const offset: u64 = 0;
-            try rdr.interface.readSliceAll(@ptrCast(&idx_offset));
+            try rdr.interface.readSliceEndian(u64, @ptrCast(&idx_offset), .little);
             rdr = try self.fil.readerAt(offset, &[0]u8{});
             var meta: MetadataReader = .init(&rdr.interface, self.decomp);
-            try meta.interface.readSliceAll(@ptrCast(slice));
+            try meta.interface.readSliceEndian(T, @ptrCast(slice), .little);
             try self.tab.put(block_num, slice);
+            return slice[idx_offset];
         }
     };
 }

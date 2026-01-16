@@ -1,9 +1,10 @@
-const math = @import("std").math;
+const std = @import("std");
+const math = std.math;
 
 const CompressionType = @import("decomp.zig").CompressionType;
 const InodeRef = @import("inode.zig").Ref;
 
-const SQUASHFS_MAGIC: u32 = "hsqs";
+const SQUASHFS_MAGIC: u32 = std.mem.readInt(u32, "hsqs", .little);
 
 const SuperblockError = error{
     InvalidMagic,
@@ -52,7 +53,7 @@ pub const Superblock = packed struct {
     pub fn validate(self: Superblock) !void {
         if (self.magic != SQUASHFS_MAGIC)
             return SuperblockError.InvalidMagic;
-        if (self.magic.flags.check)
+        if (self.flags.check)
             return SuperblockError.InvalidCheck;
         if (self.ver_maj != 4 or self.ver_min != 0)
             return SuperblockError.InvalidVersion;
