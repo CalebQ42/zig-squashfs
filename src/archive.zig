@@ -32,6 +32,7 @@ const MEM_SIZE = 4 * 1024 * 1024 * 1024;
 parent_alloc: std.mem.Allocator,
 alloc: std.heap.FixedBufferAllocator,
 fixed_buf: []u8,
+thread_count: usize,
 
 fil: OffsetFile,
 
@@ -59,7 +60,6 @@ pub fn init(alloc: std.mem.Allocator, fil: File) !Archive {
 /// If trying to extract a full archive, a large memory size & thread count could help.
 /// If you're planning on only interacting with a small number of files, it should be fine to use few threads and a small memory size.
 pub fn initAdvanced(alloc: std.mem.Allocator, fil: File, offset: u64, threads: usize, mem: usize) !Archive {
-    _ = threads;
     var super: Superblock = undefined;
     const red = try fil.pread(@ptrCast(&super), offset);
     std.debug.assert(red == @sizeOf(Superblock));
@@ -69,6 +69,7 @@ pub fn initAdvanced(alloc: std.mem.Allocator, fil: File, offset: u64, threads: u
         .parent_alloc = alloc,
         .alloc = .init(fixed_buf),
         .fixed_buf = fixed_buf,
+        .thread_count = threads,
         .fil = .init(fil, offset),
 
         .super = super,
@@ -88,21 +89,31 @@ pub fn allocator(self: *Archive) std.mem.Allocator {
     return self.alloc.threadSafeAllocator();
 }
 
+fn setupValues(self: *Archive) !void {
+    self.decomp = try .init(self.allocator(), self.super.compression, self.super.block_size, self.thread_count);
+    self.frag_table = try .init(self.allocator(), self.fil, &self.decomp, self.super.frag_start, self.super.frag_count);
+    self.id_table = try .init(self.allocator(), self.fil, &self.decomp, self.super.id_start, self.super.id_count);
+    self.export_table = try .init(self.allocator(), self.fil, &self.decomp, self.super.export_start, self.super.inode_count);
+}
+
 pub fn root(self: *Archive) !SfsFile {
+    if (!self.setup) try self.setupValues();
     var rdr = try self.fil.readerAt(self.super.root_ref.block_start + self.super.inode_start, &[0]u8{});
-    var meta: MetadataReader = .init(self.allocator(), &rdr, &self.decomp);
+    var meta: MetadataReader = .init(self.allocator(), &rdr.interface, &self.decomp);
     try meta.interface.discardAll(self.super.root_ref.block_offset);
     const inode: Inode = try .read(self.allocator(), &meta.interface, self.super.block_size);
     return .init(self, inode, "");
 }
 
 pub fn open(self: *Archive, path: []const u8) !SfsFile {
+    if (!self.setup) try self.setupValues();
     var root_fil = try self.root();
     defer if (!SfsFile.pathIsSelf(path)) root_fil.deinit();
     return root_fil.open(path);
 }
 
 pub fn extract(self: *Archive, path: []const u8, options: ExtractionOptions) !void {
+    if (!self.setup) try self.setupValues();
     var root_fil = try self.root();
     defer root_fil.deinit();
     return root_fil.extract(path, options);

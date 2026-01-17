@@ -4,7 +4,7 @@ pub const Dir = packed struct {
     block_start: u32,
     hard_links: u32,
     size: u16,
-    block_offset: u32,
+    block_offset: u16,
     parent_num: u32,
 
     pub fn read(rdr: *Reader) !Dir {

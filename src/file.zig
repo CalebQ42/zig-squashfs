@@ -24,7 +24,7 @@ name: []const u8,
 /// Initialize a new File.
 /// name is copied to the File so can be safely freed afterwards.
 pub fn init(archive: *Archive, inode: Inode, name: []const u8) !File {
-    const new_name = try archive.allocator().alloc(name.len);
+    const new_name = try archive.allocator().alloc(u8, name.len);
     @memcpy(new_name, name);
     return .{
         .archive = archive,
@@ -34,11 +34,11 @@ pub fn init(archive: *Archive, inode: Inode, name: []const u8) !File {
 }
 pub fn fromEntry(archive: *Archive, entry: DirEntry) !File {
     var rdr = try archive.fil.readerAt(entry.block_start + archive.super.inode_start, &[0]u8{});
-    var meta: MetadataReader = .init(archive.allocator(), &rdr, &archive.decomp);
+    var meta: MetadataReader = .init(archive.allocator(), &rdr.interface, &archive.decomp);
     try meta.interface.discardAll(entry.block_offset);
     const inode: Inode = try .read(archive.allocator(), &meta.interface, archive.super.block_size);
-    errdefer inode.deinit();
-    const new_name = try archive.allocator().alloc(entry.name.len);
+    errdefer inode.deinit(archive.allocator());
+    const new_name = try archive.allocator().alloc(u8, entry.name.len);
     @memcpy(new_name, entry.name);
     return .init(archive, inode, new_name);
 }
@@ -49,7 +49,7 @@ pub fn deinit(self: File) void {
     self.inode.deinit(alloc);
 }
 
-fn getEntries(self: *File) ![]DirEntry {
+fn getEntries(self: File) ![]DirEntry {
     if (!self.isDir()) return FileError.NotDirectory;
     var block_start: u32 = undefined;
     var block_offset: u16 = undefined;
@@ -67,25 +67,32 @@ fn getEntries(self: *File) ![]DirEntry {
         },
         else => unreachable,
     }
-    var rdr = self.archive.fil.readerAt(self.archive.super.dir_start + block_start, &[0]u8{});
+    var rdr = try self.archive.fil.readerAt(self.archive.super.dir_start + block_start, &[0]u8{});
     const alloc = self.archive.allocator();
     var meta: MetadataReader = .init(alloc, &rdr.interface, &self.archive.decomp);
     try meta.interface.discardAll(block_offset);
     return DirEntry.readDir(alloc, &rdr.interface, size);
 }
 
+pub fn isDir(self: File) bool {
+    return switch (self.inode.hdr.inode_type) {
+        .dir, .ext_dir => true,
+        else => false,
+    };
+}
+
 /// Open a file/folder within a directory at the given path.
 /// If path is ".", "/", or "./", this File is returned.
-pub fn open(self: *File, path: []const u8) !File {
+pub fn open(self: File, path: []const u8) !File {
     if (!self.isDir()) return FileError.NotDirectory;
     if (pathIsSelf(path)) return self;
     // Recursively stip ending & leading path separators.
     // TODO: potentially do this more efficiently or have stricter requirements.
     if (path[0] == '/') return self.open(path[1..]);
     if (path[path.len - 1] == '/') return self.open(path[0 .. path.len - 1]);
-    const idx = std.mem.indexOf(u8, path, '/') orelse path.len;
+    const idx = std.mem.indexOf(u8, path, "/") orelse path.len;
     const first_element = path[0..idx];
-    if (std.mem.eql(first_element, ".")) return self;
+    if (std.mem.eql(u8, first_element, ".")) return self;
     const entries = try self.getEntries();
     var cur_slice = entries;
     var split = cur_slice.len / 2;

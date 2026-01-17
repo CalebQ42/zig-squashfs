@@ -20,7 +20,7 @@ decomp: *DecompMgr,
 buf: [8192]u8 = undefined,
 
 interface: Reader,
-err: anyerror = 0,
+err: ?anyerror = null,
 
 pub fn init(alloc: std.mem.Allocator, rdr: *Reader, decomp: *DecompMgr) This {
     return .{
@@ -45,12 +45,12 @@ fn advance(self: *This) !void {
     var hdr: BlockHeader = undefined;
     try self.rdr.readSliceEndian(BlockHeader, @ptrCast(&hdr), .little);
     if (hdr.uncompressed) {
-        try self.rdr.readSliceEndian(u8, &self.buf[0..hdr.size], .little);
+        try self.rdr.readSliceEndian(u8, self.buf[0..hdr.size], .little);
         self.interface.end = hdr.size;
         self.interface.buffer = self.buf[0..hdr.size];
         return;
     }
-    var limit_rdr = self.rdr.limited(@enumFromInt(hdr.size), &[0]u8);
+    var limit_rdr = self.rdr.limited(@enumFromInt(hdr.size), &[0]u8{});
     self.interface.end = try self.decomp.decompReader(&limit_rdr.interface, &self.buf);
     self.interface.buffer = self.buf[0..self.interface.end];
 }

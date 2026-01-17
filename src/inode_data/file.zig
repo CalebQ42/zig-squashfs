@@ -20,7 +20,7 @@ pub const File = struct {
         const size: u32 = std.mem.readInt(u32, start[12..16], .little);
         var num_blocks: u32 = size / block_size;
         if (size % block_size != 0 and frag_idx == 0xFFFFFFFF) num_blocks += 1;
-        const sizes = try alloc.alloc(u32, num_blocks);
+        const sizes = try alloc.alloc(BlockSize, num_blocks);
         errdefer alloc.free(sizes);
         try rdr.readSliceEndian(BlockSize, sizes, .little);
         return .{
@@ -52,9 +52,9 @@ pub const ExtFile = struct {
         try rdr.readSliceEndian(u8, &start, .little);
         const frag_idx: u32 = std.mem.readInt(u32, start[28..32], .little);
         const size: u64 = std.mem.readInt(u64, start[8..16], .little);
-        var num_blocks: u32 = size / block_size;
+        var num_blocks: u32 = @truncate(size / block_size);
         if (size % block_size != 0 and frag_idx == 0xFFFFFFFF) num_blocks += 1;
-        const sizes = try alloc.alloc(u32, num_blocks);
+        const sizes = try alloc.alloc(BlockSize, num_blocks);
         errdefer alloc.free(sizes);
         try rdr.readSliceEndian(BlockSize, sizes, .little);
         return .{

@@ -28,7 +28,7 @@ pub fn readDir(alloc: std.mem.Allocator, rdr: *Reader, size: u32) ![]Entry {
     var cur_red: u32 = 3; // start at 3 due to "." & ".." being counted in the dir size.
     var hdr: Header = undefined;
     var raw: RawEntry = undefined;
-    var out: std.ArrayList(Entry) = .initCapacity(alloc, 0);
+    var out: std.ArrayList(Entry) = .empty;
     errdefer {
         for (out.items) |i|
             i.deinit(alloc);
@@ -42,13 +42,14 @@ pub fn readDir(alloc: std.mem.Allocator, rdr: *Reader, size: u32) ![]Entry {
             try rdr.readSliceEndian(RawEntry, @ptrCast(&raw), .little);
             const name = try alloc.alloc(u8, raw.name_size + 1);
             try rdr.readSliceEndian(u8, name, .little);
-            _ = out.addOneAssumeCapacity(.{
+            const val = out.addOneAssumeCapacity();
+            val.* = .{
                 .block_start = hdr.block_start,
                 .block_offset = raw.offset,
                 .num = @abs(hdr.num + raw.offset),
                 .inode_type = raw.inode_type,
                 .name = name,
-            });
+            };
             cur_red += @sizeOf(RawEntry) + raw.name_size + 1;
         }
     }

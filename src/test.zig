@@ -62,7 +62,7 @@ const LinuxPATestCorrectSuperblock: Superblock = .{
     .ver_min = 0,
     .root_ref = .{
         .block_offset = 1363,
-        .table_offset = 29237,
+        .block_start = 29237,
         ._ = 0,
     },
     .size = 106841744,
