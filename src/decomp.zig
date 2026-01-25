@@ -54,7 +54,7 @@ pub const DecompThread = struct {
     pub fn close(self: *DecompThread) void {
         if (self.status.raw == 0) return;
         while (self.status.raw == 2) Futex.wait(&self.status, 2);
-        &self.status.store(3, .release);
+        self.status.store(3, .release);
         Futex.wake(&self.status, 1);
         self.thr.join();
     }
@@ -148,6 +148,9 @@ pub fn init(alloc: std.mem.Allocator, comp_type: CompressionType, block_size: u3
 }
 
 pub fn deinit(self: DecompMgr) void {
+    for (self.threads[self.to_start..]) |*t| {
+        t.close();
+    }
     self.alloc.free(self.threads);
 }
 
@@ -179,6 +182,8 @@ pub fn decompSlice(self: *DecompMgr, dat: []u8, res: []u8) !usize {
     return thr.submitData(dat, res);
 }
 pub fn decompReader(self: *DecompMgr, rdr: *Reader, res: []u8) !usize {
+    std.debug.print("HELLO\n", .{});
+    defer std.debug.print("GOODBYE\n", .{});
     self.mut.lock();
     var thr: *DecompThread = undefined;
     var node = self.queue.popFirst();

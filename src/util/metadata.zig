@@ -7,8 +7,8 @@ const StreamError = std.Io.Reader.StreamError;
 const DecompMgr = @import("../decomp.zig");
 
 const BlockHeader = packed struct {
-    uncompressed: bool,
     size: u15,
+    uncompressed: bool,
 };
 
 const This = @This();
@@ -50,7 +50,8 @@ fn advance(self: *This) !void {
         self.interface.buffer = self.buf[0..hdr.size];
         return;
     }
-    var limit_rdr = self.rdr.limited(@enumFromInt(hdr.size), &[0]u8{});
+    var tmp_buf: [1024]u8 = undefined;
+    var limit_rdr = self.rdr.limited(@enumFromInt(hdr.size), &tmp_buf);
     self.interface.end = try self.decomp.decompReader(&limit_rdr.interface, &self.buf);
     self.interface.buffer = self.buf[0..self.interface.end];
 }
