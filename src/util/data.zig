@@ -64,24 +64,39 @@ fn blockNum(self: DataReader) u32 {
 }
 
 fn advance(self: *DataReader) !void {
-    if (self.block_idx > self.blocks.len) return Reader.Error.EndOfStream;
+    if (self.block_idx > self.blocks.len or (self.block_idx == self.blocks.len and self.frag == null)) return Reader.Error.EndOfStream;
     defer self.block_idx += 1;
     self.interface.seek = 0;
     self.alloc.free(self.interface.buffer);
-    const cur_block_size = if (self.block_idx == self.blockNum() - 1) self.size % self.block_size else self.block_size;
-    if (self.block_idx == self.blocks.len) {
-        if (self.frag == null) return Reader.Error.EndOfStream;
-        // TODO: Fragment
-        return error.TODO;
-    }
-    const block = self.blocks[self.block_idx];
-    if (block.uncompressed) {
-        var rdr = try self.fil.readerAt(self.cur_offset, &[0]u8);
-        self.interface.buffer = try rdr.interface.readAlloc(self.alloc, cur_block_size);
+    if (self.block_idx == self.blocks.len) { // fragment
+        var rdr = try self.fil.readerAt(self.frag.?.start + self.frag_offset, &[0]u8);
+        self.interface.buffer = try rdr.interface.readAlloc(self.alloc, self.size % self.block_size);
         self.interface.end = self.interface.buffer.len;
+        if (self.frag.?.size.uncompressed) {
+            try rdr.interface.discardAll(self.frag_offset);
+            try rdr.interface.readSliceAll(self.interface.buffer);
+            return;
+        }
+        const tmp_buf = try self.alloc.alloc(u8, self.frag.?.size.size);
+        defer self.alloc.free(tmp_buf);
+        var limit_rdr = Reader.limited(&rdr.interface, self.frag.?.size.size, tmp_buf);
+        const needed_block = try self.alloc.alloc(u8, self.frag_offset + self.interface.buffer.len);
+        defer self.alloc.free(needed_block);
+        _ = try self.decomp.decompReader(&limit_rdr.interface, needed_block);
+        @memcpy(self.interface.buffer, needed_block[self.frag_offset..]);
         return;
     }
-    return error.TODO;
+    const cur_block_size = if (self.block_idx == self.blockNum() - 1) self.size % self.block_size else self.block_size;
+    const block = self.blocks[self.block_idx];
+    var rdr = try self.fil.readerAt(self.cur_offset, &[0]u8);
+    self.interface.end = cur_block_size;
+    if (block.uncompressed) {
+        self.interface.buffer = try rdr.interface.readAlloc(self.alloc, cur_block_size);
+        return;
+    }
+    var buf: [8192]u8 = undefined;
+    var limit_rdr = Reader.limited(&rdr.interface, block.size, &buf);
+    _ = try self.decomp.decompReader(&limit_rdr.interface, self.interface.buffer);
 }
 
 fn stream(rdr: *Reader, wrt: *Writer, limit: Limit) Reader.StreamError!usize {
