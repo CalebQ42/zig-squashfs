@@ -79,7 +79,8 @@ pub const DecompThread = struct {
         self.rdr = rdr;
         defer self.rdr = null;
         self.res = res;
-        self.status.raw = 2;
+        self.status.store(2, .release);
+        Futex.wake(&self.status, 1);
         while (self.status.raw == 2) Futex.wait(&self.status, 2);
         return self.res_size;
     }
@@ -94,7 +95,9 @@ pub const DecompThread = struct {
             self.res_size = blk: switch (comp_type) {
                 .gzip => {
                     var decomp_rdr = compress.flate.Decompress.init(rdr, .zlib, self.buf);
-                    break :blk decomp_rdr.reader.readSliceShort(self.res);
+                    break :blk decomp_rdr.reader.readSliceShort(self.res) catch |err| {
+                        break :blk decomp_rdr.err orelse err;
+                    };
                 },
                 .lzma => {
                     var decomp_rdr = compress.lzma.decompress(self.mgr.alloc, rdr.adaptToOldInterface()) catch |err| {
@@ -110,7 +113,9 @@ pub const DecompThread = struct {
                 },
                 .zstd => {
                     var decomp_rdr = compress.zstd.Decompress.init(rdr, self.buf, .{});
-                    break :blk decomp_rdr.reader.readSliceShort(self.res);
+                    break :blk decomp_rdr.reader.readSliceShort(self.res) catch |err| {
+                        break :blk decomp_rdr.err orelse err;
+                    };
                 },
                 else => unreachable,
             };
@@ -182,8 +187,6 @@ pub fn decompSlice(self: *DecompMgr, dat: []u8, res: []u8) !usize {
     return thr.submitData(dat, res);
 }
 pub fn decompReader(self: *DecompMgr, rdr: *Reader, res: []u8) !usize {
-    std.debug.print("HELLO\n", .{});
-    defer std.debug.print("GOODBYE\n", .{});
     self.mut.lock();
     var thr: *DecompThread = undefined;
     var node = self.queue.popFirst();

@@ -1,4 +1,5 @@
-const Writer = @import("std").Io.Writer;
+const std = @import("std");
+const Writer = std.Io.Writer;
 
 const ExtractionOptions = @This();
 
@@ -9,9 +10,9 @@ ignoreOwner: bool = false,
 /// Replace symlinks with their target.
 dereferenceSymlinks: bool = false,
 
-verbose: bool = false,
-/// If options verbose and verboseWriter not set, logs are printed to stdout.
-verboseWriter: ?Writer = null,
+log_level: std.log.Level = .err,
+// /// If options verbose and verboseWriter not set, logs are printed to stdout.
+// verboseWriter: ?*Writer = null,
 
 pub const Default: ExtractionOptions = .{};
 pub const VerboseDefault: ExtractionOptions = .{ .verbose = true };

@@ -8,26 +8,25 @@ const DecompMgr = @import("decomp.zig");
 const ExtractionOptions = @import("options.zig");
 const Inode = @import("inode.zig");
 const InodeRef = Inode.Ref;
+const BlockSize = @import("inode_data/file.zig").BlockSize;
 const SfsFile = @import("file.zig");
 const Superblock = @import("super.zig").Superblock;
 const Table = @import("table.zig").Table;
 const MetadataReader = @import("util/metadata.zig");
 const OffsetFile = @import("util/offset_file.zig");
 
-const FragEntry = packed struct {
+/// Information about a fragment section. Multiple fragments are contained in the block described by a single FragEntry.
+/// The offset into the block and fragment size is stored in the file's inode.
+pub const FragEntry = packed struct {
     start: u64,
-    size: packed struct {
-        size: u24,
-        uncompressed: bool,
-        _: u7,
-    },
+    size: BlockSize,
     _: u32,
 };
 
 const Archive = @This();
 
 // 4 Gigs
-const MEM_SIZE = 4 * 1024 * 1024 * 1024;
+const DEFAULT_MEM_SIZE = 4 * 1024 * 1024 * 1024;
 
 parent_alloc: std.mem.Allocator,
 alloc: std.heap.FixedBufferAllocator,
@@ -53,7 +52,7 @@ pub fn init(alloc: std.mem.Allocator, fil: File) !Archive {
         fil,
         0,
         try std.Thread.getCpuCount(),
-        @min(MEM_SIZE, try std.process.totalSystemMemory() / 2),
+        @min(DEFAULT_MEM_SIZE, try std.process.totalSystemMemory() / 2),
     );
 }
 /// Create the Archive dictating the amount of threads & memory used.
@@ -94,6 +93,25 @@ fn setupValues(self: *Archive) !void {
     self.frag_table = try .init(self.allocator(), self.fil, &self.decomp, self.super.frag_start, self.super.frag_count);
     self.id_table = try .init(self.allocator(), self.fil, &self.decomp, self.super.id_start, self.super.id_count);
     self.export_table = try .init(self.allocator(), self.fil, &self.decomp, self.super.export_start, self.super.inode_count);
+}
+
+pub fn id(self: *Archive, idx: u32) !u16 {
+    if (!self.setup) try self.setupValues();
+    return self.id_table.get(idx);
+}
+
+pub fn frag(self: *Archive, idx: u32) !FragEntry {
+    if (!self.setup) try self.setupValues();
+    return self.frag_table.get(idx);
+}
+
+pub fn inode(self: *Archive, num: u32) !Inode {
+    if (!self.setup) try self.setupValues();
+    const ref = try self.export_table.get(num - 1);
+    var rdr = try self.fil.readerAt(ref.block_start + self.super.inode_start, &[0]u8{});
+    var meta: MetadataReader = .init(self.allocator(), &rdr.interface, &self.decomp);
+    try meta.interface.discardAll(ref.block_offset);
+    return try .read(self.allocator(), &meta.interface, self.super.block_size);
 }
 
 pub fn root(self: *Archive) !SfsFile {

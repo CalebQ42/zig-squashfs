@@ -38,7 +38,7 @@ pub fn readDir(alloc: std.mem.Allocator, rdr: *Reader, size: u32) ![]Entry {
         try rdr.readSliceEndian(Header, @ptrCast(&hdr), .little);
         cur_red += @sizeOf(Header);
         try out.ensureUnusedCapacity(alloc, hdr.num + 1);
-        for (0..hdr.num + 1) |_| {
+        for (0..hdr.count + 1) |_| {
             try rdr.readSliceEndian(RawEntry, @ptrCast(&raw), .little);
             const name = try alloc.alloc(u8, raw.name_size + 1);
             try rdr.readSliceEndian(u8, name, .little);
