@@ -62,12 +62,12 @@ pub fn Table(T: anytype) type {
             }
             const is_last = (self.values - 1) / VALS_PER_BLOCK == block_num;
             const slice_size = if (is_last) self.values - (block_num * VALS_PER_BLOCK) else VALS_PER_BLOCK;
-            const slice = try self.alloc.alloc(slice_size);
+            const slice = try self.alloc.alloc(T, slice_size);
             var rdr = try self.fil.readerAt(self.tab_start + (8 * block_num), &[0]u8{});
-            const offset: u64 = 0;
-            try rdr.interface.readSliceEndian(u64, @ptrCast(&idx_offset), .little);
+            var offset: u64 = 0;
+            try rdr.interface.readSliceEndian(u64, @ptrCast(&offset), .little);
             rdr = try self.fil.readerAt(offset, &[0]u8{});
-            var meta: MetadataReader = .init(&rdr.interface, self.decomp);
+            var meta: MetadataReader = .init(self.alloc, &rdr.interface, self.decomp);
             try meta.interface.readSliceEndian(T, @ptrCast(slice), .little);
             try self.tab.put(block_num, slice);
             return slice[idx_offset];

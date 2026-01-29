@@ -16,7 +16,7 @@ pub const File = struct {
 
     pub fn read(alloc: std.mem.Allocator, rdr: *Reader, block_size: u32) !File {
         var start: [16]u8 = undefined;
-        try rdr.readSliceAll(u8, &start, .little);
+        try rdr.readSliceAll(&start);
         const frag_idx: u32 = std.mem.readInt(u32, start[4..8], .little);
         const size: u32 = std.mem.readInt(u32, start[12..16], .little);
         var num_blocks: u32 = size / block_size;
@@ -50,7 +50,7 @@ pub const ExtFile = struct {
 
     pub fn read(alloc: std.mem.Allocator, rdr: *Reader, block_size: u32) !ExtFile {
         var start: [40]u8 = undefined;
-        try rdr.readSliceAll(u8, &start, .little);
+        try rdr.readSliceAll(&start);
         const frag_idx: u32 = std.mem.readInt(u32, start[28..32], .little);
         const size: u64 = std.mem.readInt(u64, start[8..16], .little);
         var num_blocks: u32 = @truncate(size / block_size);

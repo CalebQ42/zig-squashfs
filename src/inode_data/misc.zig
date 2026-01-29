@@ -7,7 +7,7 @@ pub const Symlink = struct {
 
     pub fn read(alloc: std.mem.Allocator, rdr: *Reader) !Symlink {
         var start: [8]u8 = undefined;
-        try rdr.readSliceAll(u8, &start, .little);
+        try rdr.readSliceAll(&start);
         const target_size = std.mem.readInt(u32, start[4..8], .little);
         const target = try alloc.alloc(u8, target_size + 1);
         errdefer alloc.free(target);
@@ -30,7 +30,7 @@ pub const ExtSymlink = struct {
 
     pub fn read(alloc: std.mem.Allocator, rdr: *Reader) !ExtSymlink {
         var start: [8]u8 = undefined;
-        try rdr.readSliceAll(u8, &start, .little);
+        try rdr.readSliceAll(&start);
         const target_size = std.mem.readInt(u32, start[4..8], .little);
         const target = try alloc.alloc(u8, target_size + 1);
         errdefer alloc.free(target);

@@ -15,4 +15,4 @@ log_level: std.log.Level = .err,
 // verboseWriter: ?*Writer = null,
 
 pub const Default: ExtractionOptions = .{};
-pub const VerboseDefault: ExtractionOptions = .{ .verbose = true };
+pub const VerboseDefault: ExtractionOptions = .{ .log_level = .debug };

@@ -119,8 +119,8 @@ pub fn root(self: *Archive) !SfsFile {
     var rdr = try self.fil.readerAt(self.super.root_ref.block_start + self.super.inode_start, &[0]u8{});
     var meta: MetadataReader = .init(self.allocator(), &rdr.interface, &self.decomp);
     try meta.interface.discardAll(self.super.root_ref.block_offset);
-    const inode: Inode = try .read(self.allocator(), &meta.interface, self.super.block_size);
-    return .init(self, inode, "");
+    const in: Inode = try .read(self.allocator(), &meta.interface, self.super.block_size);
+    return .init(self, in, "");
 }
 
 pub fn open(self: *Archive, path: []const u8) !SfsFile {

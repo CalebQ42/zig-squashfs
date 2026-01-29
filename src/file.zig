@@ -7,6 +7,8 @@ const Archive = @import("archive.zig");
 const DirEntry = @import("dir_entry.zig");
 const ExtractionOptions = @import("options.zig");
 const Inode = @import("inode.zig");
+const BlockSize = @import("inode_data/file.zig").BlockSize;
+const DataReader = @import("util/data.zig");
 const MetadataReader = @import("util/metadata.zig");
 
 const FileError = error{
@@ -15,7 +17,7 @@ const FileError = error{
     NotSymlink,
     NotDevice,
     NotFound,
-    InvalidExtractionPath,
+    ExtractionPathExists,
 };
 
 const SfsFile = @This();
@@ -88,6 +90,44 @@ pub fn permissions(self: SfsFile) u16 {
     return self.inode.hdr.permissions;
 }
 
+pub fn isRegular(self: SfsFile) bool {
+    return switch (self.inode.hdr.inode_type) {
+        .file, .ext_file => true,
+        else => false,
+    };
+}
+/// The returned DataReader will no longer work if the File's deinit function is called
+/// or, more specifically, it's inode's deinit function is called.
+pub fn dataReader(self: SfsFile) !DataReader {
+    if (!self.isRegular()) return FileError.NotRegularFile;
+    var frag_idx: u32 = undefined;
+    var frag_offset: u32 = undefined;
+    var size: u64 = undefined;
+    var blocks: []BlockSize = undefined;
+    var start: u64 = undefined;
+    switch (self.inode.data) {
+        .file => |f| {
+            frag_idx = f.frag_idx;
+            frag_offset = f.frag_block_offset;
+            size = f.size;
+            blocks = f.block_sizes;
+            start = f.block_start;
+        },
+        .ext_file => |f| {
+            frag_idx = f.frag_idx;
+            frag_offset = f.frag_block_offset;
+            size = f.size;
+            blocks = f.block_sizes;
+            start = f.block_start;
+        },
+        else => unreachable,
+    }
+    var out: DataReader = .init(self.archive, blocks, start, size);
+    if (frag_idx != 0xFFFFFFFF)
+        out.addFragment(try self.archive.frag(frag_idx), frag_offset);
+    return out;
+}
+
 pub fn isDir(self: SfsFile) bool {
     return switch (self.inode.hdr.inode_type) {
         .dir, .ext_dir => true,
@@ -101,7 +141,7 @@ pub fn iterate(self: SfsFile) !Iterator {
         .archive = self.archive,
     };
 }
-/// Open a file/folder within a directory at the given path.
+/// Open a sub-file/folder within a directory at the given path.
 /// If path is ".", "/", or "./", this File is returned.
 pub fn open(self: SfsFile, path: []const u8) !SfsFile {
     if (!self.isDir()) return FileError.NotDirectory;
@@ -142,7 +182,7 @@ pub fn isSymlink(self: SfsFile) bool {
     };
 }
 pub fn symlinkPath(self: SfsFile) ![]const u8 {
-    if (!self.isSymlink()) FileError.NotSymlink;
+    if (!self.isSymlink()) return FileError.NotSymlink;
     return switch (self.inode.data) {
         .symlink => |s| s.target,
         .ext_symlink => |s| s.target,
@@ -170,9 +210,6 @@ pub fn dev(self: SfsFile) !u32 {
 /// Extract the given File to the path. If File is a regular file, the path must be a directory or not exist.
 /// If the gievn path is a folder, the File's contents will be extracted within.
 pub fn extract(self: *SfsFile, path: []const u8, options: ExtractionOptions) !void {
-    std.Options = .{
-        .log_level = options.log_level,
-    };
     var alloc = self.archive.allocator();
     var ext_path: []u8 = undefined;
     if (std.fs.cwd().statFile(path)) |stat| {
@@ -183,24 +220,24 @@ pub fn extract(self: *SfsFile, path: []const u8, options: ExtractionOptions) !vo
                     path.len + self.name.len
                 else
                     path.len + self.name.len + 1;
-                ext_path = alloc.alloc(u8, alloc_size);
+                ext_path = try alloc.alloc(u8, alloc_size);
                 @memcpy(ext_path[0..path.len], path);
                 @memcpy(ext_path[ext_path.len - self.name.len ..], self.name);
                 if (!has_end_sep) ext_path[path.len] = '/';
             } else {
-                ext_path = path;
+                ext_path = @constCast(path);
             }
-        } else return FileError.InvalidExtractionPath;
+        } else return FileError.ExtractionPathExists;
     } else |err| {
-        if (err == .FileNotFound) {
-            ext_path = path;
+        if (err == error.FileNotFound) {
+            ext_path = @constCast(path);
         } else {
             std.log.err("Error stat-ing extraction path {s}: {}\n", .{ path, err });
             return err;
         }
     }
     defer if (ext_path.len > path.len) alloc.free(ext_path);
-    var pool: std.Thread.Pool = .{};
+    var pool: std.Thread.Pool = undefined;
     try pool.init(.{ .allocator = alloc });
     var wg: WaitGroup = .{};
     defer pool.deinit();
@@ -220,16 +257,15 @@ const ParentInfo = struct {
     options: ExtractionOptions,
     err: *?anyerror,
 
-    fn finish(self: *ParentInfo) void {
-        {
-            self.mut.lock();
-            defer self.mut.unlock();
-            self.dir_wg.finish();
-            if (!self.dir_wg.isDone()) {
-                return;
-            }
+    fn finish(self: *const ParentInfo) void {
+        self.mut.lock();
+        if (!self.dir_wg.isDone()) {
+            self.mut.unlock();
+            return;
         }
+        self.mut.unlock();
         self.sfs_fil.archive.allocator().destroy(self.mut);
+        self.sfs_fil.archive.allocator().destroy(self.dir_wg);
         defer self.parent_wg.finish();
         var fil = std.fs.cwd().openFile(self.path, .{}) catch |err| {
             std.log.err("Error opening folder {s} to set permissions: {}\n", .{ self.path, err });
@@ -267,33 +303,110 @@ fn extractReal(self: SfsFile, path: []const u8, options: ExtractionOptions, pol:
                 return;
             };
             defer fil.close();
-            //TODO:
+            var dat_rdr = self.dataReader() catch |err| {
+                std.log.err("Error getting data reader for {s} (inode {}): {}\n", .{ self.name, self.inode.hdr.num, err });
+                out_err.* = err;
+                return;
+            };
+            defer dat_rdr.deinit();
+            var wrt = fil.writer(&[0]u8{});
+            _ = dat_rdr.interface.streamRemaining(&wrt.interface) catch |err| {
+                std.log.err("Error writing data for {s} (inode {}) to {s}: {}\n", .{ self.name, self.inode.hdr.num, path, err });
+                out_err.* = wrt.err orelse err;
+                return;
+            };
+            wrt.interface.flush() catch |err| {
+                std.log.err("Error flushing data for {s} (inode {}) to {s}: {}\n", .{ self.name, self.inode.hdr.num, path, err });
+                out_err.* = wrt.err orelse err;
+                return;
+            };
             self.setPerm(fil, options) catch |err| {
-                std.log.err("Error setting permissions for {s}: {}\n", .{ path, err });
+                std.log.err("Error setting permissions/owner for {s}: {}\n", .{ path, err });
                 out_err.* = err;
                 return;
             };
         },
-        .symlink, .ext_symlink => {},
+        .symlink, .ext_symlink => {
+            //TODO: deal with dereference symlink options
+            const target_path = self.symlinkPath() catch |err| {
+                std.log.err("Error getting symlink target path for {s} (inode {}): {}\n", .{ self.name, self.inode.hdr.num, err });
+                out_err.* = err;
+                return;
+            };
+            std.fs.cwd().symLink(target_path, path, .{}) catch |err| {
+                std.log.err("Error creating {s}: {}\n", .{ path, err });
+                out_err.* = err;
+                return;
+            };
+            // self.setPerm(fil, options) catch |err| {
+            //     std.log.err("Error setting permissions/owner for {s}: {}\n", .{ path, err });
+            //     out_err.* = err;
+            //     return;
+            // };
+        },
         .block_dev,
         .char_dev,
         .fifo,
         .ext_block_dev,
         .ext_char_dev,
         .ext_fifo,
-        => {},
+        => {
+            var mode: u32 = undefined;
+            var fil_dev: u32 = 0;
+            switch (self.inode.hdr.inode_type) {
+                .block_dev, .ext_block_dev => {
+                    mode = std.posix.DT.BLK;
+                    fil_dev = self.dev() catch |err| {
+                        std.log.err("Error getting device number for {s} (inode {}): {}\n", .{ self.name, self.inode.hdr.num, err });
+                        out_err.* = err;
+                        return;
+                    };
+                },
+                .char_dev, .ext_char_dev => {
+                    mode = std.posix.DT.CHR;
+                    fil_dev = self.dev() catch |err| {
+                        std.log.err("Error getting device number for {s} (inode {}): {}\n", .{ self.name, self.inode.hdr.num, err });
+                        out_err.* = err;
+                        return;
+                    };
+                },
+                else => mode = std.posix.DT.FIFO,
+            }
+            const res = std.os.linux.mknod(@ptrCast(path), mode, fil_dev);
+            if (res != 0) {
+                std.log.err("Error creating device file at {s} with code {}\n", .{ path, res });
+                out_err.* = error.MknodError;
+                return;
+            }
+            const fil = std.fs.cwd().openFile(path, .{}) catch |err| {
+                std.log.err("Error openning {s} to set permissions: {}\n", .{ path, err });
+                out_err.* = err;
+                return;
+            };
+            defer fil.close();
+            self.setPerm(fil, options) catch |err| {
+                std.log.err("Error setting permissions/owner for {s}: {}\n", .{ path, err });
+                out_err.* = err;
+                return;
+            };
+        },
         .dir, .ext_dir => {
             _ = std.fs.cwd().statFile(path) catch |err| {
-                if (err == .NotFound) {}
+                if (err == error.FileNotFound) {}
             };
             var dir_wg: *WaitGroup = self.archive.allocator().create(WaitGroup) catch |err| {
-                std.log.err("Error allocating mutex for {s} (inode {}): {}\n", .{ path, self.inode.hdr.num, err });
+                std.log.err("Error allocating waitgroup for {s} (inode {}): {}\n", .{ path, self.inode.hdr.num, err });
                 out_err.* = err;
                 return;
             };
             const parent_info: ParentInfo = .{
-                .fil = self,
+                .sfs_fil = self,
                 .path = path,
+                .mut = self.archive.allocator().create(Mutex) catch |err| {
+                    std.log.err("Error allocating mutex for {s} (inode {}): {}\n", .{ path, self.inode.hdr.num, err });
+                    out_err.* = err;
+                    return;
+                },
                 .dir_wg = dir_wg,
                 .parent_wg = wg,
                 .options = options,
@@ -313,9 +426,9 @@ fn extractReal(self: SfsFile, path: []const u8, options: ExtractionOptions, pol:
                     break;
                 };
                 if (iter_fil == null) break;
-                var fil = iter_fil.?;
+                const fil = iter_fil.?;
                 dir_wg.start();
-                const path_len = path.len + fil.name.len;
+                var path_len = path.len + fil.name.len;
                 if (!path_has_end_sep) path_len += 1;
                 var new_path = self.archive.allocator().alloc(u8, path_len) catch |err| {
                     std.log.err("Error allocating subpath for {s} (inode {}): {}\n", .{ path, self.inode.hdr.num, err });
@@ -324,7 +437,7 @@ fn extractReal(self: SfsFile, path: []const u8, options: ExtractionOptions, pol:
                     break;
                 };
                 @memcpy(new_path[0..path.len], path);
-                @memcpy(new_path[new_path.len - fil.name.len ..], fil.name.len);
+                @memcpy(new_path[new_path.len - fil.name.len ..], fil.name);
                 if (!path_has_end_sep) new_path[path.len] = '/';
                 pol.spawn(extractReal, .{
                     fil,
@@ -340,7 +453,6 @@ fn extractReal(self: SfsFile, path: []const u8, options: ExtractionOptions, pol:
                     dir_wg.finish();
                     break;
                 };
-                fil.extractReal;
             }
         },
         .socket, .ext_socket => {
