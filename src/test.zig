@@ -21,6 +21,7 @@ const TestFile = "Start.exe";
 const TestFileExtractLocation = "testing/Start.exe";
 
 test "ExtractSingleFile" {
+    std.fs.cwd().deleteFile(TestFileExtractLocation) catch {};
     var fil = try std.fs.cwd().openFile(TestArchive, .{});
     defer fil.close();
     var sfs: Archive = try .init(std.testing.allocator, fil);
@@ -32,7 +33,14 @@ test "ExtractSingleFile" {
 
 const TestFullExtractLocation = "testing/TestExtract";
 
-test "ExtractCompleteArchive" {}
+test "ExtractCompleteArchive" {
+    std.fs.cwd().deleteTree(TestFullExtractLocation) catch {};
+    var fil = try std.fs.cwd().openFile(TestArchive, .{});
+    defer fil.close();
+    var sfs: Archive = try .init(std.testing.allocator, fil);
+    defer sfs.deinit();
+    try sfs.extract(TestFullExtractLocation, .VerboseDefault);
+}
 
 const LinuxPATestCorrectSuperblock: Superblock = .{
     .magic = std.mem.readInt(u32, "hsqs", .little),
