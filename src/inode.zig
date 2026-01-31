@@ -1,3 +1,5 @@
+//! A file-system object. Represents a File or directory.
+
 const std = @import("std");
 const Reader = std.Io.Reader;
 

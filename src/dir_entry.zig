@@ -1,3 +1,5 @@
+//! Directory entry from the directory table.
+
 const std = @import("std");
 const Reader = std.Io.Reader;
 

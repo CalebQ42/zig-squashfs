@@ -1,3 +1,5 @@
+//! A reader for a regular file.
+
 const std = @import("std");
 const Reader = std.Io.Reader;
 const Writer = std.Io.Writer;

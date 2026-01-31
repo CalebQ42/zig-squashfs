@@ -1,3 +1,5 @@
+//! A file/directory within the squashfs archive.
+
 const std = @import("std");
 const File = std.fs.File;
 const WaitGroup = std.Thread.WaitGroup;
@@ -391,9 +393,25 @@ fn extractReal(self: SfsFile, path: []const u8, options: ExtractionOptions, pol:
             };
         },
         .dir, .ext_dir => {
-            _ = std.fs.cwd().statFile(path) catch |err| {
-                if (err == error.FileNotFound) {}
-            };
+            if (std.fs.cwd().statFile(path)) |stat| {
+                if (stat.kind != .directory) {
+                    std.log.err("{s} exists and is not a folder\n", .{path});
+                    out_err.* = FileError.ExtractionPathExists;
+                    return;
+                }
+            } else |err| {
+                if (err == error.FileNotFound) {
+                    std.fs.cwd().makeDir(path) catch |err_2| {
+                        std.log.err("Error creating {s}: {}\n", .{ path, err_2 });
+                        out_err.* = err;
+                        return;
+                    };
+                } else {
+                    std.log.err("Error checking if {s} exists: {}\n", .{ path, err });
+                    out_err.* = err;
+                    return;
+                }
+            }
             var dir_wg: *WaitGroup = self.archive.allocator().create(WaitGroup) catch |err| {
                 std.log.err("Error allocating waitgroup for {s} (inode {}): {}\n", .{ path, self.inode.hdr.num, err });
                 out_err.* = err;

@@ -1,4 +1,4 @@
-//! A File that's meant where it's meaningful content starts at a given offset.
+//! A File where it's meaningful (to us) content starts at a given offset.
 
 const std = @import("std");
 const File = std.fs.File;

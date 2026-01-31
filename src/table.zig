@@ -9,6 +9,7 @@ const TableError = error{
     InvalidIndex,
 };
 
+/// A two-layer metadata table.
 pub fn Table(T: anytype) type {
     return struct {
         const Self = @This();

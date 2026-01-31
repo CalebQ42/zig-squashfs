@@ -49,6 +49,7 @@ pub const ExtSymlink = struct {
     }
 };
 
+/// A block or character device.
 pub const Dev = packed struct {
     hard_links: u32,
     dev: u32,
@@ -60,6 +61,7 @@ pub const Dev = packed struct {
     }
 };
 
+/// An extended block or character device.
 pub const ExtDev = packed struct {
     hard_links: u32,
     dev: u32,
@@ -72,6 +74,7 @@ pub const ExtDev = packed struct {
     }
 };
 
+/// A socket or FIFO file.
 pub const IPC = packed struct {
     hard_links: u32,
 
@@ -82,6 +85,7 @@ pub const IPC = packed struct {
     }
 };
 
+/// An extended socket or FIFO file.
 pub const ExtIPC = packed struct {
     hard_links: u32,
     xattr_idx: u32,

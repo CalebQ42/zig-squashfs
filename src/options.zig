@@ -1,3 +1,5 @@
+//! Options for file/directory extraction.
+
 const std = @import("std");
 const Writer = std.Io.Writer;
 

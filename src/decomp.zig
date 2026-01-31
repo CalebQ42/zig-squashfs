@@ -1,3 +1,5 @@
+//! Decompression manager. Can decompress either from an Io.Reader or from a byte slice.
+
 const std = @import("std");
 const compress = std.compress;
 const Reader = std.Io.Reader;
