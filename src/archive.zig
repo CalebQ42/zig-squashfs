@@ -93,6 +93,7 @@ fn setupValues(self: *Archive) !void {
     self.frag_table = try .init(self.allocator(), self.fil, &self.decomp, self.super.frag_start, self.super.frag_count);
     self.id_table = try .init(self.allocator(), self.fil, &self.decomp, self.super.id_start, self.super.id_count);
     self.export_table = try .init(self.allocator(), self.fil, &self.decomp, self.super.export_start, self.super.inode_count);
+    self.setup = true;
 }
 
 pub fn id(self: *Archive, idx: u32) !u16 {
