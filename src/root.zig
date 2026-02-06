@@ -1,1 +1,1 @@
-const Archive = @import("archive.zig");
+pub const Archive = @import("archive.zig");
