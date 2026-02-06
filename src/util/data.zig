@@ -104,6 +104,7 @@ fn advance(self: *DataReader) !void {
         return;
     }
     var rdr = try self.fil.readerAt(self.cur_offset, &[0]u8{});
+    self.cur_offset += block.size;
     if (block.uncompressed) {
         try rdr.interface.readSliceAll(self.interface.buffer);
         return;

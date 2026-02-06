@@ -46,9 +46,7 @@ pub fn fromEntry(archive: *Archive, entry: DirEntry) !SfsFile {
     try meta.interface.discardAll(entry.block_offset);
     const inode: Inode = try .read(archive.allocator(), &meta.interface, archive.super.block_size);
     errdefer inode.deinit(archive.allocator());
-    const new_name = try archive.allocator().alloc(u8, entry.name.len);
-    @memcpy(new_name, entry.name);
-    return .init(archive, inode, new_name);
+    return .init(archive, inode, entry.name);
 }
 
 pub fn deinit(self: SfsFile) void {
@@ -144,18 +142,26 @@ pub fn iterate(self: SfsFile) !Iterator {
     };
 }
 /// Open a sub-file/folder within a directory at the given path.
-/// If path is ".", "/", or "./", this File is returned.
+/// If path is "", ".", "/", or "./", this File is returned.
 pub fn open(self: SfsFile, path: []const u8) !SfsFile {
     if (!self.isDir()) return FileError.NotDirectory;
     if (pathIsSelf(path)) return self;
+
     // Recursively stip ending & leading path separators.
-    // TODO: potentially do this more efficiently or have stricter path requirements.
     if (path[0] == '/') return self.open(path[1..]);
     if (path[path.len - 1] == '/') return self.open(path[0 .. path.len - 1]);
+
     const idx = std.mem.indexOf(u8, path, "/") orelse path.len;
     const first_element = path[0..idx];
     if (std.mem.eql(u8, first_element, ".")) return self.open(path[idx + 1 ..]);
     const entries = try self.getEntries();
+    defer {
+        var alloc = self.archive.allocator();
+        for (entries) |e| {
+            e.deinit(alloc);
+        }
+        alloc.free(entries);
+    }
     var cur_slice = entries;
     var split = cur_slice.len / 2;
     while (cur_slice.len > 0) {
@@ -240,7 +246,7 @@ pub fn extract(self: *SfsFile, path: []const u8, options: ExtractionOptions) !vo
     }
     defer if (ext_path.len > path.len) alloc.free(ext_path);
     var pool: std.Thread.Pool = undefined;
-    try pool.init(.{ .allocator = alloc });
+    try pool.init(.{ .allocator = alloc, .n_jobs = 16 });
     var wg: WaitGroup = .{};
     defer pool.deinit();
     var err: ?anyerror = null;
@@ -266,6 +272,7 @@ const ParentInfo = struct {
             return;
         }
         self.mut.unlock();
+        std.debug.print("finishing dir {}: {s}\n", .{ self.sfs_fil.inode.hdr.num, self.sfs_fil.name });
         self.sfs_fil.archive.allocator().destroy(self.mut);
         self.sfs_fil.archive.allocator().destroy(self.dir_wg);
         defer self.parent_wg.finish();
@@ -393,6 +400,7 @@ fn extractReal(self: SfsFile, path: []const u8, options: ExtractionOptions, pol:
             };
         },
         .dir, .ext_dir => {
+            std.debug.print("starting dir {}: {s}\n", .{ self.inode.hdr.num, self.name });
             if (std.fs.cwd().statFile(path)) |stat| {
                 if (stat.kind != .directory) {
                     std.log.err("{s} exists and is not a folder\n", .{path});
@@ -457,20 +465,24 @@ fn extractReal(self: SfsFile, path: []const u8, options: ExtractionOptions, pol:
                 @memcpy(new_path[0..path.len], path);
                 @memcpy(new_path[new_path.len - fil.name.len ..], fil.name);
                 if (!path_has_end_sep) new_path[path.len] = '/';
-                pol.spawn(extractReal, .{
-                    fil,
-                    new_path,
-                    options,
-                    pol,
-                    wg,
-                    out_err,
-                    parent_info,
-                }) catch |err| {
-                    std.log.err("Error starting sub-file extraction thread: {}\n", .{err});
-                    out_err.* = err;
-                    dir_wg.finish();
-                    break;
-                };
+                if (fil.isDir()) {
+                    fil.extractReal(new_path, options, pol, wg, out_err, parent_info);
+                } else {
+                    pol.spawn(extractReal, .{
+                        fil,
+                        new_path,
+                        options,
+                        pol,
+                        wg,
+                        out_err,
+                        parent_info,
+                    }) catch |err| {
+                        std.log.err("Error starting sub-file extraction thread: {}\n", .{err});
+                        out_err.* = err;
+                        dir_wg.finish();
+                        break;
+                    };
+                }
             }
         },
         .socket, .ext_socket => {

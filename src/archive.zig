@@ -29,8 +29,9 @@ const Archive = @This();
 const DEFAULT_MEM_SIZE = 4 * 1024 * 1024 * 1024;
 
 parent_alloc: std.mem.Allocator,
-alloc: std.heap.FixedBufferAllocator,
-fixed_buf: []u8,
+alloc: std.heap.ThreadSafeAllocator,
+// alloc: std.heap.FixedBufferAllocator,
+// fixed_buf: []u8,
 thread_count: usize,
 
 fil: OffsetFile,
@@ -59,15 +60,16 @@ pub fn init(alloc: std.mem.Allocator, fil: File) !Archive {
 /// If trying to extract a full archive, a large memory size & thread count could help.
 /// If you're planning on only interacting with a small number of files, it should be fine to use few threads and a small memory size.
 pub fn initAdvanced(alloc: std.mem.Allocator, fil: File, offset: u64, threads: usize, mem: usize) !Archive {
+    _ = mem;
     var super: Superblock = undefined;
     const red = try fil.pread(@ptrCast(&super), offset);
     std.debug.assert(red == @sizeOf(Superblock));
     try super.validate();
-    const fixed_buf = try alloc.alloc(u8, mem);
+    // const fixed_buf = try alloc.alloc(u8, mem);
     return .{
         .parent_alloc = alloc,
-        .alloc = .init(fixed_buf),
-        .fixed_buf = fixed_buf,
+        .alloc = .{ .child_allocator = alloc },
+        // .fixed_buf = fixed_buf,
         .thread_count = threads,
         .fil = .init(fil, offset),
 
@@ -75,7 +77,7 @@ pub fn initAdvanced(alloc: std.mem.Allocator, fil: File, offset: u64, threads: u
     };
 }
 pub fn deinit(self: *Archive) void {
-    self.parent_alloc.free(self.fixed_buf);
+    // self.parent_alloc.free(self.fixed_buf);
     if (self.setup) {
         self.decomp.deinit();
         self.frag_table.deinit();
@@ -85,14 +87,15 @@ pub fn deinit(self: *Archive) void {
 }
 
 pub fn allocator(self: *Archive) std.mem.Allocator {
-    return self.alloc.threadSafeAllocator();
+    return self.alloc.allocator();
 }
 
 fn setupValues(self: *Archive) !void {
-    self.decomp = try .init(self.allocator(), self.super.compression, self.super.block_size, self.thread_count);
-    self.frag_table = try .init(self.allocator(), self.fil, &self.decomp, self.super.frag_start, self.super.frag_count);
-    self.id_table = try .init(self.allocator(), self.fil, &self.decomp, self.super.id_start, self.super.id_count);
-    self.export_table = try .init(self.allocator(), self.fil, &self.decomp, self.super.export_start, self.super.inode_count);
+    const alloc = self.allocator();
+    self.decomp = try .init(alloc, self.super.compression, self.super.block_size, self.thread_count);
+    self.frag_table = try .init(alloc, self.fil, &self.decomp, self.super.frag_start, self.super.frag_count);
+    self.id_table = try .init(alloc, self.fil, &self.decomp, self.super.id_start, self.super.id_count);
+    self.export_table = try .init(alloc, self.fil, &self.decomp, self.super.export_start, self.super.inode_count);
     self.setup = true;
 }
 

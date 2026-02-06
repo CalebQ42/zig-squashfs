@@ -27,6 +27,7 @@ test "ExtractSingleFile" {
     var sfs: Archive = try .init(std.testing.allocator, fil);
     defer sfs.deinit();
     var test_fil = try sfs.open(TestFile);
+    defer test_fil.deinit();
     try test_fil.extract(TestFileExtractLocation, .VerboseDefault);
     //TODO: validate extracted file.
 }

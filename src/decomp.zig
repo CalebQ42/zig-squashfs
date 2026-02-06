@@ -59,6 +59,7 @@ pub const DecompThread = struct {
         self.status.store(3, .release);
         Futex.wake(&self.status, 1);
         self.thr.join();
+        self.mgr.alloc.free(self.buf);
     }
 
     pub fn submitData(self: *DecompThread, dat: []u8, res: []u8) anyerror!usize {
