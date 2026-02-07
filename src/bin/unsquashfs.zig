@@ -1,6 +1,7 @@
 const std = @import("std");
 const Writer = std.Io.Writer;
 
+const config = @import("config");
 const squashfs = @import("zig_squashfs");
 
 //TODO: Add more options
@@ -8,8 +9,11 @@ const help_mgs =
     \\Usage: unsquashfs [options] <archive>
     \\
     \\Options:
-    \\  -o <offset>     Start reading the archive at the given offset.
     \\  -d <location>   Extract to the given location instead of "squashfs-root"
+    \\
+    \\  -o <offset>     Start reading the archive at the given offset.
+    \\
+    \\  --version       Display the version
 ;
 
 const errors = error{InvalidArguments};
@@ -24,6 +28,10 @@ pub fn main() !void {
     var out = stdout.writer(&[0]u8{});
     defer out.interface.flush() catch {};
     try handleArgs(alloc, &out.interface);
+    if (archive.len == 0) {
+        try out.interface.print("You must provide a squashfs archive\n", .{});
+        return;
+    }
     var fil: std.fs.File = try std.fs.cwd().openFile(archive, .{}); //TODO: Handle error gracefully.
     defer fil.close();
     var arc: squashfs.Archive = try .initAdvanced(alloc, fil, offset, try std.Thread.getCpuCount(), 0); //TODO: Update when memory size matters. //TODO: Handle error gracefully.
@@ -55,6 +63,12 @@ fn handleArgs(alloc: std.mem.Allocator, out: *Writer) !void {
             }
             extLoc = nxt.?;
             continue;
+        } else if (std.mem.eql(u8, arg, "--version")) {
+            _ = try out.write("v");
+            try config.version_string.format(out);
+            _ = try out.write("\n");
+            std.process.cleanExit();
+            return;
         }
         if (archive.len > 0) {
             try out.print("you can only provide one file at a time\n", .{});

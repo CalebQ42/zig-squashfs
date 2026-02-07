@@ -92,10 +92,10 @@ fn advance(self: *DataReader) !void {
         const tmp_buf = try self.alloc.alloc(u8, self.frag.?.size.size);
         defer self.alloc.free(tmp_buf);
         try rdr.interface.readSliceAll(tmp_buf);
-        const needed_block = try self.alloc.alloc(u8, self.frag_offset + cur_block_size);
+        const needed_block = try self.alloc.alloc(u8, self.block_size);
         defer self.alloc.free(needed_block);
         _ = try self.decomp(self.alloc, tmp_buf, needed_block);
-        @memcpy(self.interface.buffer, needed_block[self.frag_offset..]);
+        @memcpy(self.interface.buffer, needed_block[self.frag_offset .. self.frag_offset + cur_block_size]);
         return;
     }
     const block = self.blocks[self.block_idx];
