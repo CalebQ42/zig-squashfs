@@ -138,6 +138,9 @@ pub fn extractTo(self: Inode, archive: *Archive, path: []const u8, options: Extr
         .dir, .ext_dir => {
             // Removing any trailing separators since that's the easiest path forward.
             if (path[path.len - 1] == '/') return self.extractTo(archive, path[0 .. path.len - 1], options);
+            std.fs.cwd().makeDir(path) catch |err| {
+                if (err != std.fs.Dir.MakeError.PathAlreadyExists) return err;
+            };
             var alloc = archive.allocator();
             const entries = try self.dirEntries(archive);
             defer {
@@ -218,7 +221,7 @@ fn extractRegFile(self: Inode, archive: *Archive, path: []const u8, options: Ext
     _ = try dat_rdr.interface.streamRemaining(&wrt.interface);
     try wrt.interface.flush();
     // updateTime is in nanoseconds (a billionth of a second). mod_time is in seconds.
-    try fil.updateTimes(self.hdr.mod_time * (10 ^ 9), self.hdr.mod_time * (10 ^ 9));
+    try fil.updateTimes(self.hdr.mod_time, self.hdr.mod_time);
     if (!options.ignore_permissions) {
         try fil.chmod(self.hdr.permissions);
         try fil.chown(try archive.id(self.hdr.uid_idx), try archive.id(self.hdr.gid_idx));

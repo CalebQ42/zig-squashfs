@@ -42,7 +42,7 @@ pub fn init(archive: *Archive, inode: Inode, name: []const u8) !SfsFile {
 }
 pub fn fromEntry(archive: *Archive, entry: DirEntry) !SfsFile {
     var rdr = try archive.fil.readerAt(entry.block_start + archive.super.inode_start, &[0]u8{});
-    var meta: MetadataReader = .init(archive.allocator(), &rdr.interface, &archive.decomp);
+    var meta: MetadataReader = .init(archive.allocator(), &rdr.interface, archive.decomp);
     try meta.interface.discardAll(entry.block_offset);
     const inode: Inode = try .read(archive.allocator(), &meta.interface, archive.super.block_size);
     errdefer inode.deinit(archive.allocator());

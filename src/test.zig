@@ -28,7 +28,7 @@ test "ExtractSingleFile" {
     defer sfs.deinit();
     var test_fil = try sfs.open(TestFile);
     defer test_fil.deinit();
-    try test_fil.extract(TestFileExtractLocation, .VerboseDefault);
+    try test_fil.extract(TestFileExtractLocation, .Default);
     //TODO: validate extracted file.
 }
 
@@ -40,7 +40,7 @@ test "ExtractCompleteArchive" {
     defer fil.close();
     var sfs: Archive = try .init(std.testing.allocator, fil);
     defer sfs.deinit();
-    try sfs.extract(TestFullExtractLocation, .VerboseDefault);
+    try sfs.extract(TestFullExtractLocation, .Default);
 }
 
 const LinuxPATestCorrectSuperblock: Superblock = .{

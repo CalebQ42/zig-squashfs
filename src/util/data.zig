@@ -111,6 +111,7 @@ fn advance(self: *DataReader) !void {
     }
     const tmp_buf = try self.alloc.alloc(u8, block.size);
     defer self.alloc.free(tmp_buf);
+    try rdr.interface.readSliceAll(tmp_buf);
     _ = try self.decomp(self.alloc, tmp_buf, self.interface.buffer);
 }
 /// Does not guarentee that data currently in the buffer is retained.

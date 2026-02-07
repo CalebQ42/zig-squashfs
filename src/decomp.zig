@@ -18,9 +18,10 @@ pub const DecompFn = *const fn (alloc: std.mem.Allocator, in: []u8, out: []u8) a
 // };
 
 pub fn gzipDecompress(alloc: std.mem.Allocator, in: []u8, out: []u8) anyerror!usize {
-    _ = alloc;
     var rdr: Reader = .fixed(in);
-    var decomp = std.compress.flate.Decompress.init(&rdr, .zlib, &[0]u8{});
+    const buf = try alloc.alloc(u8, out.len);
+    defer alloc.free(buf);
+    var decomp = std.compress.flate.Decompress.init(&rdr, .zlib, buf);
     return decomp.reader.readSliceShort(out);
 }
 
@@ -37,8 +38,11 @@ pub fn xzDecompress(alloc: std.mem.Allocator, in: []u8, out: []u8) anyerror!usiz
 }
 
 pub fn zstdDecompress(alloc: std.mem.Allocator, in: []u8, out: []u8) anyerror!usize {
-    _ = alloc;
     var rdr: Reader = .fixed(in);
-    var decomp = std.compress.zstd.Decompress.init(&rdr, &[0]u8{}, .{});
-    return decomp.reader.readSliceShort(out);
+    const buf = try alloc.alloc(u8, std.compress.zstd.default_window_len + std.compress.zstd.block_size_max);
+    defer alloc.free(buf);
+    var decomp = std.compress.zstd.Decompress.init(&rdr, buf, .{});
+    return decomp.reader.readSliceShort(out) catch |err| {
+        return decomp.err orelse err;
+    };
 }

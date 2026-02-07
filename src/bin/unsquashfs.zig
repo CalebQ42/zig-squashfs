@@ -34,6 +34,7 @@ pub fn main() !void {
 fn handleArgs(alloc: std.mem.Allocator, out: *Writer) !void {
     var args = try std.process.argsWithAllocator(alloc);
     defer args.deinit();
+    _ = args.next(); // args[0] is the application launch command.
     while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "-o")) {
             const nxt = args.next();
@@ -45,6 +46,7 @@ fn handleArgs(alloc: std.mem.Allocator, out: *Writer) !void {
                 try out.print("-o must be followed by a number\n", .{});
                 return errors.InvalidArguments;
             };
+            continue;
         } else if (std.mem.eql(u8, arg, "-d")) {
             const nxt = args.next();
             if (nxt == null or nxt.?.len == 0) {
@@ -52,6 +54,7 @@ fn handleArgs(alloc: std.mem.Allocator, out: *Writer) !void {
                 return errors.InvalidArguments;
             }
             extLoc = nxt.?;
+            continue;
         }
         if (archive.len > 0) {
             try out.print("you can only provide one file at a time\n", .{});
