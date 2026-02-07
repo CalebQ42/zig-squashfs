@@ -206,7 +206,7 @@ pub fn isDevice(self: SfsFile) bool {
     };
 }
 /// If the File is a block or character device, get's it's device number.
-pub fn dev(self: SfsFile) !u32 {
+pub fn devNum(self: SfsFile) !u32 {
     if (!self.isDevice()) return FileError.NotDevice;
     return switch (self.inode.data) {
         .block_dev, .char_dev => |d| d.dev,
@@ -365,7 +365,7 @@ fn extractReal(self: SfsFile, path: []const u8, options: ExtractionOptions, pol:
             switch (self.inode.hdr.inode_type) {
                 .block_dev, .ext_block_dev => {
                     mode = std.posix.DT.BLK;
-                    fil_dev = self.dev() catch |err| {
+                    fil_dev = self.devNum() catch |err| {
                         std.log.err("Error getting device number for {s} (inode {}): {}\n", .{ self.name, self.inode.hdr.num, err });
                         out_err.* = err;
                         return;
@@ -373,7 +373,7 @@ fn extractReal(self: SfsFile, path: []const u8, options: ExtractionOptions, pol:
                 },
                 .char_dev, .ext_char_dev => {
                     mode = std.posix.DT.CHR;
-                    fil_dev = self.dev() catch |err| {
+                    fil_dev = self.devNum() catch |err| {
                         std.log.err("Error getting device number for {s} (inode {}): {}\n", .{ self.name, self.inode.hdr.num, err });
                         out_err.* = err;
                         return;
