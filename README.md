@@ -14,7 +14,7 @@ Overall works, but currently is completely single threaded and is missing some f
 
 Instead of using Zig's standard library for decompression 
 
-> `Dversion`
+> `-Dversion`
 
 Sets the version of `unsquashfs` shown when `--version` is passed.
 
