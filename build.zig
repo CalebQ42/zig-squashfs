@@ -1,7 +1,6 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) !void {
-    const static_option = b.option(bool, "static_build", "Build static");
     const use_c_libs_option = b.option(bool, "use_c_libs", "Use C versions of decompression libraries instead of the Zig standard library ones");
     const version_string_option = b.option([]const u8, "version", "Version of the library/binary");
 
@@ -35,7 +34,6 @@ pub fn build(b: *std.Build) !void {
     exe_mod.addOptions("config", unsquashfs_options);
     const exe = b.addExecutable(.{
         .name = "unsquashfs",
-        .linkage = if (static_option == true) .static else .dynamic,
         .root_module = exe_mod,
     });
 

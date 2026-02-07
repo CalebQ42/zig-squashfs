@@ -3,8 +3,9 @@
 
 const std = @import("std");
 const Reader = std.Io.Reader;
+const builtin = @import("builtin");
 
-const config = @import("config");
+const config = if (builtin.is_test) .{ .use_c_libs = true } else @import("config");
 
 const c = @cImport({
     @cInclude("zstd.h");
