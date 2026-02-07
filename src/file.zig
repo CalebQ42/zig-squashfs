@@ -198,8 +198,7 @@ pub fn extract(self: *SfsFile, path: []const u8, options: ExtractionOptions) !vo
         }
     }
     defer if (ext_path.len > path.len) alloc.free(ext_path);
-    //TODO: switch to threaded version.
-    return self.inode.extractTo(self.archive, path, options);
+    return self.inode.extractToThreaded(self.archive, path, options, self.archive.thread_count);
 }
 
 /// Utility function.

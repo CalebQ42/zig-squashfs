@@ -133,6 +133,7 @@ fn entriesFromData(archive: *Archive, data: anytype) ![]DirEntry {
     return DirEntry.readDir(alloc, &meta.interface, data.size);
 }
 
+/// Extract the inode to the given path. Single threaded.
 pub fn extractTo(self: Inode, archive: *Archive, path: []const u8, options: ExtractionOptions) !void {
     switch (self.hdr.inode_type) {
         .dir, .ext_dir => {
@@ -175,20 +176,30 @@ const Perms = struct {
     mod_time: u32,
 };
 
-pub fn extractToThreaded(inode: Inode, archive: *Archive, path: []const u8, options: ExtractionOptions, threads: usize) !void {
-    _ = archive;
-    _ = path;
-    _ = options;
-    _ = threads;
-    switch (inode.hdr.inode_type) {}
+/// Extract the inode to the given path. Multi-threaded.
+/// Functions identically to extractTo on all but regular files and directories.
+///
+/// If threads <= 1, then this just calls extractTo.
+pub fn extractToThreaded(self: Inode, archive: *Archive, path: []const u8, options: ExtractionOptions, threads: usize) !void {
+    if (threads <= 1) return self.extractTo(archive, path, options);
+    std.debug.print("{}\n", .{threads});
+    @constCast(&threads).* = try std.Thread.getCpuCount();
+    std.debug.print("{}\n", .{threads});
+    switch (self.hdr.inode_type) {
+        .dir, .ext_dir => {},
+        .file, .ext_file => {},
+        .symlink, .ext_symlink => try self.extractSymlink(path),
+        else => try self.extractDevice(archive, path, options),
+    }
+    return error.TODO;
 }
 
 /// Extract threadedly the inode to the path.
-fn extractThread(inode: Inode, archive: *Archive, path: []const u8, options: ExtractionOptions, wg: *WaitGroup, pool: *Pool, perms: ?*std.ArrayList(Perms)) !void {
+fn extractThread(self: Inode, archive: *Archive, path: []const u8, options: ExtractionOptions, wg: *WaitGroup, pool: *Pool, perms: ?*std.ArrayList(Perms)) !void {
     _ = pool;
     _ = perms;
     _ = archive;
-    switch (inode.hdr.inode_type) {
+    switch (self.hdr.inode_type) {
         .dir, .ext_dir => {
             //TOOD
             return error.TODO;
@@ -199,11 +210,11 @@ fn extractThread(inode: Inode, archive: *Archive, path: []const u8, options: Ext
         },
         .symlink, .ext_symlink => {
             defer wg.finish();
-            try inode.extractSymlink(path);
+            try self.extractSymlink(path);
         },
         else => {
             defer wg.finish();
-            try inode.extractDevice(path, options.ignore_permissions);
+            try self.extractDevice(path, options.ignore_permissions);
         },
     }
 }
