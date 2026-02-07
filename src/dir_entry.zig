@@ -30,19 +30,20 @@ pub fn readDir(alloc: std.mem.Allocator, rdr: *Reader, size: u32) ![]Entry {
     var cur_red: u32 = 3; // start at 3 due to "." & ".." being counted in the dir size.
     var hdr: Header = undefined;
     var raw: RawEntry = undefined;
-    var out: std.ArrayList(Entry) = .empty;
-    errdefer {
-        for (out.items) |i|
-            i.deinit(alloc);
-        out.deinit(alloc);
-    }
+    var out: std.ArrayList(Entry) = try .initCapacity(alloc, 25); // Start out with capacity instead of needing to allocate per header.
+    errdefer out.deinit(alloc);
     while (cur_red < size) {
         try rdr.readSliceEndian(Header, @ptrCast(&hdr), .little);
         cur_red += @sizeOf(Header);
-        try out.ensureUnusedCapacity(alloc, hdr.num + 1);
-        for (0..hdr.count + 1) |_| {
+        const count = hdr.count + 1;
+        if (out.capacity < count) {
+            // Make sure we have at least 25 capacity past current count.
+            try out.ensureUnusedCapacity(alloc, ((count % 25) + 2) * 25);
+        }
+        for (0..count) |_| {
             try rdr.readSliceEndian(RawEntry, @ptrCast(&raw), .little);
             const name = try alloc.alloc(u8, raw.name_size + 1);
+            errdefer alloc.free(name);
             try rdr.readSliceEndian(u8, name, .little);
             const val = out.addOneAssumeCapacity();
             val.* = .{
