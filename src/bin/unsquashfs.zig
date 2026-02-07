@@ -1,5 +1,6 @@
 const std = @import("std");
 const Writer = std.Io.Writer;
+const builtin = @import("builtin");
 
 const config = @import("config");
 const squashfs = @import("zig_squashfs");
@@ -64,9 +65,9 @@ fn handleArgs(alloc: std.mem.Allocator, out: *Writer) !void {
             extLoc = nxt.?;
             continue;
         } else if (std.mem.eql(u8, arg, "--version")) {
-            _ = try out.write("v");
-            try config.version_string.format(out);
-            _ = try out.write("\n");
+            _ = try out.write("unsquashfs version");
+            try config.version.format(out);
+            try out.print("\nBuilt using Zig {s} with {} backend in {} mode.\n", .{ builtin.zig_version_string, builtin.zig_backend, builtin.mode });
             std.process.cleanExit();
             return;
         }
