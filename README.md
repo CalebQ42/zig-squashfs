@@ -4,4 +4,4 @@ This is my experiments to learn Zig. Might amount to something. Might not.
 
 ## Current State
 
-Kinda works as a library, but currently has known memory leaks. `unsquashfs` is missing a lot of features (and will probably never match the official unsquashfs). Extraction is stupidly slow and uses too many resources. Only properly work on Linux, any other OSes probably won't work fully.
+Overall works, but currently is completely single threaded and is missing some features. Extraction is slow. Only properly work on Linux, any other OSes probably won't work fully.

@@ -221,7 +221,8 @@ fn extractRegFile(self: Inode, archive: *Archive, path: []const u8, options: Ext
     _ = try dat_rdr.interface.streamRemaining(&wrt.interface);
     try wrt.interface.flush();
     // updateTime is in nanoseconds (a billionth of a second). mod_time is in seconds.
-    try fil.updateTimes(self.hdr.mod_time, self.hdr.mod_time);
+    // TODO: fix
+    // try fil.updateTimes(self.hdr.mod_time, self.hdr.mod_time);
     if (!options.ignore_permissions) {
         try fil.chmod(self.hdr.permissions);
         try fil.chown(try archive.id(self.hdr.uid_idx), try archive.id(self.hdr.gid_idx));
@@ -305,7 +306,8 @@ fn extractDevice(self: Inode, archive: *Archive, path: []const u8, options: Extr
     }
     var fil = try std.fs.cwd().openFile(path, .{});
     // updateTime is in nanoseconds (a billionth of a second). mod_time is in seconds.
-    try fil.updateTimes(self.hdr.mod_time * (10 ^ 9), self.hdr.mod_time * (10 ^ 9));
+    // TODO: fix
+    // try fil.updateTimes(self.hdr.mod_time, self.hdr.mod_time);
     if (!options.ignore_permissions) {
         try fil.chmod(self.hdr.permissions);
         try fil.chown(try archive.id(self.hdr.uid_idx), try archive.id(self.hdr.gid_idx));
