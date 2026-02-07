@@ -7,14 +7,16 @@ const squashfs = @import("zig_squashfs");
 
 //TODO: Add more options
 const help_mgs =
+    \\
     \\Usage: unsquashfs [options] <archive>
     \\
     \\Options:
     \\  -d <location>   Extract to the given location instead of "squashfs-root"
-    \\
     \\  -o <offset>     Start reading the archive at the given offset.
     \\
+    \\  --help          Display this messages
     \\  --version       Display the version
+    \\
 ;
 
 const errors = error{InvalidArguments};
@@ -31,6 +33,7 @@ pub fn main() !void {
     try handleArgs(alloc, &out.interface);
     if (archive.len == 0) {
         try out.interface.print("You must provide a squashfs archive\n", .{});
+        try out.interface.print(help_mgs, .{});
         return;
     }
     var fil: std.fs.File = try std.fs.cwd().openFile(archive, .{}); //TODO: Handle error gracefully.
@@ -65,14 +68,19 @@ fn handleArgs(alloc: std.mem.Allocator, out: *Writer) !void {
             extLoc = nxt.?;
             continue;
         } else if (std.mem.eql(u8, arg, "--version")) {
-            _ = try out.write("unsquashfs version");
+            try out.print("zig-unsquashfs version ", .{});
             try config.version.format(out);
             try out.print("\nBuilt using Zig {s} with {} backend in {} mode.\n", .{ builtin.zig_version_string, builtin.zig_backend, builtin.mode });
-            std.process.cleanExit();
+            std.process.exit(0);
+            return;
+        } else if (std.mem.eql(u8, arg, "--help")) {
+            try out.print(help_mgs, .{});
+            std.process.exit(0);
             return;
         }
         if (archive.len > 0) {
             try out.print("you can only provide one file at a time\n", .{});
+            try out.print(help_mgs, .{});
             return errors.InvalidArguments;
         }
         archive = arg;
