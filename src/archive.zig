@@ -4,7 +4,7 @@
 const std = @import("std");
 const File = std.fs.File;
 
-const DecompMgr = @import("decomp.zig");
+const Decomp = @import("decomp.zig");
 const ExtractionOptions = @import("options.zig");
 const Inode = @import("inode.zig");
 const InodeRef = Inode.Ref;
@@ -40,7 +40,7 @@ super: Superblock,
 
 setup: bool = false,
 
-decomp: DecompMgr = undefined,
+decomp: Decomp.DecompFn,
 
 frag_table: Table(FragEntry) = undefined,
 id_table: Table(u16) = undefined,
@@ -72,6 +72,13 @@ pub fn initAdvanced(alloc: std.mem.Allocator, fil: File, offset: u64, threads: u
         // .fixed_buf = fixed_buf,
         .thread_count = threads,
         .fil = .init(fil, offset),
+        .decomp = switch (super.compression) {
+            .gzip => Decomp.gzipDecompress,
+            .lzma => Decomp.lzmaDecompress,
+            .xz => Decomp.xzDecompress,
+            .zstd => Decomp.zstdDecompress,
+            else => return error.UnsupportedCompressionType,
+        },
 
         .super = super,
     };
@@ -79,7 +86,6 @@ pub fn initAdvanced(alloc: std.mem.Allocator, fil: File, offset: u64, threads: u
 pub fn deinit(self: *Archive) void {
     // self.parent_alloc.free(self.fixed_buf);
     if (self.setup) {
-        self.decomp.deinit();
         self.frag_table.deinit();
         self.export_table.deinit();
         self.id_table.deinit();
@@ -92,10 +98,9 @@ pub fn allocator(self: *Archive) std.mem.Allocator {
 
 fn setupValues(self: *Archive) !void {
     const alloc = self.allocator();
-    self.decomp = try .init(alloc, self.super.compression, self.super.block_size, self.thread_count);
-    self.frag_table = try .init(alloc, self.fil, &self.decomp, self.super.frag_start, self.super.frag_count);
-    self.id_table = try .init(alloc, self.fil, &self.decomp, self.super.id_start, self.super.id_count);
-    self.export_table = try .init(alloc, self.fil, &self.decomp, self.super.export_start, self.super.inode_count);
+    self.frag_table = try .init(alloc, self.fil, self.decomp, self.super.frag_start, self.super.frag_count);
+    self.id_table = try .init(alloc, self.fil, self.decomp, self.super.id_start, self.super.id_count);
+    self.export_table = try .init(alloc, self.fil, self.decomp, self.super.export_start, self.super.inode_count);
     self.setup = true;
 }
 
@@ -121,7 +126,7 @@ pub fn inode(self: *Archive, num: u32) !Inode {
 pub fn root(self: *Archive) !SfsFile {
     if (!self.setup) try self.setupValues();
     var rdr = try self.fil.readerAt(self.super.root_ref.block_start + self.super.inode_start, &[0]u8{});
-    var meta: MetadataReader = .init(self.allocator(), &rdr.interface, &self.decomp);
+    var meta: MetadataReader = .init(self.allocator(), &rdr.interface, self.decomp);
     try meta.interface.discardAll(self.super.root_ref.block_offset);
     const in: Inode = try .read(self.allocator(), &meta.interface, self.super.block_size);
     return .init(self, in, "");
@@ -136,7 +141,24 @@ pub fn open(self: *Archive, path: []const u8) !SfsFile {
 
 pub fn extract(self: *Archive, path: []const u8, options: ExtractionOptions) !void {
     if (!self.setup) try self.setupValues();
-    var root_fil = try self.root();
-    defer root_fil.deinit();
-    return root_fil.extract(path, options);
+    var alloc = self.allocator();
+    var ext_path: []u8 = undefined;
+    if (std.fs.cwd().statFile(path)) |stat| {
+        if (stat.kind == .directory) {
+            ext_path = @constCast(path);
+        } else return error.ExtractionPathExists;
+    } else |err| {
+        if (err == error.FileNotFound) {
+            ext_path = @constCast(path);
+        } else {
+            std.log.err("Error stat-ing extraction path {s}: {}\n", .{ path, err });
+            return err;
+        }
+    }
+    defer if (ext_path.len > path.len) alloc.free(ext_path);
+    var rdr = try self.fil.readerAt(self.super.root_ref.block_start + self.super.inode_start, &[0]u8{});
+    var meta: MetadataReader = .init(self.allocator(), &rdr.interface, self.decomp);
+    try meta.interface.discardAll(self.super.root_ref.block_offset);
+    const in: Inode = try .read(self.allocator(), &meta.interface, self.super.block_size);
+    try in.extractTo(self, ext_path, options);
 }

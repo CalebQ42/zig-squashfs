@@ -4,7 +4,7 @@ const Writer = std.Io.Writer;
 const Limit = std.Io.Limit;
 const StreamError = std.Io.Reader.StreamError;
 
-const DecompMgr = @import("../decomp.zig");
+const DecompFn = @import("../decomp.zig").DecompFn;
 
 const BlockHeader = packed struct {
     size: u15,
@@ -15,14 +15,14 @@ const This = @This();
 
 alloc: std.mem.Allocator,
 rdr: *Reader,
-decomp: *DecompMgr,
+decomp: DecompFn,
 
 buf: [8192]u8 = undefined,
 
 interface: Reader,
 err: ?anyerror = null,
 
-pub fn init(alloc: std.mem.Allocator, rdr: *Reader, decomp: *DecompMgr) This {
+pub fn init(alloc: std.mem.Allocator, rdr: *Reader, decomp: DecompFn) This {
     return .{
         .alloc = alloc,
         .rdr = rdr,
@@ -51,8 +51,8 @@ fn advance(self: *This) !void {
         return;
     }
     var tmp_buf: [8192]u8 = undefined;
-    var limit_rdr = self.rdr.limited(@enumFromInt(hdr.size), &tmp_buf);
-    self.interface.end = try self.decomp.decompReader(&limit_rdr.interface, &self.buf);
+    try self.rdr.readSliceAll(tmp_buf[0..hdr.size]);
+    self.interface.end = try self.decomp(self.alloc, tmp_buf[0..hdr.size], &self.buf);
     self.interface.buffer = self.buf[0..self.interface.end];
 }
 

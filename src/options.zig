@@ -5,16 +5,21 @@ const Writer = std.Io.Writer;
 
 const ExtractionOptions = @This();
 
-/// Don't set the file's permissions after extraction
-ignorePermissions: bool = false,
-/// Don't set the file's owner after extraction.
-ignoreOwner: bool = false,
+/// Don't set the file's owner & permissions after extraction
+ignore_permissions: bool = false,
+/// Don't set xattr values. Currently xattrs are never set anyway.
+ignore_xattr: bool = false,
 /// Replace symlinks with their target.
-dereferenceSymlinks: bool = false,
-
-log_level: std.log.Level = .err,
-// /// If options verbose and verboseWriter not set, logs are printed to stdout.
-// verboseWriter: ?*Writer = null,
+dereference_symlinks: bool = false,
+/// Verbose logging. If true, verbose_writer must be set
+verbose: bool = false,
+/// Where to print verbose log.
+verbose_writer: ?*Writer = null,
 
 pub const Default: ExtractionOptions = .{};
-pub const VerboseDefault: ExtractionOptions = .{ .log_level = .debug };
+pub fn VerboseDefault(wrt: *Writer) ExtractionOptions {
+    return .{
+        .verbose = true,
+        .verbose_writer = wrt,
+    };
+}

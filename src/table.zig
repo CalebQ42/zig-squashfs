@@ -1,7 +1,7 @@
 const std = @import("std");
 const Mutex = std.Thread.Mutex;
 
-const DecompMgr = @import("decomp.zig");
+const DecompFn = @import("decomp.zig").DecompFn;
 const MetadataReader = @import("util/metadata.zig");
 const OffsetFile = @import("util/offset_file.zig");
 
@@ -18,7 +18,7 @@ pub fn Table(T: anytype) type {
 
         alloc: std.mem.Allocator,
         fil: OffsetFile,
-        decomp: *DecompMgr,
+        decomp: DecompFn,
         tab_start: u64,
 
         tab: std.AutoHashMap(u32, []T),
@@ -26,7 +26,7 @@ pub fn Table(T: anytype) type {
 
         mut: Mutex = .{},
 
-        pub fn init(alloc: std.mem.Allocator, fil: OffsetFile, decomp: *DecompMgr, tab_start: u64, values: u32) !Self {
+        pub fn init(alloc: std.mem.Allocator, fil: OffsetFile, decomp: DecompFn, tab_start: u64, values: u32) !Self {
             return .{
                 .alloc = alloc,
                 .fil = fil,

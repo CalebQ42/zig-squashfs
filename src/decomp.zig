@@ -1,21 +1,15 @@
-//! Decompression manager. Can decompress either from an Io.Reader or from a byte slice.
+//! Implementations for decompression.
+//! TODO: change to vtable interface to allow for shared decompressors for better performance/resource usage.
 
 const std = @import("std");
-const compress = std.compress;
 const Reader = std.Io.Reader;
-const Thread = std.Thread;
-const Futex = Thread.Futex;
-const Mutex = Thread.Mutex;
-const Condition = Thread.Condition;
-const Node = std.DoublyLinkedList.Node;
+const builtin = @import("builtin");
 
-const Atomic = std.atomic.Value(u32);
+const config = if (builtin.is_test) .{ .use_c_libs = true } else @import("config");
 
-const DecompError = error{
-    ThreadClosed,
-    LzoUnsupported,
-    Lz4Unsupported,
-};
+const c = @cImport({
+    @cInclude("zstd.h");
+});
 
 pub const CompressionType = enum(u16) {
     gzip = 1,
@@ -26,193 +20,140 @@ pub const CompressionType = enum(u16) {
     zstd,
 };
 
-pub const DecompThread = struct {
-    mgr: *DecompMgr,
+pub const DecompFn = *const fn (alloc: std.mem.Allocator, in: []u8, out: []u8) anyerror!usize; // TODO: replace anyerror to definitive error types.
 
-    /// Current thread status & signal value via Futex.
-    /// 0 - Unstarted, 1 - Waiting, 2 - Working, 3 - Closed,
-    status: Atomic = .{ .raw = 0 },
-    thr: Thread = undefined,
-    node: Node = .{},
-    buf: []u8,
+pub const gzipDecompress = if (config.use_c_libs) cGzip else zigGzip;
 
-    dat: []u8 = &[0]u8{},
-    rdr: ?*Reader = null,
-    res: []u8 = &[0]u8{},
-    res_size: anyerror!usize = 0,
+fn zigGzip(alloc: std.mem.Allocator, in: []u8, out: []u8) anyerror!usize {
+    var rdr: Reader = .fixed(in);
+    const buf = try alloc.alloc(u8, out.len);
+    defer alloc.free(buf);
+    var decomp = std.compress.flate.Decompress.init(&rdr, .zlib, buf);
+    return decomp.reader.readSliceShort(out);
+}
+fn cGzip(alloc: std.mem.Allocator, in: []u8, out: []u8) anyerror!usize {
+    _ = alloc;
+    _ = in;
+    _ = out;
+    return error.TODO;
+}
 
-    pub fn init(mgr: *DecompMgr) !DecompThread {
-        return .{
-            .mgr = mgr,
-            .buf = switch (mgr.comp_type) {
-                .gzip => try mgr.alloc.alloc(u8, compress.flate.max_window_len),
-                .zstd => try mgr.alloc.alloc(u8, compress.zstd.default_window_len + compress.zstd.block_size_max),
-                .lzma, .xz => &[0]u8{},
-                else => unreachable,
-            },
-        };
-    }
+pub const lzmaDecompress = if (config.use_c_libs) cLzma else zigLzma;
 
-    pub fn close(self: *DecompThread) void {
-        if (self.status.raw == 0) return;
-        while (self.status.raw == 2) Futex.wait(&self.status, 2);
-        self.status.store(3, .release);
-        Futex.wake(&self.status, 1);
-        self.thr.join();
-        self.mgr.alloc.free(self.buf);
-    }
+fn zigLzma(alloc: std.mem.Allocator, in: []u8, out: []u8) anyerror!usize {
+    var rdr: Reader = .fixed(in);
+    var decomp = try std.compress.lzma.decompress(alloc, rdr.adaptToOldInterface());
+    return decomp.read(out);
+}
+fn cLzma(alloc: std.mem.Allocator, in: []u8, out: []u8) anyerror!usize {
+    _ = alloc;
+    _ = in;
+    _ = out;
+    return error.TODO;
+}
 
-    pub fn submitData(self: *DecompThread, dat: []u8, res: []u8) anyerror!usize {
-        if (self.status.raw == 3) return DecompError.ThreadClosed;
-        if (self.status.raw == 0) {
-            self.thr = try .spawn(.{}, thread, .{self});
-        }
-        self.dat = dat;
-        defer self.dat = &[0]u8{};
-        self.res = res;
-        self.status.raw = 2;
-        while (self.status.raw == 2) Futex.wait(&self.status, 2);
-        return self.res_size;
-    }
-    pub fn submitReader(self: *DecompThread, rdr: *Reader, res: []u8) anyerror!usize {
-        if (self.status.raw == 3) return DecompError.ThreadClosed;
-        if (self.status.raw == 0) {
-            self.thr = try .spawn(.{}, thread, .{self});
-        }
-        self.rdr = rdr;
-        defer self.rdr = null;
-        self.res = res;
-        self.status.store(2, .release);
-        Futex.wake(&self.status, 1);
-        while (self.status.raw == 2) Futex.wait(&self.status, 2);
-        return self.res_size;
-    }
+pub const xzDecompress = if (config.use_c_libs) cXz else zigXz;
 
-    pub fn thread(self: *DecompThread) void {
-        const comp_type = self.mgr.comp_type;
-        while (self.status.raw != 3) {
-            while (self.status.raw == 1) Futex.wait(&self.status, 1);
-            if (self.status.raw == 3) return;
-            var dat_rdr: Reader = .fixed(self.dat);
-            var rdr: *Reader = if (self.rdr != null) self.rdr.? else &dat_rdr;
-            self.res_size = blk: switch (comp_type) {
-                .gzip => {
-                    var decomp_rdr = compress.flate.Decompress.init(rdr, .zlib, self.buf);
-                    break :blk decomp_rdr.reader.readSliceShort(self.res) catch |err| {
-                        break :blk decomp_rdr.err orelse err;
-                    };
-                },
-                .lzma => {
-                    var decomp_rdr = compress.lzma.decompress(self.mgr.alloc, rdr.adaptToOldInterface()) catch |err| {
-                        break :blk err;
-                    };
-                    break :blk decomp_rdr.read(self.res);
-                },
-                .xz => {
-                    var decomp_rdr = compress.xz.decompress(self.mgr.alloc, rdr.adaptToOldInterface()) catch |err| {
-                        break :blk err;
-                    };
-                    break :blk decomp_rdr.read(self.res);
-                },
-                .zstd => {
-                    var decomp_rdr = compress.zstd.Decompress.init(rdr, self.buf, .{});
-                    break :blk decomp_rdr.reader.readSliceShort(self.res) catch |err| {
-                        break :blk decomp_rdr.err orelse err;
-                    };
-                },
-                else => unreachable,
-            };
-            const orig = self.status.swap(1, .release);
-            Futex.wake(&self.status, 1);
-            if (orig == 3) return;
-        }
-    }
-};
+fn zigXz(alloc: std.mem.Allocator, in: []u8, out: []u8) anyerror!usize {
+    var rdr: Reader = .fixed(in);
+    var decomp = try std.compress.xz.decompress(alloc, rdr.adaptToOldInterface());
+    return decomp.read(out);
+}
+fn cXz(alloc: std.mem.Allocator, in: []u8, out: []u8) anyerror!usize {
+    _ = alloc;
+    _ = in;
+    _ = out;
+    return error.TODO;
+}
 
-const DecompMgr = @This();
+pub const zstdDecompress = if (config.use_c_libs) cZstd else zigZstd;
 
-alloc: std.mem.Allocator,
-comp_type: CompressionType,
-block_size: u32,
-
-threads: []DecompThread,
-queue: std.DoublyLinkedList = .{},
-mut: Mutex = .{},
-cond: Condition = .{},
-to_start: usize,
-
-pub fn init(alloc: std.mem.Allocator, comp_type: CompressionType, block_size: u32, threads: usize) !DecompMgr {
-    return switch (comp_type) {
-        .lzo => DecompError.LzoUnsupported,
-        .lz4 => DecompError.Lz4Unsupported,
-        else => .{
-            .alloc = alloc,
-            .comp_type = comp_type,
-            .block_size = block_size,
-            .threads = try alloc.alloc(DecompThread, threads),
-            .to_start = threads,
-        },
+pub fn zigZstd(alloc: std.mem.Allocator, in: []u8, out: []u8) anyerror!usize {
+    var rdr: Reader = .fixed(in);
+    const buf = try alloc.alloc(u8, std.compress.zstd.default_window_len + std.compress.zstd.block_size_max);
+    defer alloc.free(buf);
+    var decomp = std.compress.zstd.Decompress.init(&rdr, buf, .{});
+    return decomp.reader.readSliceShort(out) catch |err| {
+        return decomp.err orelse err;
+    };
+}
+fn cZstd(alloc: std.mem.Allocator, in: []u8, out: []u8) anyerror!usize {
+    _ = alloc;
+    const res = c.ZSTD_decompress(out.ptr, out.len, in.ptr, in.len);
+    if (c.ZSTD_isError(res) == 0) return res;
+    return switch (c.ZSTD_getErrorCode(res)) {
+        c.ZSTD_error_prefix_unknown => cZstdError.PrefixUnknown,
+        c.ZSTD_error_version_unsupported => cZstdError.VersionUnsupported,
+        c.ZSTD_error_frameParameter_unsupported => cZstdError.FrameParameterUnsupported,
+        c.ZSTD_error_frameParameter_windowTooLarge => cZstdError.FrameParameterWindowTooLarge,
+        c.ZSTD_error_corruption_detected => cZstdError.CorruptionDetected,
+        c.ZSTD_error_checksum_wrong => cZstdError.ChecksumWrong,
+        c.ZSTD_error_literals_headerWrong => cZstdError.LiteralsHeaderWrong,
+        c.ZSTD_error_dictionary_corrupted => cZstdError.DictionaryCorrupted,
+        c.ZSTD_error_dictionary_wrong => cZstdError.DictionaryWrong,
+        c.ZSTD_error_dictionaryCreation_failed => cZstdError.DictionaryCreationFailed,
+        c.ZSTD_error_parameter_unsupported => cZstdError.ParameterUnsupported,
+        c.ZSTD_error_parameter_combination_unsupported => cZstdError.ParameterCombinationUnsupported,
+        c.ZSTD_error_parameter_outOfBound => cZstdError.ParameterOutOfBound,
+        c.ZSTD_error_tableLog_tooLarge => cZstdError.TableLogTooLarge,
+        c.ZSTD_error_maxSymbolValue_tooLarge => cZstdError.MaxSymbolValueTooLarge,
+        c.ZSTD_error_maxSymbolValue_tooSmall => cZstdError.MaxSymbolValueTooSmall,
+        c.ZSTD_error_cannotProduce_uncompressedBlock => cZstdError.CannotProduceUncompressedBlock,
+        c.ZSTD_error_stabilityCondition_notRespected => cZstdError.StabilityConditionNotRespected,
+        c.ZSTD_error_stage_wrong => cZstdError.StageWrong,
+        c.ZSTD_error_init_missing => cZstdError.InitMissing,
+        c.ZSTD_error_memory_allocation => cZstdError.MemoryAllocation,
+        c.ZSTD_error_workSpace_tooSmall => cZstdError.WorkSpaceTooSmall,
+        c.ZSTD_error_dstSize_tooSmall => cZstdError.DstSizeTooSmall,
+        c.ZSTD_error_srcSize_wrong => cZstdError.SrcSizeWrong,
+        c.ZSTD_error_dstBuffer_null => cZstdError.DstBufferNull,
+        c.ZSTD_error_noForwardProgress_destFull => cZstdError.NoForwardProgressDestFull,
+        c.ZSTD_error_noForwardProgress_inputEmpty => cZstdError.NoForwardProgressInputEmpty,
+        c.ZSTD_error_frameIndex_tooLarge => cZstdError.FrameIndexTooLarge,
+        c.ZSTD_error_seekableIO => cZstdError.SeekableIo,
+        c.ZSTD_error_dstBuffer_wrong => cZstdError.DstBufferWrong,
+        c.ZSTD_error_srcBuffer_wrong => cZstdError.SrcBufferWrong,
+        c.ZSTD_error_sequenceProducer_failed => cZstdError.SequenceProducerFailed,
+        c.ZSTD_error_externalSequences_invalid => cZstdError.ExternalSequencesInvalid,
+        c.ZSTD_error_maxCode => cZstdError.MaxCode,
+        else => cZstdError.Generic,
     };
 }
 
-pub fn deinit(self: DecompMgr) void {
-    for (self.threads[self.to_start..]) |*t| {
-        t.close();
-    }
-    self.alloc.free(self.threads);
-}
-
-pub fn decompSlice(self: *DecompMgr, dat: []u8, res: []u8) !usize {
-    self.mut.lock();
-    var thr: *DecompThread = undefined;
-    var node = self.queue.popFirst();
-    if (self.node != null) {
-        self.mut.unlock();
-        thr = @fieldParentPtr("node", node.?);
-    } else blk: {
-        defer self.mut.unlock();
-        if (self.to_start > 0) {
-            self.threads[self.to_start - 1] = .init(self);
-            thr = &self.threads[self.to_start - 1];
-            self.to_start -= 1;
-            break :blk;
-        }
-        while (node == null) {
-            self.cond.wait(&self.mut);
-            node = self.queue.popFirst();
-        }
-        thr = @fieldParentPtr("node", node.?);
-    }
-    defer {
-        self.queue.append(&thr.node);
-        self.cond.signal();
-    }
-    return thr.submitData(dat, res);
-}
-pub fn decompReader(self: *DecompMgr, rdr: *Reader, res: []u8) !usize {
-    self.mut.lock();
-    var thr: *DecompThread = undefined;
-    var node = self.queue.popFirst();
-    if (node != null) {
-        self.mut.unlock();
-        thr = @fieldParentPtr("node", node.?);
-    } else blk: {
-        defer self.mut.unlock();
-        if (self.to_start > 0) {
-            self.threads[self.to_start - 1] = try .init(self);
-            thr = &self.threads[self.to_start - 1];
-            self.to_start -= 1;
-            break :blk;
-        }
-        while (node == null) {
-            self.cond.wait(&self.mut);
-            node = self.queue.popFirst();
-        }
-        thr = @fieldParentPtr("node", node.?);
-    }
-    defer {
-        self.queue.append(&thr.node);
-        self.cond.signal();
-    }
-    return thr.submitReader(rdr, res);
-}
+pub const cZstdError = error{
+    Generic,
+    PrefixUnknown,
+    VersionUnsupported,
+    FrameParameterUnsupported,
+    FrameParameterWindowTooLarge,
+    CorruptionDetected,
+    ChecksumWrong,
+    LiteralsHeaderWrong,
+    DictionaryCorrupted,
+    DictionaryWrong,
+    DictionaryCreationFailed,
+    ParameterUnsupported,
+    ParameterCombinationUnsupported,
+    ParameterOutOfBound,
+    TableLogTooLarge,
+    MaxSymbolValueTooLarge,
+    MaxSymbolValueTooSmall,
+    CannotProduceUncompressedBlock,
+    StabilityConditionNotRespected,
+    StageWrong,
+    InitMissing,
+    MemoryAllocation,
+    WorkSpaceTooSmall,
+    DstSizeTooSmall,
+    SrcSizeWrong,
+    DstBufferNull,
+    NoForwardProgressDestFull,
+    NoForwardProgressInputEmpty,
+    FrameIndexTooLarge,
+    SeekableIo,
+    DstBufferWrong,
+    SrcBufferWrong,
+    SequenceProducerFailed,
+    ExternalSequencesInvalid,
+    MaxCode,
+};

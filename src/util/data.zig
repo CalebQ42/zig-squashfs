@@ -7,7 +7,7 @@ const Limit = std.Io.Limit;
 
 const Archive = @import("../archive.zig");
 const FragEntry = Archive.FragEntry;
-const DecompMgr = @import("../decomp.zig");
+const DecompFn = @import("../decomp.zig").DecompFn;
 const BlockSize = @import("../inode_data/file.zig").BlockSize;
 const OffsetFile = @import("offset_file.zig");
 
@@ -15,7 +15,7 @@ const DataReader = @This();
 
 alloc: std.mem.Allocator,
 fil: OffsetFile,
-decomp: *DecompMgr,
+decomp: DecompFn,
 block_size: u32,
 
 blocks: []BlockSize,
@@ -33,7 +33,7 @@ pub fn init(archive: *Archive, blocks: []BlockSize, start: u64, size: u64) DataR
     return .{
         .alloc = archive.allocator(),
         .fil = archive.fil,
-        .decomp = &archive.decomp,
+        .decomp = archive.decomp,
         .block_size = archive.super.block_size,
         .blocks = blocks,
         .size = size,
@@ -91,11 +91,11 @@ fn advance(self: *DataReader) !void {
         }
         const tmp_buf = try self.alloc.alloc(u8, self.frag.?.size.size);
         defer self.alloc.free(tmp_buf);
-        var limit_rdr = Reader.limited(&rdr.interface, @enumFromInt(self.frag.?.size.size), tmp_buf);
-        const needed_block = try self.alloc.alloc(u8, self.frag_offset + cur_block_size);
+        try rdr.interface.readSliceAll(tmp_buf);
+        const needed_block = try self.alloc.alloc(u8, self.block_size);
         defer self.alloc.free(needed_block);
-        _ = try self.decomp.decompReader(&limit_rdr.interface, needed_block);
-        @memcpy(self.interface.buffer, needed_block[self.frag_offset..]);
+        _ = try self.decomp(self.alloc, tmp_buf, needed_block);
+        @memcpy(self.interface.buffer, needed_block[self.frag_offset .. self.frag_offset + cur_block_size]);
         return;
     }
     const block = self.blocks[self.block_idx];
@@ -109,9 +109,10 @@ fn advance(self: *DataReader) !void {
         try rdr.interface.readSliceAll(self.interface.buffer);
         return;
     }
-    var buf: [8192]u8 = undefined; //TODO: possibly change for better performance/memory usage. Might need to be a full block in size.
-    var limit_rdr = Reader.limited(&rdr.interface, @enumFromInt(block.size), &buf);
-    _ = try self.decomp.decompReader(&limit_rdr.interface, self.interface.buffer);
+    const tmp_buf = try self.alloc.alloc(u8, block.size);
+    defer self.alloc.free(tmp_buf);
+    try rdr.interface.readSliceAll(tmp_buf);
+    _ = try self.decomp(self.alloc, tmp_buf, self.interface.buffer);
 }
 /// Does not guarentee that data currently in the buffer is retained.
 fn resizeBuffer(self: *DataReader, size: usize) !void {
