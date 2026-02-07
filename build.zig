@@ -1,14 +1,16 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) void {
+    const static = b.option(bool, "static_build", "Build static");
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{ .preferred_optimize_mode = .ReleaseFast });
     const linkage: std.builtin.LinkMode = .static; // TODO: Add argument to set link mode.
+    const use_c_libs: bool = false;
+    _ = use_c_libs;
     const mod = b.addModule("zig_squashfs", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
-        // .imports = &.{},
     });
     const exe = b.addExecutable(.{
         .name = "unsquashfs",

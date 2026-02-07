@@ -141,7 +141,24 @@ pub fn open(self: *Archive, path: []const u8) !SfsFile {
 
 pub fn extract(self: *Archive, path: []const u8, options: ExtractionOptions) !void {
     if (!self.setup) try self.setupValues();
-    var root_fil = try self.root();
-    defer root_fil.deinit();
-    return root_fil.extract(path, options);
+    var alloc = self.allocator();
+    var ext_path: []u8 = undefined;
+    if (std.fs.cwd().statFile(path)) |stat| {
+        if (stat.kind == .directory) {
+            ext_path = @constCast(path);
+        } else return error.ExtractionPathExists;
+    } else |err| {
+        if (err == error.FileNotFound) {
+            ext_path = @constCast(path);
+        } else {
+            std.log.err("Error stat-ing extraction path {s}: {}\n", .{ path, err });
+            return err;
+        }
+    }
+    defer if (ext_path.len > path.len) alloc.free(ext_path);
+    var rdr = try self.fil.readerAt(self.super.root_ref.block_start + self.super.inode_start, &[0]u8{});
+    var meta: MetadataReader = .init(self.allocator(), &rdr.interface, self.decomp);
+    try meta.interface.discardAll(self.super.root_ref.block_offset);
+    const in: Inode = try .read(self.allocator(), &meta.interface, self.super.block_size);
+    try in.extractTo(self, ext_path, options);
 }
