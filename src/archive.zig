@@ -3,6 +3,7 @@
 
 const std = @import("std");
 const File = std.fs.File;
+const builtin = @import("builtin");
 
 const Decomp = @import("decomp.zig");
 const ExtractionOptions = @import("options.zig");
@@ -14,6 +15,8 @@ const Superblock = @import("super.zig").Superblock;
 const Table = @import("table.zig").Table;
 const MetadataReader = @import("util/metadata.zig");
 const OffsetFile = @import("util/offset_file.zig");
+
+const config = if (builtin.is_test) .{ .use_c_libs = true } else @import("config");
 
 /// Information about a fragment section. Multiple fragments are contained in the block described by a single FragEntry.
 /// The offset into the block and fragment size is stored in the file's inode.
@@ -77,7 +80,8 @@ pub fn initAdvanced(alloc: std.mem.Allocator, fil: File, offset: u64, threads: u
             .lzma => Decomp.lzmaDecompress,
             .xz => Decomp.xzDecompress,
             .zstd => Decomp.zstdDecompress,
-            else => return error.UnsupportedCompressionType,
+            .lz4 => if (config.use_c_libs) Decomp.cLz4 else return error.Lz4Unsupported,
+            .lzo => if (config.use_c_libs) Decomp.cLzo else return error.LzoUnsupported,
         },
 
         .super = super,

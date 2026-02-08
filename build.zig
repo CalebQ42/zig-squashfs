@@ -16,8 +16,13 @@ pub fn build(b: *std.Build) !void {
         .link_libc = if (use_c_libs_option == true) true else false,
     });
     mod.addOptions("config", zig_squashfs_options);
-    if (use_c_libs_option == true)
+    if (use_c_libs_option == true) {
+        mod.linkSystemLibrary("zlib", .{});
+        mod.linkSystemLibrary("lzma", .{});
+        mod.linkSystemLibrary("minilzo", .{});
+        mod.linkSystemLibrary("lz4", .{});
         mod.linkSystemLibrary("zstd", .{});
+    }
 
     const unsquashfs_options = b.addOptions();
     unsquashfs_options.addOption(std.SemanticVersion, "version", try std.SemanticVersion.parse(version_string_option orelse "0.0.0-testing"));
