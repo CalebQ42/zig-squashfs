@@ -12,7 +12,10 @@ const help_mgs =
     \\
     \\Options:
     \\  -d <location>   Extract to the given location instead of "squashfs-root"
+    \\
     \\  -o <offset>     Start reading the archive at the given offset.
+    \\
+    \\  -p <threads>    Specify how many threads to use. If no present, the system's logical cores count is used.
     \\
     \\  --help          Display this messages
     \\  --version       Display the version
@@ -24,6 +27,7 @@ const errors = error{InvalidArguments};
 var archive: []const u8 = "";
 var extLoc: []const u8 = "squashfs-root";
 var offset: u64 = 0;
+var threads: u32 = 0;
 
 pub fn main() !void {
     const alloc = std.heap.smp_allocator;
@@ -38,7 +42,7 @@ pub fn main() !void {
     }
     var fil: std.fs.File = try std.fs.cwd().openFile(archive, .{}); //TODO: Handle error gracefully.
     defer fil.close();
-    var arc: squashfs.Archive = try .initAdvanced(alloc, fil, offset, try std.Thread.getCpuCount(), 0); //TODO: Update when memory size matters. //TODO: Handle error gracefully.
+    var arc: squashfs.Archive = try .initAdvanced(alloc, fil, offset, threads); //TODO: Update when memory size matters. //TODO: Handle error gracefully.
     defer arc.deinit();
     try arc.extract(extLoc, .Default); //TODO: Handle error gracefully.
 }
@@ -66,6 +70,17 @@ fn handleArgs(alloc: std.mem.Allocator, out: *Writer) !void {
                 return errors.InvalidArguments;
             }
             extLoc = nxt.?;
+            continue;
+        } else if (std.mem.eql(u8, arg, "-p")) {
+            const nxt = args.next();
+            if (nxt == null or nxt.?.len == 0) {
+                try out.print("-p must be followed by a number\n", .{});
+                return errors.InvalidArguments;
+            }
+            threads = std.fmt.parseInt(u32, nxt.?, 10) catch {
+                try out.print("-p must be followed by a number\n", .{});
+                return errors.InvalidArguments;
+            };
             continue;
         } else if (std.mem.eql(u8, arg, "--version")) {
             try out.print("zig-unsquashfs version ", .{});

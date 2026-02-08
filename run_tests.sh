@@ -1,3 +1,10 @@
 #!/bin/sh
 
-zig test -lc -lzstd src/test.zig
+zig test \
+	-lc \
+	-lz \
+	-llzma \
+	-lminilzo \
+	-llz4 \
+	-lzstd \
+		src/test.zig

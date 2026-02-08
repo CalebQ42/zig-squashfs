@@ -29,9 +29,9 @@ interface: Reader,
 cur_offset: u64,
 block_idx: u32 = 0,
 
-pub fn init(archive: *Archive, blocks: []BlockSize, start: u64, size: u64) DataReader {
+pub fn init(alloc: std.mem.Allocator, archive: Archive, blocks: []BlockSize, start: u64, size: u64) DataReader {
     return .{
-        .alloc = archive.allocator(),
+        .alloc = alloc,
         .fil = archive.fil,
         .decomp = archive.decomp,
         .block_size = archive.super.block_size,

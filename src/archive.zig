@@ -56,7 +56,6 @@ pub fn init(alloc: std.mem.Allocator, fil: File) !Archive {
         fil,
         0,
         try std.Thread.getCpuCount(),
-        @min(DEFAULT_MEM_SIZE, try std.process.totalSystemMemory() / 2),
     );
 }
 /// Create the Archive dictating the amount of threads & memory used.

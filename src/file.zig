@@ -56,7 +56,7 @@ pub fn deinit(self: SfsFile) void {
 }
 
 fn getEntries(self: SfsFile) ![]DirEntry {
-    return self.inode.dirEntries(self.archive);
+    return self.inode.dirEntries(self.archive.allocator(), self.archive.*);
 }
 
 pub fn ownerUid(self: SfsFile) !u16 {
