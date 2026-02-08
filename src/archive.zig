@@ -62,8 +62,7 @@ pub fn init(alloc: std.mem.Allocator, fil: File) !Archive {
 /// Create the Archive dictating the amount of threads & memory used.
 /// If trying to extract a full archive, a large memory size & thread count could help.
 /// If you're planning on only interacting with a small number of files, it should be fine to use few threads and a small memory size.
-pub fn initAdvanced(alloc: std.mem.Allocator, fil: File, offset: u64, threads: usize, mem: usize) !Archive {
-    _ = mem;
+pub fn initAdvanced(alloc: std.mem.Allocator, fil: File, offset: u64, threads: usize) !Archive {
     var super: Superblock = undefined;
     const red = try fil.pread(@ptrCast(&super), offset);
     std.debug.assert(red == @sizeOf(Superblock));
