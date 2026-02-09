@@ -162,5 +162,5 @@ pub fn extract(self: *Archive, path: []const u8, options: ExtractionOptions) !vo
     var meta: MetadataReader = .init(self.allocator(), &rdr.interface, self.decomp);
     try meta.interface.discardAll(self.super.root_ref.block_offset);
     const in: Inode = try .read(self.allocator(), &meta.interface, self.super.block_size);
-    try in.extractTo(self, ext_path, options);
+    try in.extractToThreaded(self, ext_path, options, self.thread_count);
 }

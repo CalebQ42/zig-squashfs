@@ -204,9 +204,17 @@ pub fn extractToThreaded(self: Inode, archive: *Archive, path: []const u8, optio
             // Removing any trailing separators since that's the easiest path forward.
             if (path[path.len - 1] == '/') return self.extractToThreaded(archive, path[0 .. path.len - 1], options, threads);
 
+            // Fixed Allocator
+            // const mem_buf = archive.allocator().alloc(u8, 2 * 1024 * 1024 * 1024);
+            // defer archive.allocator().free(mem_buf);
+            // var fixed_alloc: std.heap.FixedBufferAllocator = .init(mem_buf);
+            // const alloc = fixed_alloc.threadSafeAllocator();
+
+            // Arena Allocator
             var arena_alloc: std.heap.ArenaAllocator = .init(archive.allocator());
             defer arena_alloc.deinit();
-            const alloc = arena_alloc.allocator();
+            var thread_alloc: std.heap.ThreadSafeAllocator = .{ .child_allocator = arena_alloc.allocator() };
+            const alloc = thread_alloc.allocator();
 
             var wg: WaitGroup = .{};
             var perms: ?std.ArrayList(Perms) = if (options.ignore_permissions) null else try .initCapacity(alloc, 100);
@@ -222,13 +230,13 @@ pub fn extractToThreaded(self: Inode, archive: *Archive, path: []const u8, optio
             if (out_err != null) return out_err.?;
 
             if (perms != null) {
-                var i = perms.?.items.len - 1;
-                while (i >= 0) {
+                var i = perms.?.items.len;
+                while (i > 0) {
+                    i -= 1;
                     const p = perms.?.items[i];
                     var fil = try std.fs.cwd().openFile(p.path, .{});
                     try fil.chmod(p.perm);
                     try fil.chown(p.uid, p.gid);
-                    i -= 1;
                 }
             }
         },
@@ -354,20 +362,16 @@ fn extractThread(
         .file, .ext_file => {
             self.extractRegFileThreaded(alloc, archive, path, options, pool) catch |err| {
                 out_err.* = err;
-                return;
             };
         },
         .symlink, .ext_symlink => {
             self.extractSymlink(path) catch |err| {
-                wg.finish();
                 out_err.* = err;
             };
         },
         else => {
             self.extractDevice(archive, path, options) catch |err| {
-                wg.finish();
                 out_err.* = err;
-                return;
             };
         },
     }
