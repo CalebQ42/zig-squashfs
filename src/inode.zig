@@ -230,10 +230,7 @@ pub fn extractToThreaded(self: Inode, archive: *Archive, path: []const u8, optio
             if (out_err != null) return out_err.?;
 
             if (perms != null) {
-                var i = perms.?.items.len;
-                while (i > 0) {
-                    i -= 1;
-                    const p = perms.?.items[i];
+                for (perms.?.items) |p| {
                     var fil = try std.fs.cwd().openFile(p.path, .{});
                     try fil.chmod(p.perm);
                     try fil.chown(p.uid, p.gid);
