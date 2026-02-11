@@ -5,15 +5,19 @@ const std = @import("std");
 const Reader = std.Io.Reader;
 const builtin = @import("builtin");
 
-const config = if (builtin.is_test) .{ .use_c_libs = true } else @import("config");
+const config = if (builtin.is_test) .{
+    .use_c_libs = true,
+    .allow_lzo = false,
+} else @import("config");
 
 const c = @cImport({
     if (config.use_c_libs) {
         @cInclude("zlib.h");
         @cInclude("lzma.h");
-        @cInclude("lzo/minilzo.h");
         @cInclude("lz4.h");
         @cInclude("zstd.h");
+        if (config.allow_lzo)
+            @cInclude("lzo/minilzo.h");
     }
 });
 
@@ -176,7 +180,7 @@ pub const zstdDecompress = if (config.use_c_libs) cZstd else zigZstd;
 
 pub fn zigZstd(alloc: std.mem.Allocator, in: []u8, out: []u8) anyerror!usize {
     var rdr: Reader = .fixed(in);
-    const buf = try alloc.alloc(u8, std.compress.zstd.default_window_len + std.compress.zstd.block_size_max);
+    const buf = try alloc.alloc(u8, 1024 * 1024);
     defer alloc.free(buf);
     var decomp = std.compress.zstd.Decompress.init(&rdr, buf, .{});
     return decomp.reader.readSliceShort(out) catch |err| {

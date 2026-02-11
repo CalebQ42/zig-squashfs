@@ -16,7 +16,10 @@ const Table = @import("table.zig").Table;
 const MetadataReader = @import("util/metadata.zig");
 const OffsetFile = @import("util/offset_file.zig");
 
-const config = if (builtin.is_test) .{ .use_c_libs = true } else @import("config");
+const config = if (builtin.is_test) .{
+    .use_c_libs = true,
+    .allow_lzo = false,
+} else @import("config");
 
 /// Information about a fragment section. Multiple fragments are contained in the block described by a single FragEntry.
 /// The offset into the block and fragment size is stored in the file's inode.
@@ -79,7 +82,7 @@ pub fn initAdvanced(alloc: std.mem.Allocator, fil: File, offset: u64, threads: u
             .xz => Decomp.xzDecompress,
             .zstd => Decomp.zstdDecompress,
             .lz4 => if (config.use_c_libs) Decomp.cLz4 else return error.Lz4Unsupported,
-            .lzo => if (config.use_c_libs) Decomp.cLzo else return error.LzoUnsupported,
+            .lzo => if (config.use_c_libs and config.allow_lzo) Decomp.lzoDecompress else return error.LzoUnsupported,
         },
 
         .super = super,

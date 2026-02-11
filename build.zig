@@ -2,10 +2,12 @@ const std = @import("std");
 
 pub fn build(b: *std.Build) !void {
     const use_c_libs_option = b.option(bool, "use_c_libs", "Use C versions of decompression libraries instead of the Zig standard library ones");
+    const allow_lzo = b.option(bool, "allow_lzo", "Compile with lzo support");
     const version_string_option = b.option([]const u8, "version", "Version of the library/binary");
 
     const zig_squashfs_options = b.addOptions();
     zig_squashfs_options.addOption(bool, "use_c_libs", use_c_libs_option orelse false);
+    zig_squashfs_options.addOption(bool, "allow_lzo", allow_lzo orelse false);
 
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{ .preferred_optimize_mode = .ReleaseFast });
