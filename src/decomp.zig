@@ -16,6 +16,7 @@ const c = @cImport({
         @cInclude("lzma.h");
         @cInclude("lz4.h");
         @cInclude("zstd.h");
+        @cInclude("zstd_errors.h");
         if (config.allow_lzo)
             @cInclude("lzo/minilzo.h");
     }
