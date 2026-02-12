@@ -11,15 +11,13 @@ const config = if (builtin.is_test) .{
 } else @import("config");
 
 const c = @cImport({
-    if (config.use_c_libs) {
-        @cInclude("zlib.h");
-        @cInclude("lzma.h");
-        @cInclude("lz4.h");
-        @cInclude("zstd.h");
-        @cInclude("zstd_errors.h");
-        if (config.allow_lzo)
-            @cInclude("lzo/minilzo.h");
-    }
+    @cInclude("zlib.h");
+    @cInclude("lzma.h");
+    @cInclude("lz4.h");
+    @cInclude("zstd.h");
+    @cInclude("zstd_errors.h");
+    if (config.allow_lzo)
+        @cInclude("lzo/minilzo.h");
 });
 
 pub const CompressionType = enum(u16) {
@@ -209,7 +207,6 @@ fn cZstd(alloc: std.mem.Allocator, in: []u8, out: []u8) anyerror!usize {
         c.ZSTD_error_tableLog_tooLarge => cZstdError.TableLogTooLarge,
         c.ZSTD_error_maxSymbolValue_tooLarge => cZstdError.MaxSymbolValueTooLarge,
         c.ZSTD_error_maxSymbolValue_tooSmall => cZstdError.MaxSymbolValueTooSmall,
-        c.ZSTD_error_cannotProduce_uncompressedBlock => cZstdError.CannotProduceUncompressedBlock,
         c.ZSTD_error_stabilityCondition_notRespected => cZstdError.StabilityConditionNotRespected,
         c.ZSTD_error_stage_wrong => cZstdError.StageWrong,
         c.ZSTD_error_init_missing => cZstdError.InitMissing,
@@ -220,13 +217,6 @@ fn cZstd(alloc: std.mem.Allocator, in: []u8, out: []u8) anyerror!usize {
         c.ZSTD_error_dstBuffer_null => cZstdError.DstBufferNull,
         c.ZSTD_error_noForwardProgress_destFull => cZstdError.NoForwardProgressDestFull,
         c.ZSTD_error_noForwardProgress_inputEmpty => cZstdError.NoForwardProgressInputEmpty,
-        c.ZSTD_error_frameIndex_tooLarge => cZstdError.FrameIndexTooLarge,
-        c.ZSTD_error_seekableIO => cZstdError.SeekableIo,
-        c.ZSTD_error_dstBuffer_wrong => cZstdError.DstBufferWrong,
-        c.ZSTD_error_srcBuffer_wrong => cZstdError.SrcBufferWrong,
-        c.ZSTD_error_sequenceProducer_failed => cZstdError.SequenceProducerFailed,
-        c.ZSTD_error_externalSequences_invalid => cZstdError.ExternalSequencesInvalid,
-        c.ZSTD_error_maxCode => cZstdError.MaxCode,
         else => cZstdError.Generic,
     };
 }
