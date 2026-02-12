@@ -12,7 +12,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
       - name: Install deps
-        run: apt install -y zig zlib1g-dev libzstd-dev liblzma-dev liblz4-dev liblzo2-dev
+        run: sudo apt install -y zig zlib1g-dev libzstd-dev liblzma-dev liblz4-dev liblzo2-dev
       - name: Build normal version
         run: zig build -Drelease=true -Dversion=${{ github.ref_name }}
       - name: Move normal build out
