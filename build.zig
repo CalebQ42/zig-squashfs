@@ -44,6 +44,12 @@ pub fn build(b: *std.Build) !void {
         .root_module = exe_mod,
     });
 
+    const lib = b.addLibrary(.{
+        .name = "squashfs",
+        .root_module = mod,
+    });
+
+    b.installArtifact(lib);
     b.installArtifact(exe);
     const run_step = b.step("run", "Run the app");
     const run_cmd = b.addRunArtifact(exe);

@@ -6,8 +6,8 @@ const Reader = std.Io.Reader;
 const builtin = @import("builtin");
 
 const config = if (builtin.is_test) .{
-    .use_c_libs = true,
-    .allow_lzo = false,
+    .use_c_libs = builtin.link_libc == true,
+    .allow_lzo = false, // Change once LZO compilation is fixed
 } else @import("config");
 
 const c = @cImport({
