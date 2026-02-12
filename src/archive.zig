@@ -74,7 +74,7 @@ pub fn initAdvanced(alloc: std.mem.Allocator, fil: File, offset: u64, threads: u
         .parent_alloc = alloc,
         .alloc = .{ .child_allocator = alloc },
         // .fixed_buf = fixed_buf,
-        .thread_count = threads,
+        .thread_count = if (threads > 0) threads else try std.Thread.getCpuCount(),
         .fil = .init(fil, offset),
         .decomp = switch (super.compression) {
             .gzip => Decomp.gzipDecompress,

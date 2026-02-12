@@ -15,7 +15,7 @@ const help_mgs =
     \\
     \\  -o <offset>     Start reading the archive at the given offset.
     \\
-    \\  -p <threads>    Specify how many threads to use. If no present, the system's logical cores count is used.
+    \\  -p <threads>    Specify how many threads to use. If no present or zero, the system's logical cores count is used.
     \\
     \\  --help          Display this messages
     \\  --version       Display the version
@@ -83,9 +83,9 @@ fn handleArgs(alloc: std.mem.Allocator, out: *Writer) !void {
             };
             continue;
         } else if (std.mem.eql(u8, arg, "--version")) {
-            try out.print("zig-unsquashfs version ", .{});
+            try out.print("zig-unsquashfs v", .{});
             try config.version.format(out);
-            try out.print("\nBuilt using Zig {s} with {} backend in {} mode.\n", .{ builtin.zig_version_string, builtin.zig_backend, builtin.mode });
+            try out.print("\nBuilt using Zig {s}\n", .{ builtin.zig_version_string, builtin.zig_backend, builtin.mode });
             std.process.exit(0);
             return;
         } else if (std.mem.eql(u8, arg, "--help")) {
