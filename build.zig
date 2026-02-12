@@ -26,8 +26,14 @@ pub fn build(b: *std.Build) !void {
         mod.linkSystemLibrary("zstd", .{});
     }
 
+    var version = version_string_option orelse "0.0.0-testing";
+    if (version[0] == 'v') version = version[1..];
     const unsquashfs_options = b.addOptions();
-    unsquashfs_options.addOption(std.SemanticVersion, "version", try std.SemanticVersion.parse(version_string_option orelse "0.0.0-testing"));
+    unsquashfs_options.addOption(
+        std.SemanticVersion,
+        "version",
+        try std.SemanticVersion.parse(version),
+    );
 
     var exe_mod = b.createModule(.{
         .root_source_file = b.path("src/bin/unsquashfs.zig"),
