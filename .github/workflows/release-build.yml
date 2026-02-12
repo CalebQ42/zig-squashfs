@@ -1,9 +1,6 @@
 name: Release Build
 
-on:
-  push:
-    tags:
-      - "v*.*.*"
+on: release
 
 jobs:
   build:
@@ -22,10 +19,11 @@ jobs:
         run: zig build -Drelease=true -Duse_c_libs=true -Dversion="${{ github.ref_name }}"
       - name: Move C build out
         run: mv zig-out/bin/unsquashfs ./unsquashfs-c-libs
-      - name: Release
-        uses: softprops/action-gh-release@v2
+      - name: Upload to release
+        uses: JasonEtco/upload-to-release@master
         with:
-          prerelease: true
-          files: |
-            unsquashfs
-            unsquashfs-c-libs
+          args: |
+            unsquashfs application/x-executable
+            unsquashfs-c-libs application/x-executable
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
