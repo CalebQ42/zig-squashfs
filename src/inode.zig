@@ -232,6 +232,9 @@ pub fn extractToThreaded(self: Inode, archive: *Archive, path: []const u8, optio
             if (perms != null) {
                 for (perms.?.items) |p| {
                     var fil = try std.fs.cwd().openFile(p.path, .{});
+                    defer fil.close();
+                    const time = @as(i128, self.hdr.mod_time) * 1000000000;
+                    try fil.updateTimes(time, time);
                     try fil.chmod(p.perm);
                     try fil.chown(p.uid, p.gid);
                 }
@@ -246,8 +249,11 @@ pub fn extractToThreaded(self: Inode, archive: *Archive, path: []const u8, optio
 
             try self.extractRegFileThreaded(alloc, archive, path, options, &pool);
 
+            var fil = try std.fs.cwd().openFile(path, .{});
+            defer fil.close();
+            const time = @as(i128, self.hdr.mod_time) * 1000000000;
+            try fil.updateTimes(time, time);
             if (!options.ignore_permissions) {
-                var fil = try std.fs.cwd().openFile(path, .{});
                 try fil.chmod(self.hdr.permissions);
                 try fil.chown(try archive.id(self.hdr.uid_idx), try archive.id(self.hdr.gid_idx));
             }
@@ -300,11 +306,9 @@ fn extractThread(
     if (out_err.* != null) return;
     switch (self.hdr.inode_type) {
         .dir, .ext_dir => {
-            std.fs.cwd().makeDir(path) catch |err| {
-                if (err != std.fs.Dir.MakeError.PathAlreadyExists) {
-                    out_err.* = err;
-                    return;
-                }
+            _ = std.fs.cwd().makePathStatus(path) catch |err| {
+                out_err.* = err;
+                return;
             };
 
             const entries = self.dirEntries(alloc, archive.*) catch |err| {
@@ -385,9 +389,9 @@ fn extractRegFile(self: Inode, alloc: std.mem.Allocator, archive: *Archive, path
     defer dat_rdr.deinit();
     _ = try dat_rdr.interface.streamRemaining(&wrt.interface);
     try wrt.interface.flush();
-    // updateTime is in nanoseconds (a billionth of a second). mod_time is in seconds.
-    // TODO: fix
-    // try fil.updateTimes(self.hdr.mod_time, self.hdr.mod_time);
+
+    const time = @as(i128, self.hdr.mod_time) * 1000000000;
+    try fil.updateTimes(time, time);
     if (!options.ignore_permissions) {
         try fil.chmod(self.hdr.permissions);
         try fil.chown(try archive.id(self.hdr.uid_idx), try archive.id(self.hdr.gid_idx));
@@ -399,8 +403,12 @@ fn extractRegFile(self: Inode, alloc: std.mem.Allocator, archive: *Archive, path
 /// Assumes the inode is a file or ext_file type.
 fn extractRegFileThreaded(self: Inode, alloc: std.mem.Allocator, archive: *Archive, path: []const u8, options: ExtractionOptions, pool: *Pool) !void {
     var fil = try std.fs.cwd().createFile(path, .{});
+    defer fil.close();
     var data = try self.threadedDataReader(alloc, archive);
     try data.extractThreaded(fil, pool);
+
+    const time = @as(i128, self.hdr.mod_time) * 1000000000;
+    try fil.updateTimes(time, time);
     if (!options.ignore_permissions) {
         try fil.chmod(self.hdr.permissions);
         try fil.chown(try archive.id(self.hdr.uid_idx), try archive.id(self.hdr.gid_idx));
@@ -465,9 +473,9 @@ fn extractDevice(self: Inode, archive: *Archive, path: []const u8, options: Extr
         },
     }
     var fil = try std.fs.cwd().openFile(path, .{});
-    // updateTime is in nanoseconds (a billionth of a second). mod_time is in seconds.
-    // TODO: fix
-    // try fil.updateTimes(self.hdr.mod_time, self.hdr.mod_time);
+    defer fil.close();
+    const time = @as(i128, self.hdr.mod_time) * 1000000000;
+    try fil.updateTimes(time, time);
     if (!options.ignore_permissions) {
         try fil.chmod(self.hdr.permissions);
         try fil.chown(try archive.id(self.hdr.uid_idx), try archive.id(self.hdr.gid_idx));
