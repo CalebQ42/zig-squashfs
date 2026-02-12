@@ -85,7 +85,7 @@ fn handleArgs(alloc: std.mem.Allocator, out: *Writer) !void {
         } else if (std.mem.eql(u8, arg, "--version")) {
             try out.print("zig-unsquashfs v", .{});
             try config.version.format(out);
-            try out.print("\nBuilt using Zig {s}\n", .{ builtin.zig_version_string, builtin.zig_backend, builtin.mode });
+            try out.print("\nBuilt using Zig {s} in {} mode\n", .{ builtin.zig_version_string, builtin.mode });
             std.process.exit(0);
             return;
         } else if (std.mem.eql(u8, arg, "--help")) {
