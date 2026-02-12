@@ -378,7 +378,7 @@ fn extractThread(
 ///
 /// Assumes the inode is a file or ext_file type.
 fn extractRegFile(self: Inode, alloc: std.mem.Allocator, archive: *Archive, path: []const u8, options: ExtractionOptions) !void {
-    var fil = try std.fs.cwd().createFile(path, .{});
+    var fil = try std.fs.cwd().createFile(path, .{ .exclusive = true });
     defer fil.close();
     var wrt = fil.writer(&[0]u8{});
     var dat_rdr = try self.dataReader(alloc, archive);
