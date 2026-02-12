@@ -11,8 +11,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+      - uses: https://codeberg.org/mlugg/setup-zig@v2
       - name: Install deps
-        run: sudo apt update && sudo apt install -y zig zlib1g-dev libzstd-dev liblzma-dev liblz4-dev liblzo2-dev
+        run: sudo apt update && sudo apt install -y zlib1g-dev libzstd-dev liblzma-dev liblz4-dev liblzo2-dev
       - name: Build normal version
         run: zig build -Drelease=true -Dversion=${{ github.ref_name }}
       - name: Move normal build out
@@ -26,5 +27,5 @@ jobs:
         with:
           prerelease: true
           files: |
-            ./unsquashfs
-            ./unsquashfs-c-libs
+            unsquashfs
+            unsquashfs-c-libs
