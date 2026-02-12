@@ -11,12 +11,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+      - name: Install deps
+        run: apt install zig zlib1g-dev libzstd-dev liblzma-dev liblz4-dev liblzo2-dev | yes
       - name: Build normal version
         run: zig build -Drelease=true -Dversion=${{ github.ref_name }}
       - name: Move normal build out
         run: mv zig-out/bin/unsquashfs ./
-      - name: Install C deps
-        run: apt install zlib1g-dev libzstd-dev liblzma-dev liblz4-dev liblzo2-dev | yes
       - name: Rebuild with C libraries
         run: zig build -Drelease=true -Duse_c_libs=true -Dversion="${{ github.ref_name }}"
       - name: Move C build out
