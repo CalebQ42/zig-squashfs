@@ -22,8 +22,12 @@ jobs:
       - name: Upload to release
         uses: JasonEtco/upload-to-release@master
         with:
-          args: |
-            unsquashfs application/x-executable
-            unsquashfs-c-libs application/x-executable
+          args: unsquashfs application/x-executable
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload to release
+        uses: JasonEtco/upload-to-release@master
+        with:
+          args: unsquashfs-c-libs application/x-executable
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
