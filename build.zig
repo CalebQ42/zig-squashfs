@@ -21,7 +21,8 @@ pub fn build(b: *std.Build) !void {
     if (use_c_libs_option == true) {
         mod.linkSystemLibrary("zlib", .{});
         mod.linkSystemLibrary("lzma", .{});
-        mod.linkSystemLibrary("minilzo", .{});
+        if (allow_lzo == true)
+            mod.linkSystemLibrary("minilzo", .{});
         mod.linkSystemLibrary("lz4", .{});
         mod.linkSystemLibrary("zstd", .{});
     }
