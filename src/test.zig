@@ -9,8 +9,7 @@ const TestArchive = "testing/LinuxPATest.sfs";
 test "Basics" {
     var fil = try std.fs.cwd().openFile(TestArchive, .{});
     defer fil.close();
-    var sfs: Archive = try .init(std.testing.allocator, fil);
-    defer sfs.deinit();
+    const sfs: Archive = try .init(fil, 0);
     if (sfs.super != LinuxPATestCorrectSuperblock) {
         std.debug.print("Superblock wrong\nShould be: {}\n\nis: {}\n", .{ LinuxPATestCorrectSuperblock, sfs.super });
         return error.BadSuperblock;
@@ -24,11 +23,10 @@ test "ExtractSingleFile" {
     std.fs.cwd().deleteFile(TestFileExtractLocation) catch {};
     var fil = try std.fs.cwd().openFile(TestArchive, .{});
     defer fil.close();
-    var sfs: Archive = try .init(std.testing.allocator, fil);
-    defer sfs.deinit();
-    var test_fil = try sfs.open(TestFile);
+    var sfs: Archive = try .init(fil, 0);
+    var test_fil = try sfs.open(std.testing.allocator, TestFile);
     defer test_fil.deinit();
-    try test_fil.extract(TestFileExtractLocation, .Default);
+    try test_fil.extract(std.testing.allocator, TestFileExtractLocation, try .Default());
     //TODO: validate extracted file.
 }
 
@@ -38,9 +36,8 @@ test "ExtractCompleteArchive" {
     std.fs.cwd().deleteTree(TestFullExtractLocation) catch {};
     var fil = try std.fs.cwd().openFile(TestArchive, .{});
     defer fil.close();
-    var sfs: Archive = try .init(std.testing.allocator, fil);
-    defer sfs.deinit();
-    try sfs.extract(TestFullExtractLocation, .Default);
+    var sfs: Archive = try .init(fil, 0);
+    try sfs.extract(std.testing.allocator, TestFullExtractLocation, try .Default());
 }
 
 const LinuxPATestCorrectSuperblock: Superblock = .{

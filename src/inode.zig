@@ -93,7 +93,7 @@ pub fn read(alloc: std.mem.Allocator, rdr: *Reader, block_size: u32) !Inode {
         },
     };
 }
-pub fn readFromEntry(alloc: std.mem.Allocator, archive: *Archive, entry: DirEntry) !Inode {
+pub fn readFromEntry(alloc: std.mem.Allocator, archive: Archive, entry: DirEntry) !Inode {
     var rdr = try archive.fil.readerAt(archive.super.inode_start + entry.block_start, &[0]u8{});
     var meta: MetadataReader = .init(alloc, &rdr.interface, archive.decomp);
     try meta.interface.discardAll(entry.block_offset);
@@ -111,32 +111,42 @@ pub fn deinit(self: Inode, alloc: std.mem.Allocator) void {
 }
 
 /// Get the data reader for a file inode.
-pub fn dataReader(self: Inode, alloc: std.mem.Allocator, archive: *Archive) !DataReader {
+pub fn dataReader(self: Inode, alloc: std.mem.Allocator, archive: Archive) !DataReader {
     return switch (self.hdr.inode_type) {
         .file => readerFromData(alloc, archive, self.data.file),
         .ext_file => readerFromData(alloc, archive, self.data.ext_file),
         else => error.NotRegularFile,
     };
 }
-fn readerFromData(alloc: std.mem.Allocator, archive: *Archive, data: anytype) !DataReader {
-    var out: DataReader = .init(alloc, archive.*, data.block_sizes, data.block_start, data.size);
-    if (data.frag_idx != 0xFFFFFFFF)
-        out.addFragment(try archive.frag(data.frag_idx), data.frag_block_offset);
-    return out;
+fn readerFromData(alloc: std.mem.Allocator, archive: Archive, data: anytype) !DataReader {
+    return .init(
+        alloc,
+        archive,
+        data.block_sizes,
+        data.block_start,
+        data.size,
+        data.frag_block_offset,
+        if (data.frag_idx == 0xFFFFFFFF) null else try archive.frag_table.get(alloc, data.frag_idx),
+    );
 }
 /// Get a threaded data reader for a file inode.
-pub fn threadedDataReader(self: Inode, alloc: std.mem.Allocator, archive: *Archive) !ThreadedDataReader {
+pub fn threadedDataReader(self: Inode, alloc: std.mem.Allocator, archive: Archive) !ThreadedDataReader {
     return switch (self.hdr.inode_type) {
         .file => threadedReaderFromData(alloc, archive, self.data.file),
         .ext_file => threadedReaderFromData(alloc, archive, self.data.ext_file),
         else => error.NotRegularFile,
     };
 }
-fn threadedReaderFromData(alloc: std.mem.Allocator, archive: *Archive, data: anytype) !ThreadedDataReader {
-    var out: ThreadedDataReader = .init(alloc, archive.*, data.block_sizes, data.block_start, data.size);
-    if (data.frag_idx != 0xFFFFFFFF)
-        out.addFragment(try archive.frag(data.frag_idx), data.frag_block_offset);
-    return out;
+fn threadedReaderFromData(alloc: std.mem.Allocator, archive: Archive, data: anytype) !ThreadedDataReader {
+    return .init(
+        alloc,
+        archive,
+        data.block_sizes,
+        data.block_start,
+        data.size,
+        data.frag_block_offset,
+        if (data.frag_idx == 0xFFFFFFFF) null else try archive.frag_table.get(alloc, data.frag_idx),
+    );
 }
 
 /// Get the directory entries for a directory inode.
@@ -154,17 +164,17 @@ fn entriesFromData(alloc: std.mem.Allocator, archive: Archive, data: anytype) ![
     return DirEntry.readDir(alloc, &meta.interface, data.size);
 }
 
-/// Extract the inode to the given path. Single threaded.
-pub fn extractTo(self: Inode, archive: *Archive, path: []const u8, options: ExtractionOptions) !void {
+/// Extract the inode to the given path.
+pub fn extractTo(self: Inode, alloc: std.mem.Allocator, archive: Archive, path: []const u8, options: ExtractionOptions) !void {
+    if (options.threads > 1) return self.extractToThreaded(alloc, archive, path, options); // We go to a dedicated function for mutli-threaded
     switch (self.hdr.inode_type) {
         .dir, .ext_dir => {
             // Removing any trailing separators since that's the easiest path forward.
-            if (path[path.len - 1] == '/') return self.extractTo(archive, path[0 .. path.len - 1], options);
+            if (path[path.len - 1] == '/') return self.extractTo(alloc, archive, path[0 .. path.len - 1], options);
             std.fs.cwd().makeDir(path) catch |err| {
                 if (err != std.fs.Dir.MakeError.PathAlreadyExists) return err;
             };
-            var alloc = archive.allocator();
-            const entries = try self.dirEntries(alloc, archive.*);
+            const entries = try self.dirEntries(alloc, archive);
             defer {
                 for (entries) |entry| entry.deinit(alloc);
                 alloc.free(entries);
@@ -178,12 +188,12 @@ pub fn extractTo(self: Inode, archive: *Archive, path: []const u8, options: Extr
 
                 var inode: Inode = try readFromEntry(alloc, archive, entry);
                 defer inode.deinit(alloc);
-                try inode.extractTo(archive, new_path, options);
+                try inode.extractTo(alloc, archive, new_path, options);
             }
         },
-        .file, .ext_file => try self.extractRegFile(archive.allocator(), archive, path, options),
+        .file, .ext_file => try self.extractRegFile(alloc, archive, path, options),
         .symlink, .ext_symlink => try self.extractSymlink(path),
-        else => try self.extractDevice(archive, path, options),
+        else => try self.extractDevice(alloc, archive, path, options),
     }
 }
 
@@ -202,23 +212,24 @@ const Parent = struct {
     wg: WaitGroup,
     mut: Mutex = .{},
 
-    fn create(alloc: std.mem.Allocator, hdr: Header, archive: *Archive, path: []const u8, options: ExtractionOptions, dir_size: usize) !*Parent {
+    fn create(alloc: std.mem.Allocator, hdr: Header, archive: Archive, path: []const u8, options: ExtractionOptions, dir_size: usize) !*Parent {
         const out = try alloc.create(Parent);
         errdefer alloc.destroy(out);
         out.* = .{
             .alloc = alloc,
 
             .path = path,
-            .uid = try archive.id(hdr.uid_idx),
-            .gid = try archive.id(hdr.gid_idx),
+            .uid = try archive.id_table.get(alloc, hdr.uid_idx),
+            .gid = try archive.id_table.get(alloc, hdr.gid_idx),
             .perm = hdr.permissions,
             .mod_time = hdr.mod_time,
 
             .ignore_permissions = options.ignore_permissions,
             .ignore_xattr = options.ignore_xattr,
 
-            .wg = .{ .state = .init(dir_size) },
+            .wg = .{},
         };
+        out.wg.startMany(dir_size);
         return out;
     }
 
@@ -232,7 +243,7 @@ const Parent = struct {
         defer p.alloc.destroy(p);
         var fil = try std.fs.cwd().openFile(p.path, .{});
         defer fil.close();
-        const time = p.mod_time * 1000000000;
+        const time = @as(i128, p.mod_time) * 1000000000;
         try fil.updateTimes(time, time);
         if (p.ignore_permissions) {
             try fil.chmod(p.perm);
@@ -243,36 +254,26 @@ const Parent = struct {
 
 /// Extract the inode to the given path. Multi-threaded.
 /// Functions identically to extractTo on all but regular files and directories.
-///
-/// If threads <= 1, then this just calls extractTo.
-pub fn extractToThreaded(self: Inode, archive: *Archive, path: []const u8, options: ExtractionOptions, threads: usize) !void {
-    if (threads <= 1) return self.extractTo(archive, path, options);
+fn extractToThreaded(self: Inode, alloc: std.mem.Allocator, archive: Archive, path: []const u8, options: ExtractionOptions) !void {
     switch (self.hdr.inode_type) {
         .dir, .ext_dir => {
             // Removing any trailing separators since that's the easiest path forward.
-            if (path[path.len - 1] == '/') return self.extractToThreaded(archive, path[0 .. path.len - 1], options, threads);
-
-            // Fixed Allocator
-            // const mem_buf = archive.allocator().alloc(u8, 2 * 1024 * 1024 * 1024);
-            // defer archive.allocator().free(mem_buf);
-            // var fixed_alloc: std.heap.FixedBufferAllocator = .init(mem_buf);
-            // const alloc = fixed_alloc.threadSafeAllocator();
+            if (path[path.len - 1] == '/') return self.extractToThreaded(alloc, archive, path[0 .. path.len - 1], options);
 
             // Arena Allocator
-            var arena_alloc: std.heap.ArenaAllocator = .init(archive.allocator());
+            var arena_alloc: std.heap.ArenaAllocator = .init(alloc);
             defer arena_alloc.deinit();
             var thread_alloc: std.heap.ThreadSafeAllocator = .{ .child_allocator = arena_alloc.allocator() };
-            const alloc = thread_alloc.allocator();
 
             var wg: WaitGroup = .{};
             // defer if(!options.ignore_permissions) perms.?.deinit(alloc); We don't need to do this due to ArenaAllocator
             var pool: Pool = undefined;
-            try pool.init(.{ .allocator = alloc, .n_jobs = threads - 1 });
+            try pool.init(.{ .allocator = alloc, .n_jobs = options.threads - 1 });
             defer pool.deinit();
             var out_err: ?anyerror = null;
 
             wg.start();
-            self.extractThread(alloc, archive, path, options, &wg, &pool, &out_err, null);
+            self.extractThread(thread_alloc.allocator(), archive, path, options, &wg, &pool, &out_err, null);
             pool.waitAndWork(&wg);
             if (out_err != null) return out_err.?;
 
@@ -282,17 +283,17 @@ pub fn extractToThreaded(self: Inode, archive: *Archive, path: []const u8, optio
             try fil.updateTimes(time, time);
             if (options.ignore_permissions) {
                 try fil.chmod(self.hdr.permissions);
-                try fil.chown(try archive.id(self.hdr.uid_idx), try archive.id(self.hdr.gid_idx));
+                try fil.chown(try archive.id_table.get(alloc, self.hdr.uid_idx), try archive.id_table.get(alloc, self.hdr.gid_idx));
             }
         },
         .file, .ext_file => {
-            const alloc = archive.allocator();
-
             var pool: Pool = undefined;
-            try pool.init(.{ .allocator = alloc, .n_jobs = threads });
+            try pool.init(.{ .allocator = alloc, .n_jobs = options.threads - 1 });
             defer pool.deinit();
 
-            try self.extractRegFileThreaded(alloc, archive, path, options, &pool);
+            var thread_alloc: std.heap.ThreadSafeAllocator = .{ .child_allocator = alloc };
+
+            try self.extractRegFileThreaded(thread_alloc.allocator(), archive, path, options, &pool);
 
             var fil = try std.fs.cwd().openFile(path, .{});
             defer fil.close();
@@ -300,18 +301,18 @@ pub fn extractToThreaded(self: Inode, archive: *Archive, path: []const u8, optio
             try fil.updateTimes(time, time);
             if (!options.ignore_permissions) {
                 try fil.chmod(self.hdr.permissions);
-                try fil.chown(try archive.id(self.hdr.uid_idx), try archive.id(self.hdr.gid_idx));
+                try fil.chown(try archive.id_table.get(alloc, self.hdr.uid_idx), try archive.id_table.get(alloc, self.hdr.gid_idx));
             }
         },
         .symlink, .ext_symlink => try self.extractSymlink(path),
-        else => try self.extractDevice(archive, path, options),
+        else => try self.extractDevice(alloc, archive, path, options),
     }
 }
 
 fn extractThreadEntry(
     entry: DirEntry,
     alloc: std.mem.Allocator,
-    archive: *Archive,
+    archive: Archive,
     path: []const u8,
     options: ExtractionOptions,
     wg: *WaitGroup,
@@ -339,7 +340,7 @@ fn extractThreadEntry(
 fn extractThread(
     self: Inode,
     alloc: std.mem.Allocator,
-    archive: *Archive,
+    archive: Archive,
     path: []const u8,
     options: ExtractionOptions,
     wg: *WaitGroup,
@@ -352,7 +353,7 @@ fn extractThread(
     defer {
         if (parent != null) parent.?.finish() catch |err| {
             if (options.verbose)
-                options.verbose_writer.?.print("Error setting folder permission to {s}: {}\n", .{ path, err }) catch {};
+                options.verbose_writer.?.print("Error setting folder permission to {s}: {}\n", .{ parent.?.path, err }) catch {};
             out_err.* = err;
         };
         wg.finish();
@@ -367,7 +368,7 @@ fn extractThread(
                 return;
             };
 
-            const entries = self.dirEntries(alloc, archive.*) catch |err| {
+            const entries = self.dirEntries(alloc, archive) catch |err| {
                 if (options.verbose)
                     options.verbose_writer.?.print("Error getting directory entries for inode #{} (extracting to {s}): {}\n", .{ self.hdr.num, path, err }) catch {};
                 out_err.* = err;
@@ -399,6 +400,10 @@ fn extractThread(
                     },
                 ) catch |err| {
                     wg.finish();
+                    p.finish() catch |e| {
+                        if (options.verbose)
+                            options.verbose_writer.?.print("Error setting folder permission to {s}: {}\n", .{ p.path, e }) catch {};
+                    };
                     if (options.verbose)
                         options.verbose_writer.?.print("Error starting extraction thread: {}\n", .{err}) catch {};
                     out_err.* = err;
@@ -421,7 +426,7 @@ fn extractThread(
             };
         },
         else => {
-            self.extractDevice(archive, path, options) catch |err| {
+            self.extractDevice(alloc, archive, path, options) catch |err| {
                 if (options.verbose)
                     options.verbose_writer.?.print("Error extracting device/IPC inode #{} to {s}: {}\n", .{ self.hdr.num, path, err }) catch {};
                 out_err.* = err;
@@ -433,7 +438,7 @@ fn extractThread(
 /// Optionally set owner & permissions.
 ///
 /// Assumes the inode is a file or ext_file type.
-fn extractRegFile(self: Inode, alloc: std.mem.Allocator, archive: *Archive, path: []const u8, options: ExtractionOptions) !void {
+fn extractRegFile(self: Inode, alloc: std.mem.Allocator, archive: Archive, path: []const u8, options: ExtractionOptions) !void {
     var fil = try std.fs.cwd().createFile(path, .{ .exclusive = true });
     defer fil.close();
     var wrt = fil.writer(&[0]u8{});
@@ -446,14 +451,14 @@ fn extractRegFile(self: Inode, alloc: std.mem.Allocator, archive: *Archive, path
     try fil.updateTimes(time, time);
     if (!options.ignore_permissions) {
         try fil.chmod(self.hdr.permissions);
-        try fil.chown(try archive.id(self.hdr.uid_idx), try archive.id(self.hdr.gid_idx));
+        try fil.chown(try archive.id_table.get(alloc, self.hdr.uid_idx), try archive.id_table.get(alloc, self.hdr.gid_idx));
     }
 }
 /// Extract the inode file contents to the given path threadedly.
 /// pool is used to spawn threads.
 ///
 /// Assumes the inode is a file or ext_file type.
-fn extractRegFileThreaded(self: Inode, alloc: std.mem.Allocator, archive: *Archive, path: []const u8, options: ExtractionOptions, pool: *Pool) !void {
+fn extractRegFileThreaded(self: Inode, alloc: std.mem.Allocator, archive: Archive, path: []const u8, options: ExtractionOptions, pool: *Pool) !void {
     var fil = try std.fs.cwd().createFile(path, .{});
     defer fil.close();
     var data = try self.threadedDataReader(alloc, archive);
@@ -463,7 +468,7 @@ fn extractRegFileThreaded(self: Inode, alloc: std.mem.Allocator, archive: *Archi
     try fil.updateTimes(time, time);
     if (!options.ignore_permissions) {
         try fil.chmod(self.hdr.permissions);
-        try fil.chown(try archive.id(self.hdr.uid_idx), try archive.id(self.hdr.gid_idx));
+        try fil.chown(try archive.id_table.get(alloc, self.hdr.uid_idx), try archive.id_table.get(alloc, self.hdr.gid_idx));
     }
 }
 /// Creates the symlink described by the inode.
@@ -481,7 +486,7 @@ fn extractSymlink(self: Inode, path: []const u8) !void {
 ///
 /// Optionally set owner & permissions.
 /// Assumes the inode is a char_dev, block_dev, fifo, socket, or their extended counterparts.
-fn extractDevice(self: Inode, archive: *Archive, path: []const u8, options: ExtractionOptions) !void {
+fn extractDevice(self: Inode, alloc: std.mem.Allocator, archive: Archive, path: []const u8, options: ExtractionOptions) !void {
     var mode: u32 = undefined;
     var dev: u32 = 0;
     switch (self.data) {
@@ -530,7 +535,7 @@ fn extractDevice(self: Inode, archive: *Archive, path: []const u8, options: Extr
     try fil.updateTimes(time, time);
     if (!options.ignore_permissions) {
         try fil.chmod(self.hdr.permissions);
-        try fil.chown(try archive.id(self.hdr.uid_idx), try archive.id(self.hdr.gid_idx));
+        try fil.chown(try archive.id_table.get(alloc, self.hdr.uid_idx), try archive.id_table.get(alloc, self.hdr.gid_idx));
     }
     if (!options.ignore_xattr) {
         // TODO

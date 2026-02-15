@@ -29,13 +29,16 @@ interface: Reader,
 cur_offset: u64,
 block_idx: u32 = 0,
 
-pub fn init(alloc: std.mem.Allocator, archive: Archive, blocks: []BlockSize, start: u64, size: u64) DataReader {
+pub fn init(alloc: std.mem.Allocator, archive: Archive, blocks: []BlockSize, start: u64, size: u64, frag_offset: u32, frag_entry: ?FragEntry) DataReader {
     return .{
         .alloc = alloc,
         .fil = archive.fil,
         .decomp = archive.decomp,
         .block_size = archive.super.block_size,
         .blocks = blocks,
+
+        .frag = frag_entry,
+        .frag_offset = frag_offset,
         .size = size,
         .cur_offset = start,
         .interface = .{
@@ -54,11 +57,6 @@ pub fn deinit(self: *DataReader) void {
     self.alloc.free(self.interface.buffer);
     self.interface.end = 0;
     self.interface.seek = 0;
-}
-
-pub fn addFragment(self: *DataReader, entry: FragEntry, frag_offset: u32) void {
-    self.frag = entry;
-    self.frag_offset = frag_offset;
 }
 
 fn numBlocks(self: DataReader) usize {

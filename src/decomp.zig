@@ -29,6 +29,7 @@ pub const CompressionType = enum(u16) {
     zstd,
 };
 
+/// A generic decompression function. alloc is only used for internal use and any allocations made will be freed.
 pub const DecompFn = *const fn (alloc: std.mem.Allocator, in: []u8, out: []u8) anyerror!usize; // TODO: replace anyerror to definitive error types.
 
 pub const gzipDecompress = if (config.use_c_libs) cGzip else zigGzip;

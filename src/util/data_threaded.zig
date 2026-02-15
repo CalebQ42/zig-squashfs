@@ -28,7 +28,7 @@ size: u64,
 
 start_offset: u64,
 
-pub fn init(alloc: std.mem.Allocator, archive: Archive, blocks: []BlockSize, start: u64, size: u64) ThreadedDataReader {
+pub fn init(alloc: std.mem.Allocator, archive: Archive, blocks: []BlockSize, start: u64, size: u64, frag_offset: u32, frag_entry: ?FragEntry) ThreadedDataReader {
     return .{
         .alloc = alloc,
         .fil = archive.fil,
@@ -37,12 +37,10 @@ pub fn init(alloc: std.mem.Allocator, archive: Archive, blocks: []BlockSize, sta
         .blocks = blocks,
         .size = size,
         .start_offset = start,
-    };
-}
 
-pub fn addFragment(self: *ThreadedDataReader, entry: FragEntry, frag_offset: u32) void {
-    self.frag = entry;
-    self.frag_offset = frag_offset;
+        .frag_offset = frag_offset,
+        .frag = frag_entry,
+    };
 }
 
 fn numBlocks(self: ThreadedDataReader) usize {

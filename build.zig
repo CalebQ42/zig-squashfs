@@ -58,6 +58,7 @@ pub fn build(b: *std.Build) !void {
 
     b.installArtifact(lib);
     b.installArtifact(exe);
+
     const run_step = b.step("run", "Run the app");
     const run_cmd = b.addRunArtifact(exe);
     run_step.dependOn(&run_cmd.step);
@@ -76,4 +77,12 @@ pub fn build(b: *std.Build) !void {
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_mod_tests.step);
     test_step.dependOn(&run_exe_tests.step);
+
+    // Wanted by ZLS for better detection.
+    const exe_check = b.addExecutable(.{
+        .name = "unsquashfs",
+        .root_module = mod,
+    });
+    const check = b.step("check", "Check if unsquashfs compiles");
+    check.dependOn(&exe_check.step);
 }
