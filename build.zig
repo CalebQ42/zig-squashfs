@@ -10,7 +10,7 @@ pub fn build(b: *std.Build) !void {
     zig_squashfs_options.addOption(bool, "allow_lzo", allow_lzo orelse false);
 
     const target = b.standardTargetOptions(.{});
-    const optimize = b.standardOptimizeOption(.{ .preferred_optimize_mode = .ReleaseFast });
+    const optimize = b.standardOptimizeOption(.{});
     const mod = b.addModule("zig_squashfs", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,

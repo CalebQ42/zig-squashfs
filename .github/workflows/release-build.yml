@@ -17,15 +17,15 @@ jobs:
       - name: Build normal version
         run: zig build -Drelease=true -Dversion=${{ github.ref_name }}
       - name: Move normal build out
-        run: mv zig-out/bin/unsquashfs ./
+        run: mv zig-out/bin/unsquashfs ./unsquashfs-x86_64
       - name: Rebuild with C libraries
-        run: zig build -Drelease=true -Duse_c_libs=true -Dversion="${{ github.ref_name }}"
+        run: zig build --release=fast -Drelease=true -Duse_c_libs=true -Dversion="${{ github.ref_name }}"
       - name: Move C build out
-        run: mv zig-out/bin/unsquashfs ./unsquashfs-c-libs
+        run: mv zig-out/bin/unsquashfs ./unsquashfs-x86_64-c-libs
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
           prerelease: true
           files: |
-            unsquashfs
-            unsquashfs-c-libs
+            unsquashfs-x86_64
+            unsquashfs-x86_64-c-libs

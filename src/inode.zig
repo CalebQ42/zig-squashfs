@@ -199,7 +199,7 @@ const Parent = struct {
     ignore_permissions: bool,
     ignore_xattr: bool,
 
-    wg: WaitGroup,
+    wg: WaitGroup = .{},
     mut: Mutex = .{},
 
     fn create(alloc: std.mem.Allocator, hdr: Header, archive: *Archive, path: []const u8, options: ExtractionOptions, dir_size: usize) !*Parent {
@@ -216,9 +216,8 @@ const Parent = struct {
 
             .ignore_permissions = options.ignore_permissions,
             .ignore_xattr = options.ignore_xattr,
-
-            .wg = .{ .state = .init(dir_size) },
         };
+        out.wg.startMany(dir_size);
         return out;
     }
 
@@ -232,7 +231,7 @@ const Parent = struct {
         defer p.alloc.destroy(p);
         var fil = try std.fs.cwd().openFile(p.path, .{});
         defer fil.close();
-        const time = p.mod_time * 1000000000;
+        const time = @as(i128, p.mod_time) * 1000000000;
         try fil.updateTimes(time, time);
         if (p.ignore_permissions) {
             try fil.chmod(p.perm);
