@@ -3,6 +3,7 @@ const std = @import("std");
 pub fn build(b: *std.Build) !void {
     const use_c_libs_option = b.option(bool, "use_c_libs", "Use C versions of decompression libraries instead of the Zig standard library ones");
     const allow_lzo = b.option(bool, "allow_lzo", "Compile with lzo support");
+    const valgrind = b.option(bool, "valgrind", "Compile with valgrind integration");
     const version_string_option = b.option([]const u8, "version", "Version of the library/binary");
 
     const zig_squashfs_options = b.addOptions();
@@ -15,7 +16,8 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
-        .link_libc = if (use_c_libs_option == true) true else false,
+        .link_libc = use_c_libs_option,
+        .valgrind = valgrind,
     });
     mod.addOptions("config", zig_squashfs_options);
     if (use_c_libs_option == true) {
@@ -40,10 +42,11 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = b.path("src/bin/unsquashfs.zig"),
         .target = target,
         .optimize = optimize,
-        .link_libc = if (use_c_libs_option == true) true else false,
+        .link_libc = use_c_libs_option,
         .imports = &.{
             .{ .name = "zig_squashfs", .module = mod },
         },
+        .valgrind = valgrind,
     });
     exe_mod.addOptions("config", unsquashfs_options);
     const exe = b.addExecutable(.{
@@ -58,13 +61,7 @@ pub fn build(b: *std.Build) !void {
 
     b.installArtifact(lib);
     b.installArtifact(exe);
-    const run_step = b.step("run", "Run the app");
-    const run_cmd = b.addRunArtifact(exe);
-    run_step.dependOn(&run_cmd.step);
-    run_cmd.step.dependOn(b.getInstallStep());
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
-    }
+
     const mod_tests = b.addTest(.{
         .root_module = mod,
     });
@@ -76,4 +73,17 @@ pub fn build(b: *std.Build) !void {
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_mod_tests.step);
     test_step.dependOn(&run_exe_tests.step);
+
+    // zls build check steps
+    const lib_check = b.addLibrary(.{
+        .name = "squashfs",
+        .root_module = mod,
+    });
+    const exe_check = b.addExecutable(.{
+        .name = "unsquashfs",
+        .root_module = exe_mod,
+    });
+    const check = b.step("check", "Check if unsquashfs compiles");
+    check.dependOn(&lib_check.step);
+    check.dependOn(&exe_check.step);
 }

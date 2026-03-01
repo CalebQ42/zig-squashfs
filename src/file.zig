@@ -96,7 +96,7 @@ pub fn iterate(self: SfsFile) !Iterator {
 }
 /// Open a sub-file/folder within a directory at the given path.
 /// If path is "", ".", "/", or "./", this File is returned.
-pub fn open(self: SfsFile, path: []const u8) !SfsFile {
+pub fn open(self: SfsFile, alloc: std.mem.Allocator, path: []const u8) !SfsFile {
     if (!self.isDir()) return FileError.NotDirectory;
     if (pathIsSelf(path)) return self;
 
@@ -109,7 +109,6 @@ pub fn open(self: SfsFile, path: []const u8) !SfsFile {
     if (std.mem.eql(u8, first_element, ".")) return self.open(path[idx + 1 ..]);
     const entries = try self.getEntries();
     defer {
-        var alloc = self.archive.allocator();
         for (entries) |e| {
             e.deinit(alloc);
         }
@@ -127,7 +126,7 @@ pub fn open(self: SfsFile, path: []const u8) !SfsFile {
                     return fil;
                 }
                 defer fil.deinit();
-                return fil.open(path[idx + 1 ..]);
+                return fil.open(alloc, path[idx + 1 ..]);
             },
             .lt => cur_slice = cur_slice[0..split],
             .gt => cur_slice = cur_slice[split + 1 ..],
@@ -170,35 +169,8 @@ pub fn devNum(self: SfsFile) !u32 {
 
 /// Extract the given File to the path. If File is a regular file, the path must be a directory or not exist.
 /// If the gievn path is a folder, the File's contents will be extracted within.
-pub fn extract(self: *SfsFile, path: []const u8, options: ExtractionOptions) !void {
-    var alloc = self.archive.allocator();
-    var ext_path: []u8 = undefined;
-    if (std.fs.cwd().statFile(path)) |stat| {
-        if (stat.kind == .directory) {
-            if (!self.isDir()) {
-                const has_end_sep = path[path.len - 1] == '/';
-                const alloc_size = if (has_end_sep)
-                    path.len + self.name.len
-                else
-                    path.len + self.name.len + 1;
-                ext_path = try alloc.alloc(u8, alloc_size);
-                @memcpy(ext_path[0..path.len], path);
-                @memcpy(ext_path[ext_path.len - self.name.len ..], self.name);
-                if (!has_end_sep) ext_path[path.len] = '/';
-            } else {
-                ext_path = @constCast(path);
-            }
-        } else return FileError.ExtractionPathExists;
-    } else |err| {
-        if (err == error.FileNotFound) {
-            ext_path = @constCast(path);
-        } else {
-            std.log.err("Error stat-ing extraction path {s}: {}\n", .{ path, err });
-            return err;
-        }
-    }
-    defer if (ext_path.len > path.len) alloc.free(ext_path);
-    return self.inode.extractToThreaded(self.archive, path, options, self.archive.thread_count);
+pub fn extract(self: *SfsFile, alloc: std.mem.Allocator, path: []const u8, options: ExtractionOptions) !void {
+    return self.inode.extractToThreaded(alloc, self.archive, path, options);
 }
 
 /// Utility function.

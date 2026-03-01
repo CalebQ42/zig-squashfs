@@ -44,9 +44,14 @@ pub fn main() !void {
     }
     var fil: std.fs.File = try std.fs.cwd().openFile(archive, .{}); //TODO: Handle error gracefully.
     defer fil.close();
-    var arc: squashfs.Archive = try .initAdvanced(alloc, fil, offset, threads); //TODO: Update when memory size matters. //TODO: Handle error gracefully.
+    var arc: squashfs.Archive = try .init(alloc, fil, offset); //TODO: Update when memory size matters. //TODO: Handle error gracefully.
     defer arc.deinit();
-    try arc.extract(extLoc, if (verbose) .VerboseDefault(&out.interface) else .Default); //TODO: Handle error gracefully.
+    const options: squashfs.ExtractionOptions = .{
+        .threads = if (threads == 0) try std.Thread.getCpuCount() else threads,
+        .verbose = verbose,
+        .verbose_writer = if (verbose) &out.interface else null,
+    };
+    try arc.extract(alloc, extLoc, options); //TODO: Handle error gracefully.
 }
 
 fn handleArgs(alloc: std.mem.Allocator, out: *Writer) !void {
