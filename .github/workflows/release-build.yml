@@ -17,7 +17,7 @@ jobs:
       - name: Build normal version
         run: zig build --release=fast -Dversion=${{ github.ref_name }}
       - name: Move normal build out
-        run: mv zig-out/bin/unsquashfs ./unsquashfs-x86_64
+        run: mv zig-out/bin/unsquashfs ./unsquashfs-x86_64-zig-libs
       - name: Rebuild with C libraries
         run: zig build --release=fast -Duse_c_libs=true -Dversion="${{ github.ref_name }}"
       - name: Move C build out
@@ -27,5 +27,5 @@ jobs:
         with:
           prerelease: true
           files: |
-            unsquashfs-x86_64
+            unsquashfs-x86_64-zig-libs
             unsquashfs-x86_64-c-libs
