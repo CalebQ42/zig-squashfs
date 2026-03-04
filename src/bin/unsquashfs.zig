@@ -14,6 +14,8 @@ const help_mgs =
     \\  -d <location>   Extract to the given location instead of "squashfs-root"
     \\
     \\  -o <offset>     Start reading the archive at the given offset.
+    \\  -dx             Don't set xattr values
+    \\  -dp             Don't set permissions (includes setting uid & gid owner)
     \\
     \\  -p <threads>    Specify how many threads to use. If no present or zero, the system's logical cores count is used.
     \\  -v              Verbose
@@ -30,6 +32,8 @@ var extLoc: []const u8 = "squashfs-root";
 var offset: u64 = 0;
 var threads: u32 = 0;
 var verbose: bool = false;
+var ignore_xattrs: bool = false;
+var ignore_permissions: bool = false;
 
 pub fn main() !void {
     const alloc = std.heap.smp_allocator;
@@ -50,6 +54,8 @@ pub fn main() !void {
         .threads = if (threads == 0) try std.Thread.getCpuCount() else threads,
         .verbose = verbose,
         .verbose_writer = if (verbose) &out.interface else null,
+        .ignore_xattr = ignore_xattrs,
+        .ignore_permissions = ignore_permissions,
     };
     try arc.extract(alloc, extLoc, options); //TODO: Handle error gracefully.
 }
@@ -91,6 +97,12 @@ fn handleArgs(alloc: std.mem.Allocator, out: *Writer) !void {
             continue;
         } else if (std.mem.eql(u8, arg, "-v")) {
             verbose = true;
+            continue;
+        } else if (std.mem.eql(u8, arg, "-dx")) {
+            ignore_xattrs = true;
+            continue;
+        } else if (std.mem.eql(u8, arg, "-dp")) {
+            ignore_permissions = true;
             continue;
         } else if (std.mem.eql(u8, arg, "--version")) {
             try out.print("zig-unsquashfs v", .{});

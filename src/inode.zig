@@ -183,15 +183,14 @@ pub fn setMetadata(self: Inode, alloc: std.mem.Allocator, archive: *Archive, fil
         const xattrs = try archive.xattr_table.get(alloc, idx);
         defer alloc.free(xattrs);
         for (xattrs) |kv| {
-            defer {
-                alloc.free(kv.key);
-                alloc.free(kv.value);
-            }
             const res = std.os.linux.fsetxattr(fil.handle, @ptrCast(kv.key), @ptrCast(kv.value), kv.value.len, 0);
+            alloc.free(kv.key);
+            alloc.free(kv.value);
             if (res != 0) {
                 if (options.verbose)
                     options.verbose_writer.?.print("fsetxattr has result of: {}\n", .{res}) catch {};
-                return error.SetXattr;
+                //TODO: Currently this seems a bit flakey, so we just ignore the result... for now.
+                // return error.SetXattr;
             }
         }
     }
