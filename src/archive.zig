@@ -15,6 +15,7 @@ const Superblock = @import("super.zig").Superblock;
 const Table = @import("table.zig").Table;
 const MetadataReader = @import("util/metadata.zig");
 const OffsetFile = @import("util/offset_file.zig");
+const XattrTable = @import("xattr.zig");
 
 const config = if (builtin.is_test) .{
     .use_c_libs = true,
@@ -38,9 +39,10 @@ decomp: Decomp.DecompFn,
 
 super: Superblock,
 
-frag_table: Table(FragEntry) = undefined,
-id_table: Table(u16) = undefined,
-export_table: Table(InodeRef) = undefined,
+frag_table: Table(FragEntry),
+id_table: Table(u16),
+export_table: Table(InodeRef),
+xattr_table: XattrTable,
 
 /// Default settings using std.Thread.getCpuCount() threads and the minimum of 4gb or half of system memory for memory usage.
 pub fn init(alloc: std.mem.Allocator, fil: File, offset: u64) !Archive {
@@ -59,15 +61,13 @@ pub fn init(alloc: std.mem.Allocator, fil: File, offset: u64) !Archive {
     };
     return .{
         .alloc = alloc,
-
         .fil = off_fil,
         .decomp = decomp,
-
         .super = super,
-
         .frag_table = try .init(alloc, off_fil, decomp, super.frag_start, super.frag_count),
         .id_table = try .init(alloc, off_fil, decomp, super.id_start, super.id_count),
         .export_table = try .init(alloc, off_fil, decomp, super.export_start, super.inode_count),
+        .xattr_table = try .init(alloc, off_fil, decomp, super.xattr_start),
     };
 }
 pub fn deinit(self: *Archive) void {

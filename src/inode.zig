@@ -15,6 +15,7 @@ const misc = @import("inode_data/misc.zig");
 const DataReader = @import("util/data.zig");
 const ThreadedDataReader = @import("util/data_threaded.zig");
 const MetadataReader = @import("util/metadata.zig");
+const XattrTable = @import("xattr.zig");
 
 pub const Ref = packed struct {
     block_offset: u16,
@@ -154,7 +155,46 @@ fn entriesFromData(alloc: std.mem.Allocator, archive: Archive, data: anytype) ![
     return DirEntry.readDir(alloc, &meta.interface, data.size);
 }
 
-/// Extract the inode to the given path. Single threaded.
+/// Returns the xattr index for the given inode. If the inode isn't an extended variant or doesn't have any, the returned value is the max u32 value (0xFFFFFFFF)
+pub fn xattrIdx(self: Inode) u32 {
+    return switch (self.data) {
+        .ext_dir => |d| d.xattr_id,
+        .ext_file => |f| f.xattr_idx,
+        .ext_symlink => |s| s.xattr_idx,
+        .ext_block_dev, .ext_char_dev => |d| d.xattr_idx,
+        .ext_fifo, .ext_socket => |i| i.xattr_idx,
+        else => 0xFFFFFFFF,
+    };
+}
+
+inline fn setPermissionAndXattr(self: Inode, alloc: std.mem.Allocator, archive: *Archive, fil: std.fs.File, options: ExtractionOptions) !void {
+    const time = @as(i128, self.hdr.mod_time) * 1000000000;
+    try fil.updateTimes(time, time);
+    if (!options.ignore_permissions) {
+        try fil.chmod(self.hdr.permissions);
+        try fil.chown(try archive.id_table.get(self.hdr.uid_idx), try archive.id_table.get(self.hdr.gid_idx));
+    }
+    if (!options.ignore_xattr) {
+        const idx = self.xattrIdx();
+        if (idx == 0xFFFFFFFF) return;
+        const xattrs = try archive.xattr_table.get(alloc, idx);
+        defer alloc.free(xattrs);
+        for (xattrs) |kv| {
+            defer {
+                alloc.free(kv.key);
+                alloc.free(kv.value);
+            }
+            const res = std.os.linux.fsetxattr(fil.handle, @ptrCast(kv.key), @ptrCast(kv.value), kv.value.len, 0);
+            if (res != 0) {
+                if (options.verbose)
+                    options.verbose_writer.?.print("fsetxattr has result of: {}\n", .{res}) catch {};
+                return error.SetXattr;
+            }
+        }
+    }
+}
+
+/// Extract the inode to the given path.
 pub fn extractTo(self: Inode, alloc: std.mem.Allocator, archive: *Archive, path: []const u8, options: ExtractionOptions) !void {
     if (options.threads > 1) return self.extractToThreaded(alloc, archive, path, options);
     switch (self.hdr.inode_type) {
@@ -180,42 +220,38 @@ pub fn extractTo(self: Inode, alloc: std.mem.Allocator, archive: *Archive, path:
                 defer inode.deinit(alloc);
                 try inode.extractTo(alloc, archive, new_path, options);
             }
+
+            var fil = try std.fs.cwd().openFile(path, .{});
+            defer fil.close();
+            try self.setPermissionAndXattr(alloc, archive, fil, options);
         },
         .file, .ext_file => try self.extractRegFile(alloc, archive, path, options),
         .symlink, .ext_symlink => try self.extractSymlink(path),
-        else => try self.extractDevice(archive, path, options),
+        else => try self.extractDevice(alloc, archive, path, options),
     }
 }
 
 const Parent = struct {
     alloc: std.mem.Allocator,
 
+    inode: Inode,
     path: []const u8,
-    uid: u16,
-    gid: u16,
-    perm: u16,
-    mod_time: u32,
-
-    ignore_permissions: bool,
-    ignore_xattr: bool,
+    archive: *Archive,
+    options: ExtractionOptions,
 
     wg: WaitGroup = .{},
     mut: Mutex = .{},
 
-    fn create(alloc: std.mem.Allocator, hdr: Header, archive: *Archive, path: []const u8, options: ExtractionOptions, dir_size: usize) !*Parent {
+    fn create(alloc: std.mem.Allocator, inode: Inode, path: []const u8, archive: *Archive, options: ExtractionOptions, dir_size: usize) !*Parent {
         const out = try alloc.create(Parent);
         errdefer alloc.destroy(out);
         out.* = .{
             .alloc = alloc,
 
+            .inode = inode,
             .path = path,
-            .uid = try archive.id_table.get(hdr.uid_idx),
-            .gid = try archive.id_table.get(hdr.gid_idx),
-            .perm = hdr.permissions,
-            .mod_time = hdr.mod_time,
-
-            .ignore_permissions = options.ignore_permissions,
-            .ignore_xattr = options.ignore_xattr,
+            .archive = archive,
+            .options = options,
         };
         out.wg.startMany(dir_size);
         return out;
@@ -231,33 +267,21 @@ const Parent = struct {
         defer p.alloc.destroy(p);
         var fil = try std.fs.cwd().openFile(p.path, .{});
         defer fil.close();
-        const time = @as(i128, p.mod_time) * 1000000000;
-        try fil.updateTimes(time, time);
-        if (p.ignore_permissions) {
-            try fil.chmod(p.perm);
-            try fil.chown(p.uid, p.gid);
-        }
+        try p.inode.setPermissionAndXattr(p.alloc, p.archive, fil, p.options);
     }
 };
 
 /// Extract the inode to the given path. Multi-threaded.
 /// Functions identically to extractTo on all but regular files and directories.
-///
-/// If threads <= 1, then this just calls extractTo.
 fn extractToThreaded(self: Inode, allocator: std.mem.Allocator, archive: *Archive, path: []const u8, options: ExtractionOptions) !void {
     switch (self.hdr.inode_type) {
         .dir, .ext_dir => {
             // Removing any trailing separators since that's the easiest path forward.
             if (path[path.len - 1] == '/') return self.extractToThreaded(allocator, archive, path[0 .. path.len - 1], options);
 
-            // Fixed Allocator
-            // const mem_buf = archive.allocator().alloc(u8, 2 * 1024 * 1024 * 1024);
-            // defer archive.allocator().free(mem_buf);
-            // var fixed_alloc: std.heap.FixedBufferAllocator = .init(mem_buf);
-            // const alloc = fixed_alloc.threadSafeAllocator();
-
             // Arena Allocator
-            var arena_alloc: std.heap.ArenaAllocator = .init(allocator);
+            var stack_alloc = std.heap.stackFallback(1024 * 1024, allocator);
+            var arena_alloc: std.heap.ArenaAllocator = .init(stack_alloc.get());
             defer arena_alloc.deinit();
             var thread_alloc: std.heap.ThreadSafeAllocator = .{ .child_allocator = arena_alloc.allocator() };
             const alloc = thread_alloc.allocator();
@@ -265,7 +289,7 @@ fn extractToThreaded(self: Inode, allocator: std.mem.Allocator, archive: *Archiv
             var wg: WaitGroup = .{};
             // defer if(!options.ignore_permissions) perms.?.deinit(alloc); We don't need to do this due to ArenaAllocator
             var pool: Pool = undefined;
-            try pool.init(.{ .allocator = allocator, .n_jobs = options.threads - 1 });
+            try pool.init(.{ .allocator = alloc, .n_jobs = options.threads - 1 });
             defer pool.deinit();
             var out_err: ?anyerror = null;
 
@@ -276,19 +300,16 @@ fn extractToThreaded(self: Inode, allocator: std.mem.Allocator, archive: *Archiv
 
             var fil = try std.fs.cwd().openFile(path, .{});
             defer fil.close();
-            const time = @as(i128, self.hdr.mod_time) * 1000000000;
-            try fil.updateTimes(time, time);
-            if (options.ignore_permissions) {
-                try fil.chmod(self.hdr.permissions);
-                try fil.chown(try archive.id_table.get(self.hdr.uid_idx), try archive.id_table.get(self.hdr.gid_idx));
-            }
+            try self.setPermissionAndXattr(alloc, archive, fil, options);
         },
         .file, .ext_file => {
             var pool: Pool = undefined;
             try pool.init(.{ .allocator = allocator, .n_jobs = options.threads - 1 });
             defer pool.deinit();
 
-            var arena_alloc: std.heap.ArenaAllocator = .init(allocator);
+            // Arena Allocator
+            var stack_alloc = std.heap.stackFallback(1024 * 1024, allocator);
+            var arena_alloc: std.heap.ArenaAllocator = .init(stack_alloc.get());
             defer arena_alloc.deinit();
             var thread_alloc: std.heap.ThreadSafeAllocator = .{ .child_allocator = arena_alloc.allocator() };
             const alloc = thread_alloc.allocator();
@@ -297,15 +318,10 @@ fn extractToThreaded(self: Inode, allocator: std.mem.Allocator, archive: *Archiv
 
             var fil = try std.fs.cwd().openFile(path, .{});
             defer fil.close();
-            const time = @as(i128, self.hdr.mod_time) * 1000000000;
-            try fil.updateTimes(time, time);
-            if (!options.ignore_permissions) {
-                try fil.chmod(self.hdr.permissions);
-                try fil.chown(try archive.id_table.get(self.hdr.uid_idx), try archive.id_table.get(self.hdr.gid_idx));
-            }
+            try self.setPermissionAndXattr(alloc, archive, fil, options);
         },
         .symlink, .ext_symlink => try self.extractSymlink(path),
-        else => try self.extractDevice(archive, path, options),
+        else => try self.extractDevice(allocator, archive, path, options),
     }
 }
 
@@ -374,7 +390,7 @@ fn extractThread(
                 out_err.* = err;
                 return;
             };
-            const p = Parent.create(alloc, self.hdr, archive, path, options, entries.len) catch |err| {
+            const p = Parent.create(alloc, self, path, archive, options, entries.len) catch |err| {
                 out_err.* = err;
                 return;
             };
@@ -422,7 +438,7 @@ fn extractThread(
             };
         },
         else => {
-            self.extractDevice(archive, path, options) catch |err| {
+            self.extractDevice(alloc, archive, path, options) catch |err| {
                 if (options.verbose)
                     options.verbose_writer.?.print("Error extracting device/IPC inode #{} to {s}: {}\n", .{ self.hdr.num, path, err }) catch {};
                 out_err.* = err;
@@ -443,12 +459,7 @@ fn extractRegFile(self: Inode, alloc: std.mem.Allocator, archive: *Archive, path
     _ = try dat_rdr.interface.streamRemaining(&wrt.interface);
     try wrt.interface.flush();
 
-    const time = @as(i128, self.hdr.mod_time) * 1000000000;
-    try fil.updateTimes(time, time);
-    if (!options.ignore_permissions) {
-        try fil.chmod(self.hdr.permissions);
-        try fil.chown(try archive.id_table.get(self.hdr.uid_idx), try archive.id_table.get(self.hdr.gid_idx));
-    }
+    try self.setPermissionAndXattr(alloc, archive, fil, options);
 }
 /// Extract the inode file contents to the given path threadedly.
 /// pool is used to spawn threads.
@@ -460,12 +471,7 @@ fn extractRegFileThreaded(self: Inode, alloc: std.mem.Allocator, archive: *Archi
     var data = try self.threadedDataReader(alloc, archive);
     try data.extractThreaded(fil, pool);
 
-    const time = @as(i128, self.hdr.mod_time) * 1000000000;
-    try fil.updateTimes(time, time);
-    if (!options.ignore_permissions) {
-        try fil.chmod(self.hdr.permissions);
-        try fil.chown(try archive.id_table.get(self.hdr.uid_idx), try archive.id_table.get(self.hdr.gid_idx));
-    }
+    try self.setPermissionAndXattr(alloc, archive, fil, options);
 }
 /// Creates the symlink described by the inode.
 ///
@@ -482,7 +488,7 @@ fn extractSymlink(self: Inode, path: []const u8) !void {
 ///
 /// Optionally set owner & permissions.
 /// Assumes the inode is a char_dev, block_dev, fifo, socket, or their extended counterparts.
-fn extractDevice(self: Inode, archive: *Archive, path: []const u8, options: ExtractionOptions) !void {
+fn extractDevice(self: Inode, alloc: std.mem.Allocator, archive: *Archive, path: []const u8, options: ExtractionOptions) !void {
     var mode: u32 = undefined;
     var dev: u32 = 0;
     switch (self.data) {
@@ -527,13 +533,5 @@ fn extractDevice(self: Inode, archive: *Archive, path: []const u8, options: Extr
     }
     var fil = try std.fs.cwd().openFile(path, .{});
     defer fil.close();
-    const time = @as(i128, self.hdr.mod_time) * 1000000000;
-    try fil.updateTimes(time, time);
-    if (!options.ignore_permissions) {
-        try fil.chmod(self.hdr.permissions);
-        try fil.chown(try archive.id_table.get(self.hdr.uid_idx), try archive.id_table.get(self.hdr.gid_idx));
-    }
-    if (!options.ignore_xattr) {
-        // TODO
-    }
+    try self.setPermissionAndXattr(alloc, archive, fil, options);
 }
