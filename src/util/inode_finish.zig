@@ -65,6 +65,11 @@ pub fn create(
     return out;
 }
 
+pub fn logError(self: *InodeFinish, comptime fmt: []const u8, args: anytype) void {
+    if (self.options.verbose)
+        self.options.verbose_writer.?.print(fmt, args) catch {};
+}
+
 pub fn finish(self: *InodeFinish) void {
     self.mut.lock();
     {

@@ -52,6 +52,7 @@ pub fn build(b: *std.Build) !void {
     const exe = b.addExecutable(.{
         .name = "unsquashfs",
         .root_module = exe_mod,
+        .use_llvm = true,
     });
 
     const lib = b.addLibrary(.{

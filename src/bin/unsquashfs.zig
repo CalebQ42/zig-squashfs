@@ -20,6 +20,8 @@ const help_mgs =
     \\  -p <threads>    Specify how many threads to use. If no present or zero, the system's logical cores count is used.
     \\  -v              Verbose
     \\
+    \\  --force         Force extraction. If the destination already exists, it will be deleted.
+    \\
     \\  --help          Display this messages
     \\  --version       Display the version
     \\
@@ -34,6 +36,7 @@ var threads: u32 = 0;
 var verbose: bool = false;
 var ignore_xattrs: bool = false;
 var ignore_permissions: bool = false;
+var force: bool = false;
 
 pub fn main() !void {
     const alloc = std.heap.smp_allocator;
@@ -57,6 +60,8 @@ pub fn main() !void {
         .ignore_xattr = ignore_xattrs,
         .ignore_permissions = ignore_permissions,
     };
+    if (force)
+        try std.fs.cwd().deleteTree(extLoc);
     try arc.extract(alloc, extLoc, options); //TODO: Handle error gracefully.
 }
 
@@ -103,6 +108,9 @@ fn handleArgs(alloc: std.mem.Allocator, out: *Writer) !void {
             continue;
         } else if (std.mem.eql(u8, arg, "-dp")) {
             ignore_permissions = true;
+            continue;
+        } else if (std.mem.eql(u8, arg, "--force")) {
+            force = true;
             continue;
         } else if (std.mem.eql(u8, arg, "--version")) {
             try out.print("zig-unsquashfs v", .{});

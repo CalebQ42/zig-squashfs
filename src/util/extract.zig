@@ -28,7 +28,7 @@ pub fn extractTo(
     var arena: std.heap.ArenaAllocator = .init(stack_alloc.get());
     defer arena.deinit();
     if (options.threads <= 1)
-        return extractToSingle(arena.allocator(), inode, archive, path, options);
+        return extractSingleThread(arena.allocator(), inode, archive, path, options);
 
     var thread_alloc = std.heap.ThreadSafeAllocator{ .child_allocator = arena.allocator() };
     const alloc = thread_alloc.allocator();
@@ -39,21 +39,22 @@ pub fn extractTo(
 
     var wg: WaitGroup = .{};
     var err: ?anyerror = null;
-    extractToMulti(
+    wg.start();
+    try pool.spawn(extractMultiThread, .{
         alloc,
         inode,
         archive,
         path,
         options,
         &pool,
-        .{ .wg = &wg },
+        FinishUnion{ .wg = &wg },
         &err,
-    );
+    });
     pool.waitAndWork(&wg);
     if (err != null) return err.?;
 }
 
-fn extractToSingle(
+fn extractSingleThread(
     alloc: Allocator,
     inode: Inode,
     archive: *Archive,
@@ -72,14 +73,14 @@ fn extractToSingle(
             // otherwise be more conscientious about freeing memory.
             // For now, this is good enough.
 
-            const entries = try inode.dirEntries(alloc, archive);
+            const entries = try inode.dirEntries(alloc, archive.*);
             for (entries) |ent| {
                 const sub_inode: Inode = try .readFromEntry(alloc, archive, ent);
-                const new_path = try std.mem.concat(alloc, u8, []const []const u8{ path, "/", ent.name });
-                extractToSingle(alloc, sub_inode, archive, new_path, options);
+                const new_path = try std.mem.concat(alloc, u8, &[_][]const u8{ path, "/", ent.name });
+                try extractSingleThread(alloc, sub_inode, archive, new_path, options);
             }
 
-            const fil = try std.fs.cwd().openFile(path);
+            const fil = try std.fs.cwd().openFile(path, .{});
             defer fil.close();
             try inode.setMetadata(alloc, archive, fil, options);
         },
@@ -99,7 +100,7 @@ fn extractToSingle(
     }
 }
 
-fn extractToMulti(
+fn extractMultiThread(
     alloc: Allocator,
     inode: Inode,
     archive: *Archive,
@@ -109,7 +110,7 @@ fn extractToMulti(
     fin: FinishUnion,
     err: *?anyerror,
 ) void {
-    if (err != null) {
+    if (err.* != null) {
         fin.finish();
         return;
     }
@@ -129,7 +130,7 @@ fn extractToMulti(
             // otherwise be more conscientious about freeing memory.
             // For now, this is good enough.
 
-            const entries = try inode.dirEntries(alloc, archive) catch |res_err| {
+            const entries = inode.dirEntries(alloc, archive.*) catch |res_err| {
                 err.* = res_err;
                 fin.finish();
                 return;
@@ -153,9 +154,21 @@ fn extractToMulti(
 
             for (entries) |ent| {
                 if (ent.inode_type == .dir)
-                    extractEntry(alloc, ent, archive, path, options, pool, dir_fin, err);
+                    extractEntry(
+                        alloc,
+                        ent,
+                        archive,
+                        path,
+                        options,
+                        pool,
+                        .{ .fin = dir_fin },
+                        err,
+                    );
 
-                pool.spawn(extractEntry, .{ alloc, ent, archive, path, options, pool, dir_fin, err }) catch |res_err| {
+                pool.spawn(
+                    extractEntry,
+                    .{ alloc, ent, archive, path, options, pool, FinishUnion{ .fin = dir_fin }, err },
+                ) catch |res_err| {
                     err.* = res_err;
                     dir_fin.finish();
                     return;
@@ -164,12 +177,16 @@ fn extractToMulti(
         },
         .file, .ext_file => {
             const fil = std.fs.cwd().createFile(path, .{ .exclusive = true }) catch |res_err| {
+                if (options.verbose)
+                    options.verbose_writer.?.print("Can't create file at {s}: {}\n", .{ path, res_err }) catch {};
                 err.* = res_err;
                 fin.finish();
                 return;
             };
 
             var data_rdr = threadedDataReader(inode, alloc, archive) catch |res_err| {
+                if (options.verbose)
+                    options.verbose_writer.?.print("Can't create data reader for inode #{} (extracting to {s}): {}\n", .{ inode.hdr.num, path, res_err }) catch {};
                 err.* = res_err;
                 fin.finish();
                 return;
@@ -185,6 +202,8 @@ fn extractToMulti(
                 fil,
                 data_rdr.num_blocks,
             ) catch |res_err| {
+                if (options.verbose)
+                    options.verbose_writer.?.print("Can't create callback for inode #{} (extracting to {s}): {}\n", .{ inode.hdr.num, path, res_err }) catch {};
                 err.* = res_err;
                 fin.finish();
                 return;
@@ -207,7 +226,7 @@ fn extractToMulti(
     }
 }
 
-inline fn extractEntry(
+fn extractEntry(
     alloc: Allocator,
     ent: DirEntry,
     archive: *Archive,
@@ -217,18 +236,18 @@ inline fn extractEntry(
     fin: FinishUnion,
     err: *?anyerror,
 ) void {
-    const new_path = std.mem.concat(alloc, u8, []const []const u8{ path, "/", ent.name }) catch |res_err| {
+    const new_path = std.mem.concat(alloc, u8, &[_][]const u8{ path, "/", ent.name }) catch |res_err| {
         err.* = res_err;
         fin.finish();
         return;
     };
 
-    const inode: Inode = .readFromEntry(alloc, archive, ent) catch |res_err| {
+    const inode = Inode.readFromEntry(alloc, archive, ent) catch |res_err| {
         err.* = res_err;
         fin.finish();
         return;
     };
-    extractToMulti(alloc, inode, archive, new_path, options, pool, fin, err);
+    extractMultiThread(alloc, inode, archive, new_path, options, pool, fin, err);
 }
 
 /// Get a threaded data reader for a file inode.

@@ -1,0 +1,30 @@
+// Project-local debug tasks
+//
+// For more documentation on how to configure debug tasks,
+// see: https://zed.dev/docs/debugger
+[
+	{
+		"label": "Build & Run",
+
+		"adapter": "CodeLLDB",
+		"request": "launch",
+
+		"build": {
+			"command": "zig",
+			"args": [
+				"build",
+				"-Doptimize=Debug",
+				"-Duse_c_libs=true",
+				"-Dvalgrind=true",
+			],
+		},
+
+		"program": "zig-out/bin/unsquashfs",
+		"args": [
+			"--force",
+			"-d",
+			"testing/TestExtractUnsquashfs",
+			"testing/LinuxPATest.sfs",
+		],
+	},
+]
