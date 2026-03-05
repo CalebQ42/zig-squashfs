@@ -1,13 +1,44 @@
 const std = @import("std");
 const Mutex = std.Thread.Mutex;
 
+const Archive = @import("archive.zig");
 const DecompFn = @import("decomp.zig").DecompFn;
+const BlockSize = @import("inode_data/file.zig").BlockSize;
+const InodeRef = @import("inode.zig").Ref;
+const Superblock = @import("super.zig").Superblock;
 const MetadataReader = @import("util/metadata.zig");
 const OffsetFile = @import("util/offset_file.zig");
+const XattrTable = @import("xattr.zig");
 
-const TableError = error{
-    InvalidIndex,
+/// Information about a fragment section. Multiple fragments are contained in the block described by a single FragEntry.
+/// The offset into the block and fragment size is stored in the file's inode.
+pub const FragEntry = packed struct {
+    start: u64,
+    size: BlockSize,
+    _: u32,
 };
+
+const Tables = @This();
+
+frag_table: Table(FragEntry),
+id_table: Table(u16),
+export_table: Table(InodeRef),
+xattr_table: XattrTable,
+
+pub fn init(alloc: std.mem.Allocator, archive: Archive) !Tables {
+    return .{
+        .frag_table = try .init(alloc, archive.fil, archive.decomp, archive.super.frag_start, archive.super.frag_count),
+        .id_table = try .init(alloc, archive.fil, archive.decomp, archive.super.id_start, archive.super.id_count),
+        .export_table = try .init(alloc, archive.fil, archive.decomp, archive.super.export_start, archive.super.inode_count),
+        .xattr_table = try .init(alloc, archive.fil, archive.decomp, archive.super.xattr_start),
+    };
+}
+pub fn deinit(self: *Tables) void {
+    self.frag_table.deinit();
+    self.id_table.deinit();
+    self.export_table.deinit();
+    self.xattr_table.deinit();
+}
 
 /// A two-layer metadata table.
 pub fn Table(T: anytype) type {
@@ -47,7 +78,7 @@ pub fn Table(T: anytype) type {
         }
 
         pub fn get(self: *Self, idx: u32) !T {
-            if (idx >= self.values) return TableError.InvalidIndex;
+            if (idx >= self.values) return error.InvalidIndex;
             const block_num = idx / VALS_PER_BLOCK;
             const idx_offset = idx - (block_num * VALS_PER_BLOCK);
             if (self.tab.contains(block_num)) {

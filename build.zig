@@ -21,12 +21,12 @@ pub fn build(b: *std.Build) !void {
     });
     mod.addOptions("config", zig_squashfs_options);
     if (use_c_libs_option == true) {
-        mod.linkSystemLibrary("zlib", .{});
-        mod.linkSystemLibrary("lzma", .{});
+        mod.linkSystemLibrary("zlib", .{ .preferred_link_mode = .static });
+        mod.linkSystemLibrary("lzma", .{ .preferred_link_mode = .static });
         if (allow_lzo == true)
-            mod.linkSystemLibrary("minilzo", .{});
-        mod.linkSystemLibrary("lz4", .{});
-        mod.linkSystemLibrary("zstd", .{});
+            mod.linkSystemLibrary("minilzo", .{ .preferred_link_mode = .static });
+        mod.linkSystemLibrary("lz4", .{ .preferred_link_mode = .static });
+        mod.linkSystemLibrary("zstd", .{ .preferred_link_mode = .static });
     }
 
     var version = version_string_option orelse "0.0.0-testing";
@@ -52,7 +52,7 @@ pub fn build(b: *std.Build) !void {
     const exe = b.addExecutable(.{
         .name = "unsquashfs",
         .root_module = exe_mod,
-        .use_llvm = true,
+        // .use_llvm = true, This can be needed to properly debug
     });
 
     const lib = b.addLibrary(.{

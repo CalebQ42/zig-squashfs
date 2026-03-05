@@ -7,6 +7,7 @@ const Archive = @import("../archive.zig");
 const DirEntry = @import("../dir_entry.zig");
 const Inode = @import("../inode.zig");
 const ExtractionOptions = @import("../options.zig");
+const Tables = @import("../tables.zig");
 const InodeFinish = @import("inode_finish.zig");
 const FinishUnion = InodeFinish.FinishUnion;
 const ThreadedDataReader = @import("data_threaded.zig");
@@ -17,7 +18,7 @@ const STACK_ALLOC_SIZE = 1024 * 1024;
 pub fn extractTo(
     allocator: Allocator,
     inode: Inode,
-    archive: *Archive,
+    archive: Archive,
     path: []const u8,
     options: ExtractionOptions,
 ) !void {
@@ -27,11 +28,15 @@ pub fn extractTo(
     var stack_alloc = std.heap.stackFallback(STACK_ALLOC_SIZE, allocator);
     var arena: std.heap.ArenaAllocator = .init(stack_alloc.get());
     defer arena.deinit();
-    if (options.threads <= 1)
-        return extractSingleThread(arena.allocator(), inode, archive, path, options);
+    if (options.threads <= 1) {
+        const alloc = arena.allocator();
+        var tables: Tables = try .init(alloc, archive);
+        return extractSingleThread(arena.allocator(), inode, archive, &tables, path, options);
+    }
 
     var thread_alloc = std.heap.ThreadSafeAllocator{ .child_allocator = arena.allocator() };
     const alloc = thread_alloc.allocator();
+    var tables: Tables = try .init(alloc, archive);
 
     var pool_alloc = std.heap.stackFallback(10 * 1024, alloc);
     var pool: Pool = undefined;
@@ -44,6 +49,7 @@ pub fn extractTo(
         alloc,
         inode,
         archive,
+        &tables,
         path,
         options,
         &pool,
@@ -57,7 +63,8 @@ pub fn extractTo(
 fn extractSingleThread(
     alloc: Allocator,
     inode: Inode,
-    archive: *Archive,
+    archive: Archive,
+    tables: *Tables,
     path: []const u8,
     options: ExtractionOptions,
 ) !void {
@@ -73,37 +80,38 @@ fn extractSingleThread(
             // otherwise be more conscientious about freeing memory.
             // For now, this is good enough.
 
-            const entries = try inode.dirEntries(alloc, archive.*);
+            const entries = try inode.dirEntries(alloc, archive);
             for (entries) |ent| {
                 const sub_inode: Inode = try .readFromEntry(alloc, archive, ent);
                 const new_path = try std.mem.concat(alloc, u8, &[_][]const u8{ path, "/", ent.name });
-                try extractSingleThread(alloc, sub_inode, archive, new_path, options);
+                try extractSingleThread(alloc, sub_inode, archive, tables, new_path, options);
             }
 
             const fil = try std.fs.cwd().openFile(path, .{});
             defer fil.close();
-            try inode.setMetadata(alloc, archive, fil, options);
+            try inode.setMetadata(alloc, tables, fil, options);
         },
         .file, .ext_file => {
             var fil = try std.fs.cwd().createFile(path, .{ .exclusive = true });
             defer fil.close();
             var wrt = fil.writer(&[0]u8{});
-            var dat_rdr = try inode.dataReader(alloc, archive);
+            var dat_rdr = try inode.dataReader(alloc, archive, tables);
             defer dat_rdr.deinit();
             _ = try dat_rdr.interface.streamRemaining(&wrt.interface);
             try wrt.interface.flush();
 
-            try inode.setMetadata(alloc, archive, fil, options);
+            try inode.setMetadata(alloc, tables, fil, options);
         },
         .symlink, .ext_symlink => return extractSymlink(inode, path),
-        else => return extractDeviceAndIPC(inode, alloc, archive, path, options),
+        else => return extractDeviceAndIPC(inode, alloc, tables, path, options),
     }
 }
 
 fn extractMultiThread(
     alloc: Allocator,
     inode: Inode,
-    archive: *Archive,
+    archive: Archive,
+    tables: *Tables,
     path: []const u8,
     options: ExtractionOptions,
     pool: *Pool,
@@ -130,17 +138,22 @@ fn extractMultiThread(
             // otherwise be more conscientious about freeing memory.
             // For now, this is good enough.
 
-            const entries = inode.dirEntries(alloc, archive.*) catch |res_err| {
+            const entries = inode.dirEntries(alloc, archive) catch |res_err| {
                 err.* = res_err;
                 fin.finish();
                 return;
             };
 
+            if (entries.len == 0) {
+                fin.finish();
+                return;
+            }
+
             var dir_fin = InodeFinish.create(
                 alloc,
                 inode,
                 path,
-                archive,
+                tables,
                 options,
                 fin,
                 err,
@@ -153,21 +166,24 @@ fn extractMultiThread(
             };
 
             for (entries) |ent| {
-                if (ent.inode_type == .dir)
+                if (ent.inode_type == .dir) {
                     extractEntry(
                         alloc,
                         ent,
                         archive,
+                        tables,
                         path,
                         options,
                         pool,
                         .{ .fin = dir_fin },
                         err,
                     );
+                    continue;
+                }
 
                 pool.spawn(
                     extractEntry,
-                    .{ alloc, ent, archive, path, options, pool, FinishUnion{ .fin = dir_fin }, err },
+                    .{ alloc, ent, archive, tables, path, options, pool, FinishUnion{ .fin = dir_fin }, err },
                 ) catch |res_err| {
                     err.* = res_err;
                     dir_fin.finish();
@@ -184,23 +200,32 @@ fn extractMultiThread(
                 return;
             };
 
-            var data_rdr = threadedDataReader(inode, alloc, archive) catch |res_err| {
+            var data_rdr = threadedDataReader(inode, alloc, archive, tables) catch |res_err| {
                 if (options.verbose)
                     options.verbose_writer.?.print("Can't create data reader for inode #{} (extracting to {s}): {}\n", .{ inode.hdr.num, path, res_err }) catch {};
                 err.* = res_err;
                 fin.finish();
                 return;
             };
+            if (data_rdr == null) {
+                inode.setMetadata(alloc, tables, fil, options) catch |res_err| {
+                    if (options.verbose)
+                        options.verbose_writer.?.print("Can't set metadata to {s}: {}\n", .{ path, res_err }) catch {};
+                    err.* = res_err;
+                };
+                fin.finish();
+                return;
+            }
             const file_fin = InodeFinish.create(
                 alloc,
                 inode,
                 path,
-                archive,
+                tables,
                 options,
                 fin,
                 err,
                 fil,
-                data_rdr.num_blocks,
+                data_rdr.?.num_blocks,
             ) catch |res_err| {
                 if (options.verbose)
                     options.verbose_writer.?.print("Can't create callback for inode #{} (extracting to {s}): {}\n", .{ inode.hdr.num, path, res_err }) catch {};
@@ -209,7 +234,7 @@ fn extractMultiThread(
                 return;
             };
 
-            data_rdr.extractThreaded(fil, pool, file_fin);
+            data_rdr.?.extractThreaded(fil, pool, file_fin);
         },
         .symlink, .ext_symlink => {
             extractSymlink(inode, path) catch |res_err| {
@@ -218,7 +243,7 @@ fn extractMultiThread(
             fin.finish();
         },
         else => {
-            extractDeviceAndIPC(inode, alloc, archive, path, options) catch |res_err| {
+            extractDeviceAndIPC(inode, alloc, tables, path, options) catch |res_err| {
                 err.* = res_err;
             };
             fin.finish();
@@ -229,7 +254,8 @@ fn extractMultiThread(
 fn extractEntry(
     alloc: Allocator,
     ent: DirEntry,
-    archive: *Archive,
+    archive: Archive,
+    tables: *Tables,
     path: []const u8,
     options: ExtractionOptions,
     pool: *Pool,
@@ -247,21 +273,22 @@ fn extractEntry(
         fin.finish();
         return;
     };
-    extractMultiThread(alloc, inode, archive, new_path, options, pool, fin, err);
+    extractMultiThread(alloc, inode, archive, tables, new_path, options, pool, fin, err);
 }
 
 /// Get a threaded data reader for a file inode.
-fn threadedDataReader(self: Inode, alloc: std.mem.Allocator, archive: *Archive) !ThreadedDataReader {
+fn threadedDataReader(self: Inode, alloc: std.mem.Allocator, archive: Archive, tables: *Tables) !?ThreadedDataReader {
     return switch (self.hdr.inode_type) {
-        .file => threadedReaderFromData(alloc, archive, self.data.file),
-        .ext_file => threadedReaderFromData(alloc, archive, self.data.ext_file),
+        .file => threadedReaderFromData(alloc, archive, tables, self.data.file),
+        .ext_file => threadedReaderFromData(alloc, archive, tables, self.data.ext_file),
         else => error.NotRegularFile,
     };
 }
-fn threadedReaderFromData(alloc: std.mem.Allocator, archive: *Archive, data: anytype) !ThreadedDataReader {
-    var out: ThreadedDataReader = .init(alloc, archive.*, data.block_sizes, data.block_start, data.size);
+fn threadedReaderFromData(alloc: std.mem.Allocator, archive: Archive, tables: *Tables, data: anytype) !?ThreadedDataReader {
+    if (data.block_sizes.len == 0 and data.frag_idx == 0xFFFFFFFF) return null;
+    var out: ThreadedDataReader = .init(alloc, archive, data.block_sizes, data.block_start, data.size);
     if (data.frag_idx != 0xFFFFFFFF)
-        out.addFragment(try archive.frag_table.get(data.frag_idx), data.frag_block_offset);
+        out.addFragment(try tables.frag_table.get(data.frag_idx), data.frag_block_offset);
     return out;
 }
 
@@ -277,7 +304,7 @@ fn extractSymlink(self: Inode, path: []const u8) !void {
 }
 /// Creates the device described by the inode.
 /// Sets metadata.
-fn extractDeviceAndIPC(self: Inode, alloc: std.mem.Allocator, archive: *Archive, path: []const u8, options: ExtractionOptions) !void {
+fn extractDeviceAndIPC(self: Inode, alloc: std.mem.Allocator, tables: *Tables, path: []const u8, options: ExtractionOptions) !void {
     var mode: u32 = undefined;
     var dev: u32 = 0;
     switch (self.data) {
@@ -322,5 +349,5 @@ fn extractDeviceAndIPC(self: Inode, alloc: std.mem.Allocator, archive: *Archive,
     }
     var fil = try std.fs.cwd().openFile(path, .{});
     defer fil.close();
-    try self.setMetadata(alloc, archive, fil, options);
+    try self.setMetadata(alloc, tables, fil, options);
 }

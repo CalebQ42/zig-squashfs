@@ -8,9 +8,9 @@ const WaitGroup = std.Thread.WaitGroup;
 const Pool = std.Thread.Pool;
 
 const Archive = @import("../archive.zig");
-const FragEntry = Archive.FragEntry;
 const DecompFn = @import("../decomp.zig").DecompFn;
 const BlockSize = @import("../inode_data/file.zig").BlockSize;
+const FragEntry = @import("../tables.zig").FragEntry;
 const InodeFinish = @import("inode_finish.zig");
 const OffsetFile = @import("offset_file.zig");
 

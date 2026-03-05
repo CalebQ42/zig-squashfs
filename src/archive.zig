@@ -12,7 +12,7 @@ const InodeRef = Inode.Ref;
 const BlockSize = @import("inode_data/file.zig").BlockSize;
 const SfsFile = @import("file.zig");
 const Superblock = @import("super.zig").Superblock;
-const Table = @import("table.zig").Table;
+const Tables = @import("tables.zig");
 const MetadataReader = @import("util/metadata.zig");
 const OffsetFile = @import("util/offset_file.zig");
 const XattrTable = @import("xattr.zig");
@@ -21,14 +21,6 @@ const config = if (builtin.is_test) .{
     .use_c_libs = true,
     .allow_lzo = false,
 } else @import("config");
-
-/// Information about a fragment section. Multiple fragments are contained in the block described by a single FragEntry.
-/// The offset into the block and fragment size is stored in the file's inode.
-pub const FragEntry = packed struct {
-    start: u64,
-    size: BlockSize,
-    _: u32,
-};
 
 const Archive = @This();
 
@@ -39,10 +31,7 @@ decomp: Decomp.DecompFn,
 
 super: Superblock,
 
-frag_table: Table(FragEntry),
-id_table: Table(u16),
-export_table: Table(InodeRef),
-xattr_table: XattrTable,
+tables: ?Tables = null,
 
 /// Default settings using std.Thread.getCpuCount() threads and the minimum of 4gb or half of system memory for memory usage.
 pub fn init(alloc: std.mem.Allocator, fil: File, offset: u64) !Archive {
@@ -64,19 +53,16 @@ pub fn init(alloc: std.mem.Allocator, fil: File, offset: u64) !Archive {
         .fil = off_fil,
         .decomp = decomp,
         .super = super,
-        .frag_table = try .init(alloc, off_fil, decomp, super.frag_start, super.frag_count),
-        .id_table = try .init(alloc, off_fil, decomp, super.id_start, super.id_count),
-        .export_table = try .init(alloc, off_fil, decomp, super.export_start, super.inode_count),
-        .xattr_table = try .init(alloc, off_fil, decomp, super.xattr_start),
     };
 }
 pub fn deinit(self: *Archive) void {
-    self.frag_table.deinit();
-    self.export_table.deinit();
-    self.id_table.deinit();
+    if (self.tables != null)
+        self.tables.?.deinit();
 }
 
 pub fn inode(self: *Archive, alloc: std.mem.Allocator, num: u32) !Inode {
+    if (self.tables == null)
+        self.tables = try .init(alloc, self);
     const ref = try self.export_table.get(num - 1);
     var rdr = try self.fil.readerAt(ref.block_start + self.super.inode_start, &[0]u8{});
     var meta: MetadataReader = .init(alloc, &rdr.interface, &self.decomp);
@@ -85,6 +71,8 @@ pub fn inode(self: *Archive, alloc: std.mem.Allocator, num: u32) !Inode {
 }
 
 pub fn root(self: *Archive, alloc: std.mem.Allocator) !SfsFile {
+    if (self.tables == null)
+        self.tables = try .init(alloc, self);
     var rdr = try self.fil.readerAt(self.super.root_ref.block_start + self.super.inode_start, &[0]u8{});
     var meta: MetadataReader = .init(alloc, &rdr.interface, self.decomp);
     try meta.interface.discardAll(self.super.root_ref.block_offset);
@@ -93,12 +81,14 @@ pub fn root(self: *Archive, alloc: std.mem.Allocator) !SfsFile {
 }
 
 pub fn open(self: *Archive, alloc: std.mem.Allocator, path: []const u8) !SfsFile {
+    if (self.tables == null)
+        self.tables = try .init(alloc, self);
     var root_fil = try self.root(alloc);
     defer if (!SfsFile.pathIsSelf(path)) root_fil.deinit();
     return root_fil.open(path);
 }
 
-pub fn extract(self: *Archive, alloc: std.mem.Allocator, path: []const u8, options: ExtractionOptions) !void {
+pub fn extract(self: Archive, alloc: std.mem.Allocator, path: []const u8, options: ExtractionOptions) !void {
     var rdr = try self.fil.readerAt(self.super.root_ref.block_start + self.super.inode_start, &[0]u8{});
     var meta: MetadataReader = .init(self.alloc, &rdr.interface, self.decomp);
     try meta.interface.discardAll(self.super.root_ref.block_offset);

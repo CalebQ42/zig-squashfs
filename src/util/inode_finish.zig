@@ -5,6 +5,7 @@ const Mutex = std.Thread.Mutex;
 const Archive = @import("../archive.zig");
 const Inode = @import("../inode.zig");
 const ExtractionOptions = @import("../options.zig");
+const Tables = @import("../tables.zig");
 
 const InodeFinish = @This();
 
@@ -28,7 +29,7 @@ alloc: std.mem.Allocator,
 
 inode: Inode,
 path: []const u8,
-archive: *Archive,
+tables: *Tables,
 options: ExtractionOptions,
 parent_finish: FinishUnion,
 fil: ?std.fs.File,
@@ -41,13 +42,15 @@ pub fn create(
     alloc: std.mem.Allocator,
     inode: Inode,
     path: []const u8,
-    archive: *Archive,
+    tables: *Tables,
     options: ExtractionOptions,
     parent_finish: FinishUnion,
     out_err: *?anyerror,
     fil: ?std.fs.File,
     work_size: usize,
 ) !*InodeFinish {
+    if (work_size == 0)
+        return error.InvalidWorkSize;
     const out = try alloc.create(InodeFinish);
     errdefer alloc.destroy(out);
     out.* = .{
@@ -55,7 +58,7 @@ pub fn create(
 
         .inode = inode,
         .path = path,
-        .archive = archive,
+        .tables = tables,
         .options = options,
         .parent_finish = parent_finish,
         .out_err = out_err,
@@ -89,7 +92,7 @@ pub fn finish(self: *InodeFinish) void {
             return;
         };
     defer self.fil.?.close();
-    self.inode.setMetadata(self.alloc, self.archive, self.fil.?, self.options) catch |err| {
+    self.inode.setMetadata(self.alloc, self.tables, self.fil.?, self.options) catch |err| {
         if (self.options.verbose)
             self.options.verbose_writer.?.print("Error setting metadata to {s}: {}\n", .{ self.path, err }) catch {};
         self.out_err.* = err;

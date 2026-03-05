@@ -1,7 +1,7 @@
 const std = @import("std");
 
 const DecompFn = @import("decomp.zig").DecompFn;
-const Table = @import("table.zig").Table;
+const Table = @import("tables.zig").Table;
 const MetadataReader = @import("util/metadata.zig");
 const OffsetFile = @import("util/offset_file.zig");
 
@@ -30,7 +30,7 @@ const KeyRaw = packed struct {
 };
 
 pub const KeyValue = struct {
-    key: []u8,
+    key: [:0]u8,
     value: []u8,
 };
 
@@ -62,7 +62,7 @@ pub fn init(alloc: std.mem.Allocator, fil: OffsetFile, decomp: DecompFn, table_s
         .table = try .init(alloc, fil, decomp, table_start + 16, info.count),
     };
 }
-pub fn deinit(self: XattrTable) void {
+pub fn deinit(self: *XattrTable) void {
     self.table.deinit();
 }
 
@@ -80,19 +80,22 @@ pub fn get(self: *XattrTable, alloc: std.mem.Allocator, idx: u32) ![]KeyValue {
 
         switch (key_raw.type.prefix) {
             .user => {
-                kv.key = try alloc.alloc(u8, key_raw.name_size + 5);
+                kv.key = @ptrCast(try alloc.alloc(u8, key_raw.name_size + 5 + 1));
                 @memcpy(kv.key[0..5], "user.");
-                try meta.interface.readSliceAll(kv.key[5..]);
+                try meta.interface.readSliceAll(kv.key[5 .. kv.key.len - 1]);
+                kv.key[kv.key.len - 1] = 0;
             },
             .security => {
-                kv.key = try alloc.alloc(u8, key_raw.name_size + 9);
+                kv.key = @ptrCast(try alloc.alloc(u8, key_raw.name_size + 9 + 1));
                 @memcpy(kv.key[0..9], "security.");
-                try meta.interface.readSliceAll(kv.key[9..]);
+                try meta.interface.readSliceAll(kv.key[9 .. kv.key.len - 1]);
+                kv.key[kv.key.len - 1] = 0;
             },
             .trusted => {
-                kv.key = try alloc.alloc(u8, key_raw.name_size + 8);
+                kv.key = @ptrCast(try alloc.alloc(u8, key_raw.name_size + 8 + 1));
                 @memcpy(kv.key[0..8], "trusted.");
-                try meta.interface.readSliceAll(kv.key[8..]);
+                try meta.interface.readSliceAll(kv.key[8 .. kv.key.len - 1]);
+                kv.key[kv.key.len - 1] = 0;
             },
         }
         if (key_raw.type.out_of_line) {

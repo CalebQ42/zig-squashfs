@@ -12,6 +12,7 @@ const ExtractionOptions = @import("options.zig");
 const dir = @import("inode_data/dir.zig");
 const file = @import("inode_data/file.zig");
 const misc = @import("inode_data/misc.zig");
+const Tables = @import("tables.zig");
 const DataReader = @import("util/data.zig");
 const ThreadedDataReader = @import("util/data_threaded.zig");
 const InodeExtract = @import("util/extract.zig");
@@ -96,7 +97,7 @@ pub fn read(alloc: std.mem.Allocator, rdr: *Reader, block_size: u32) !Inode {
         },
     };
 }
-pub fn readFromEntry(alloc: std.mem.Allocator, archive: *Archive, entry: DirEntry) !Inode {
+pub fn readFromEntry(alloc: std.mem.Allocator, archive: Archive, entry: DirEntry) !Inode {
     var rdr = try archive.fil.readerAt(archive.super.inode_start + entry.block_start, &[0]u8{});
     var meta: MetadataReader = .init(alloc, &rdr.interface, archive.decomp);
     try meta.interface.discardAll(entry.block_offset);
@@ -114,17 +115,17 @@ pub fn deinit(self: Inode, alloc: std.mem.Allocator) void {
 }
 
 /// Get the data reader for a file inode.
-pub fn dataReader(self: Inode, alloc: std.mem.Allocator, archive: *Archive) !DataReader {
+pub fn dataReader(self: Inode, alloc: std.mem.Allocator, archive: Archive, tables: *Tables) !DataReader {
     return switch (self.hdr.inode_type) {
-        .file => readerFromData(alloc, archive, self.data.file),
-        .ext_file => readerFromData(alloc, archive, self.data.ext_file),
+        .file => readerFromData(alloc, archive, tables, self.data.file),
+        .ext_file => readerFromData(alloc, archive, tables, self.data.ext_file),
         else => error.NotRegularFile,
     };
 }
-fn readerFromData(alloc: std.mem.Allocator, archive: *Archive, data: anytype) !DataReader {
-    var out: DataReader = .init(alloc, archive.*, data.block_sizes, data.block_start, data.size);
+fn readerFromData(alloc: std.mem.Allocator, archive: Archive, tables: *Tables, data: anytype) !DataReader {
+    var out: DataReader = .init(alloc, archive, data.block_sizes, data.block_start, data.size);
     if (data.frag_idx != 0xFFFFFFFF)
-        out.addFragment(try archive.frag_table.get(data.frag_idx), data.frag_block_offset);
+        out.addFragment(try tables.frag_table.get(data.frag_idx), data.frag_block_offset);
     return out;
 }
 
@@ -157,33 +158,32 @@ pub fn xattrIdx(self: Inode) u32 {
 
 /// Applies the Inode's metadata to the given File.
 /// Mod time is always set, but permissions and xattrs are set based on the given ExtractionOptions.
-pub fn setMetadata(self: Inode, alloc: std.mem.Allocator, archive: *Archive, fil: std.fs.File, options: ExtractionOptions) !void {
+pub fn setMetadata(self: Inode, alloc: std.mem.Allocator, tables: *Tables, fil: std.fs.File, options: ExtractionOptions) !void {
     const time = @as(i128, self.hdr.mod_time) * 1000000000;
     try fil.updateTimes(time, time);
     if (!options.ignore_permissions) {
         try fil.chmod(self.hdr.permissions);
-        try fil.chown(try archive.id_table.get(self.hdr.uid_idx), try archive.id_table.get(self.hdr.gid_idx));
+        try fil.chown(try tables.id_table.get(self.hdr.uid_idx), try tables.id_table.get(self.hdr.gid_idx));
     }
     if (!options.ignore_xattr) {
         const idx = self.xattrIdx();
         if (idx == 0xFFFFFFFF) return;
-        const xattrs = try archive.xattr_table.get(alloc, idx);
+        const xattrs = try tables.xattr_table.get(alloc, idx);
         defer alloc.free(xattrs);
         for (xattrs) |kv| {
-            const res = std.os.linux.fsetxattr(fil.handle, @ptrCast(kv.key), @ptrCast(kv.value), kv.value.len, 0);
-            alloc.free(kv.key);
-            alloc.free(kv.value);
+            const res = std.os.linux.fsetxattr(fil.handle, kv.key[0.. :0], kv.value.ptr, kv.value.len, 0);
             if (res != 0) {
                 if (options.verbose)
                     options.verbose_writer.?.print("fsetxattr has result of: {}\n", .{res}) catch {};
-                //TODO: Currently this seems a bit flakey, so we just ignore the result... for now.
-                // return error.SetXattr;
+                return error.SetXattr;
             }
+            alloc.free(kv.key);
+            alloc.free(kv.value);
         }
     }
 }
 
 /// Extract the inode to the given path.
-pub fn extractTo(self: Inode, alloc: std.mem.Allocator, archive: *Archive, path: []const u8, options: ExtractionOptions) !void {
+pub fn extractTo(self: Inode, alloc: std.mem.Allocator, archive: Archive, path: []const u8, options: ExtractionOptions) !void {
     return InodeExtract.extractTo(alloc, self, archive, path, options);
 }
