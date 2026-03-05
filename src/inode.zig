@@ -172,13 +172,13 @@ pub fn setMetadata(self: Inode, alloc: std.mem.Allocator, tables: *Tables, fil: 
         defer alloc.free(xattrs);
         for (xattrs) |kv| {
             const res = std.os.linux.fsetxattr(fil.handle, kv.key[0.. :0], kv.value.ptr, kv.value.len, 0);
+            alloc.free(kv.key);
+            alloc.free(kv.value);
             if (res != 0) {
                 if (options.verbose)
                     options.verbose_writer.?.print("fsetxattr has result of: {}\n", .{res}) catch {};
                 return error.SetXattr;
             }
-            alloc.free(kv.key);
-            alloc.free(kv.value);
         }
     }
 }
