@@ -30,7 +30,6 @@ Sets the version of `unsquashfs` shown when `--version` is passed.
 
 Most features are present except for the following:
 
-* xattrs are not applied on extraction
 * When using Zig decompression libraries then lzo and lz4 compression types are unavailable. I don't _currently_ plan on spending the time to find and validate a library since neither is popular.
 * When using C decompression libraries, lzo is not supported by default due to [some issues](#build-considerations). If it's needed it's trivial to fix, but it's easiest to just leave it disabled.
 
@@ -38,16 +37,16 @@ Most features are present except for the following:
 
 This is some basic observation's I've made about this library's performance when compared to `unsquashfs`. Unless otherwise stated, most observations were made when extracting my test archive (which is fairly small and uses zstd compression) and with `--release=fast`.
 
-* Under ideal circumstances, my library is ~60% slower (.12s vs .19s).
+* Under ideal circumstances, my library is ~70% slower (.12s vs .20s).
 * Using Zig decompression libraries *significantly* increases decompression time by ~600%. Under ideal circumstances.
 * Performance improvements/regressions will be common. I'm still learning Zig.
 
-Times:
+Example Times:
 
 * *unsquashfs, multi-threaded*: .12s
 * *unsquashfs, single-threaded*: .13s
-* *C-libs, single-threaded*: .56s
-* *C-libs, multi-threaded*: .19s
+* *C-libs, single-threaded*: .45s
+* *C-libs, multi-threaded*: .20s
 * *Zig-libs, single-threaded*: 5.78s
 * *Zig-libs, multi-threaded*: 1.08s
 

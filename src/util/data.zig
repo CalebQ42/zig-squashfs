@@ -6,9 +6,9 @@ const Writer = std.Io.Writer;
 const Limit = std.Io.Limit;
 
 const Archive = @import("../archive.zig");
-const FragEntry = Archive.FragEntry;
 const DecompFn = @import("../decomp.zig").DecompFn;
 const BlockSize = @import("../inode_data/file.zig").BlockSize;
+const FragEntry = @import("../tables.zig").FragEntry;
 const OffsetFile = @import("offset_file.zig");
 
 const DataReader = @This();
