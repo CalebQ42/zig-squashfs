@@ -3,7 +3,7 @@ const std = @import("std");
 pub fn build(b: *std.Build) !void {
     const use_c_libs_option = b.option(bool, "use_c_libs", "Use C versions of decompression libraries instead of the Zig standard library ones");
     const allow_lzo = b.option(bool, "allow_lzo", "Compile with lzo support");
-    const valgrind = b.option(bool, "valgrind", "Compile with valgrind integration");
+    const debug = b.option(bool, "debug", "Enable options to make debugging easier.");
     const version_string_option = b.option([]const u8, "version", "Version of the library/binary");
 
     const zig_squashfs_options = b.addOptions();
@@ -15,9 +15,11 @@ pub fn build(b: *std.Build) !void {
     const mod = b.addModule("zig_squashfs", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
-        .optimize = optimize,
+        .optimize = if (debug == true) .Debug else optimize,
         .link_libc = use_c_libs_option,
-        .valgrind = valgrind,
+        .valgrind = debug,
+        .error_tracing = debug,
+        .strip = if (debug == true) false else null,
     });
     mod.addOptions("config", zig_squashfs_options);
     if (use_c_libs_option == true) {
@@ -41,23 +43,26 @@ pub fn build(b: *std.Build) !void {
     var exe_mod = b.createModule(.{
         .root_source_file = b.path("src/bin/unsquashfs.zig"),
         .target = target,
-        .optimize = optimize,
+        .optimize = if (debug == true) .Debug else optimize,
         .link_libc = use_c_libs_option,
         .imports = &.{
             .{ .name = "zig_squashfs", .module = mod },
         },
-        .valgrind = valgrind,
+        .valgrind = debug,
+        .error_tracing = debug,
+        .strip = if (debug == true) false else null,
     });
     exe_mod.addOptions("config", unsquashfs_options);
     const exe = b.addExecutable(.{
         .name = "unsquashfs",
         .root_module = exe_mod,
-        // .use_llvm = true, This can be needed to properly debug
+        .use_llvm = debug,
     });
 
     const lib = b.addLibrary(.{
         .name = "squashfs",
         .root_module = mod,
+        .use_llvm = debug,
     });
 
     b.installArtifact(lib);

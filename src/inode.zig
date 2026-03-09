@@ -171,14 +171,13 @@ pub fn setMetadata(self: Inode, alloc: std.mem.Allocator, tables: *Tables, fil: 
         const xattrs = try tables.xattr_table.get(alloc, idx);
         defer alloc.free(xattrs);
         for (xattrs) |kv| {
-            const res = std.os.linux.fsetxattr(fil.handle, @ptrCast(kv.key), @ptrCast(kv.value), kv.value.len, 0);
+            const res = std.os.linux.fsetxattr(fil.handle, kv.key, kv.value.ptr, kv.value.len, 0);
             alloc.free(kv.key);
             alloc.free(kv.value);
             if (res != 0) {
                 if (options.verbose)
                     options.verbose_writer.?.print("fsetxattr has result of: {}\n", .{res}) catch {};
-                //TODO: Currently this seems a bit flakey, so we just ignore the result... for now.
-                // return error.SetXattr;
+                return error.SetXattr;
             }
         }
     }

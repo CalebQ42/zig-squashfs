@@ -18,9 +18,9 @@ Instead of using Zig's standard library for decompression, use the system's C li
 
 Enable compiling with LZO decompression support. The LZO library currently has some issues with Zig when imported so it's easier to just disable it by default. Only has an effect when using `-Duse_c_libs=true`.
 
-> `-Dvalgrind=true`
+> `-Ddebug=true`
 
-Just sets the valgrind build option.
+Sets various build options that make debugging easier. Specifically, debug optimization is forced, valgrind support is enabled, error tracing is enabled, stipping is disabled, and copmilation uses LLVM (this is due to some linking issues when on Debug optimization and is required for debugging tools such as `lldb`. In the future this may be removed from the debug flag).
 
 > `-Dversion=0.0.0`
 
@@ -36,6 +36,8 @@ Most features are present except for the following:
 ## Performance
 
 This is some basic observation's I've made about this library's performance when compared to `unsquashfs`. Unless otherwise stated, most observations were made when extracting my test archive (which is fairly small and uses zstd compression) and with `--release=fast`.
+
+Currently, my only performance checks are checking execution time, nothing deeper.
 
 * Under ideal circumstances, my library is ~70% slower (.12s vs .20s).
 * Using Zig decompression libraries *significantly* increases decompression time by ~600%. Under ideal circumstances.

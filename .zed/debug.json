@@ -11,12 +11,7 @@
 
 		"build": {
 			"command": "zig",
-			"args": [
-				"build",
-				"-Doptimize=Debug",
-				"-Duse_c_libs=true",
-				"-Dvalgrind=true",
-			],
+			"args": ["build", "-Duse_c_libs=true", "-Ddebug=true"],
 		},
 
 		"program": "zig-out/bin/unsquashfs",
