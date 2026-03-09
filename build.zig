@@ -21,7 +21,7 @@ pub fn build(b: *std.Build) !void {
     });
     mod.addOptions("config", zig_squashfs_options);
     if (use_c_libs_option == true) {
-        mod.linkSystemLibrary("zlib", .{ .preferred_link_mode = .static });
+        mod.linkSystemLibrary("zlib-ng", .{ .preferred_link_mode = .static });
         mod.linkSystemLibrary("lzma", .{ .preferred_link_mode = .static });
         if (allow_lzo == true)
             mod.linkSystemLibrary("minilzo", .{ .preferred_link_mode = .static });

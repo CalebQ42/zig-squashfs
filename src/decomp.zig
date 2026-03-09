@@ -11,7 +11,7 @@ const config = if (builtin.is_test) .{
 } else @import("config");
 
 const c = @cImport({
-    @cInclude("zlib.h");
+    @cInclude("zlib-ng.h");
     @cInclude("lzma.h");
     @cInclude("lz4.h");
     @cInclude("zstd.h");
@@ -43,7 +43,7 @@ fn zigGzip(alloc: std.mem.Allocator, in: []u8, out: []u8) anyerror!usize {
 fn cGzip(alloc: std.mem.Allocator, in: []u8, out: []u8) anyerror!usize {
     _ = alloc;
     var out_len: usize = out.len;
-    const res = c.uncompress(out.ptr, &out_len, in.ptr, in.len);
+    const res = c.zng_uncompress2(out.ptr, &out_len, in.ptr, in.len);
     return switch (res) {
         c.Z_OK => out_len,
         c.Z_MEM_ERROR => error.NotEnoughMemory,
@@ -137,6 +137,7 @@ fn cXz(alloc: std.mem.Allocator, in: []u8, out: []u8) anyerror!usize {
         .avail_in = in.len,
         .next_out = out.ptr,
         .avail_out = out.len,
+        // .allocator = _, TODO: create a custom allocator based on alloc,
     };
     var res = c.lzma_stream_decoder(&stream, in.len * 2, 0);
     switch (res) {
