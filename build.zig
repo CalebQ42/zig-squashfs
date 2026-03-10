@@ -93,3 +93,63 @@ pub fn build(b: *std.Build) !void {
     check.dependOn(&lib_check.step);
     check.dependOn(&exe_check.step);
 }
+
+fn buildZstdLibrary(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, debug: ?bool) *std.Build.Step.Compile {
+    var zstd_lib = b.addLibrary(.{
+        .name = "zstd",
+        .linkage = .static,
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = if (debug == true) .Debug else optimize,
+            .link_libc = true,
+        }),
+        .use_llvm = debug,
+    });
+    zstd_lib.root_module.addCSourceFiles(.{
+        .flags = &.{"-O3"},
+        .root = b.path("extern/zstd/lib/"),
+        .files = &.{
+            "common/debug.c",
+            "common/entropy_common.c",
+            "common/error_private.c",
+            "common/fse_decompress.c",
+            "common/pool.c",
+            "common/threading.c",
+            "common/xxhash.c",
+            "common/zstd_common.c",
+            "compress/fse_compress.c",
+            "compress/hist.c",
+            "compress/huf_compress.c",
+            "compress/zstd_compress.c",
+            "compress/zstd_compress_literals.c",
+            "compress/zstd_compress_sequences.c",
+            "compress/zstd_compress_superblock.c",
+            "compress/zstd_double_fast.c",
+            "compress/zstd_fast.c",
+            "compress/zstd_lazy.c",
+            "compress/zstd_ldm.c",
+            "compress/zstdmt_compress.c",
+            "compress/zstd_opt.c",
+            "compress/zstd_preSplit.c",
+            "decompress/huf_decompress.c",
+            "decompress/zstd_ddict.c",
+            "decompress/zstd_decompress_block.c",
+            "decompress/zstd_decompress.c",
+            "dictBuilder/cover.c",
+            "dictBuilder/divsufsort.c",
+            "dictBuilder/fastcover.c",
+            "dictBuilder/zdict.c",
+        },
+    });
+    zstd_lib.root_module.addCSourceFiles(.{
+        .flags = &.{"-O3"},
+        .root = b.path("extern/zstd/lib/decompress"),
+        .files = &.{"huf_decompress_amd64.S"},
+    });
+    zstd_lib.installHeadersDirectory(b.path("extern/zstd/lib/"), &.{}, .{});
+    zstd_lib.installHeadersDirectory(b.path("extern/zstd/lib/common/"), &.{}, .{});
+    zstd_lib.installHeadersDirectory(b.path("extern/zstd/lib/compress/"), &.{}, .{});
+    zstd_lib.installHeadersDirectory(b.path("extern/zstd/lib/dictBuilder/"), &.{}, .{});
+    zstd_lib.installHeadersDirectory(b.path("extern/zstd/lib/"), &.{}, .{});
+    return zstd_lib;
+}
