@@ -1,14 +1,18 @@
 const std = @import("std");
+const Compile = std.Build.Step.Compile;
+const ResolvedTarget = std.Build.ResolvedTarget;
+const OptimizeMode = std.builtin.OptimizeMode;
+const Module = std.Build.Module;
 
 pub fn build(b: *std.Build) !void {
-    const use_c_libs_option = b.option(bool, "use_c_libs", "Use C versions of decompression libraries instead of the Zig standard library ones");
-    const allow_lzo = b.option(bool, "allow_lzo", "Compile with lzo support");
+    const use_zig_decomp = b.option(bool, "use_zig_decomp", "Use Zig standard library for decompression instead of C libraries.") orelse false;
+    const allow_lzo = b.option(bool, "allow_lzo", "Compile with lzo support") orelse false;
     const debug = b.option(bool, "debug", "Enable options to make debugging easier.");
     const version_string_option = b.option([]const u8, "version", "Version of the library/binary");
 
     const zig_squashfs_options = b.addOptions();
-    zig_squashfs_options.addOption(bool, "use_c_libs", use_c_libs_option orelse false);
-    zig_squashfs_options.addOption(bool, "allow_lzo", allow_lzo orelse false);
+    zig_squashfs_options.addOption(bool, "use_zig_decomp", use_zig_decomp);
+    zig_squashfs_options.addOption(bool, "allow_lzo", allow_lzo);
 
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -16,19 +20,25 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = if (debug == true) .Debug else optimize,
-        .link_libc = use_c_libs_option,
+        .link_libc = !use_zig_decomp,
         .valgrind = debug,
         .error_tracing = debug,
         .strip = if (debug == true) false else null,
     });
     mod.addOptions("config", zig_squashfs_options);
-    if (use_c_libs_option == true) {
-        mod.linkSystemLibrary("zlib-ng", .{ .preferred_link_mode = .static });
+
+    if (!use_zig_decomp) {
+        var zlib = b.dependency("zlib_ng", .{});
+        mod.linkLibrary(zlib.artifact("zng"));
+
         mod.linkSystemLibrary("lzma", .{ .preferred_link_mode = .static });
         if (allow_lzo == true)
             mod.linkSystemLibrary("minilzo", .{ .preferred_link_mode = .static });
         mod.linkSystemLibrary("lz4", .{ .preferred_link_mode = .static });
-        mod.linkSystemLibrary("zstd", .{ .preferred_link_mode = .static });
+
+        const zstd_lib = buildZstdLibrary(b, target, optimize, debug);
+        mod.linkLibrary(zstd_lib);
+        mod.addIncludePath(b.path("extern/zstd/lib/"));
     }
 
     var version = version_string_option orelse "0.0.0-testing";
@@ -44,7 +54,7 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = b.path("src/bin/unsquashfs.zig"),
         .target = target,
         .optimize = if (debug == true) .Debug else optimize,
-        .link_libc = use_c_libs_option,
+        .link_libc = !use_zig_decomp,
         .imports = &.{
             .{ .name = "zig_squashfs", .module = mod },
         },
@@ -94,7 +104,7 @@ pub fn build(b: *std.Build) !void {
     check.dependOn(&exe_check.step);
 }
 
-fn buildZstdLibrary(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, debug: ?bool) *std.Build.Step.Compile {
+fn buildZstdLibrary(b: *std.Build, target: ResolvedTarget, optimize: OptimizeMode, debug: ?bool) *Compile {
     var zstd_lib = b.addLibrary(.{
         .name = "zstd",
         .linkage = .static,
@@ -106,7 +116,6 @@ fn buildZstdLibrary(b: *std.Build, target: std.Build.ResolvedTarget, optimize: s
         .use_llvm = debug,
     });
     zstd_lib.root_module.addCSourceFiles(.{
-        .flags = &.{"-O3"},
         .root = b.path("extern/zstd/lib/"),
         .files = &.{
             "common/debug.c",
@@ -142,7 +151,6 @@ fn buildZstdLibrary(b: *std.Build, target: std.Build.ResolvedTarget, optimize: s
         },
     });
     zstd_lib.root_module.addCSourceFiles(.{
-        .flags = &.{"-O3"},
         .root = b.path("extern/zstd/lib/decompress"),
         .files = &.{"huf_decompress_amd64.S"},
     });

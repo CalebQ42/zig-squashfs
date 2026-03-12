@@ -3,7 +3,12 @@
     .version = "0.0.6",
     .fingerprint = 0x37ba29474b87f145, // Changing this has security and trust implications.
     .minimum_zig_version = "0.15.2",
-    .dependencies = .{},
+    .dependencies = .{
+        .zlib_ng = .{
+            .url = "https://github.com/CalebQ42/zig-zlib-ng/archive/refs/tags/2.3.3.tar.gz",
+            .hash = "zlib_ng-2.3.3-2HYS4Bw_AADjgv7tkrqjjz2fVz5kRTvha8wN9LEcjYNp",
+        },
+    },
     .paths = .{
         "build.zig",
         "build.zig.zon",
