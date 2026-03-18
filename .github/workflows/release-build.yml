@@ -15,7 +15,7 @@ jobs:
       - name: Install deps
         run: sudo apt update && sudo apt install -y liblzma-dev liblzo2-dev
       - name: Build normal version
-        run: zig build --release=fast --Duse_zig_decomp=true -Dversion=${{ github.ref_name }}
+        run: zig build --release=fast -Duse_zig_decomp=true -Dversion=${{ github.ref_name }}
       - name: Move zig build out
         run: mv zig-out/bin/unsquashfs ./unsquashfs-x86_64-zig-libs
       - name: Rebuild with C libraries
