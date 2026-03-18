@@ -5,8 +5,8 @@
     .minimum_zig_version = "0.15.2",
     .dependencies = .{
         .zlib_ng = .{
-            .url = "git+https://github.com/CalebQ42/zig-zlib-ng#8988c0850be6ad54ef53b8d85f323825b9fcb3ae",
-            .hash = "zlib_ng-2.3.3-pre1-2HYS4H5CAAD1PdTeOOZDvpLMXZzg0-4aBRUVdtq8LUXu",
+            .url = "git+https://github.com/CalebQ42/zig-zlib-ng#5f2f02dfb28acca2517dacbbd09e9b987f57b133",
+            .hash = "zlib_ng-2.3.3-pre1-2HYS4ClFAABW8KlHMyBHtlNKE3V7kCS8wqfxawG7xeaa",
         },
         .zstd = .{
             .url = "git+https://github.com/allyourcodebase/zstd.git?ref=1.5.7-1#e1a501be57f42c541e8a5597e4b59a074dfd09a3",
