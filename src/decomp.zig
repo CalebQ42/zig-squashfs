@@ -43,7 +43,7 @@ fn zigGzip(alloc: std.mem.Allocator, in: []u8, out: []u8) anyerror!usize {
 fn cGzip(alloc: std.mem.Allocator, in: []u8, out: []u8) anyerror!usize {
     _ = alloc;
     var out_len: usize = out.len;
-    const res = c.zng_uncompress2(out.ptr, &out_len, in.ptr, in.len);
+    const res = c.zng_uncompress(out.ptr, &out_len, in.ptr, in.len);
     return switch (res) {
         c.Z_OK => out_len,
         c.Z_MEM_ERROR => error.NotEnoughMemory,
