@@ -6,7 +6,7 @@ const Reader = std.Io.Reader;
 const builtin = @import("builtin");
 
 const config = if (builtin.is_test) .{
-    .use_c_libs = builtin.link_libc == true,
+    .use_zig_decomp = !builtin.link_libc,
     .allow_lzo = false, // Change once LZO compilation is fixed
 } else @import("config");
 
@@ -31,7 +31,7 @@ pub const CompressionType = enum(u16) {
 
 pub const DecompFn = *const fn (alloc: std.mem.Allocator, in: []u8, out: []u8) anyerror!usize; // TODO: replace anyerror to definitive error types.
 
-pub const gzipDecompress = if (config.use_c_libs) cGzip else zigGzip;
+pub const gzipDecompress = if (!config.use_zig_decomp) cGzip else zigGzip;
 
 fn zigGzip(alloc: std.mem.Allocator, in: []u8, out: []u8) anyerror!usize {
     var rdr: Reader = .fixed(in);
@@ -43,7 +43,7 @@ fn zigGzip(alloc: std.mem.Allocator, in: []u8, out: []u8) anyerror!usize {
 fn cGzip(alloc: std.mem.Allocator, in: []u8, out: []u8) anyerror!usize {
     _ = alloc;
     var out_len: usize = out.len;
-    const res = c.zng_uncompress2(out.ptr, &out_len, in.ptr, in.len);
+    const res = c.zng_uncompress(out.ptr, &out_len, in.ptr, in.len);
     return switch (res) {
         c.Z_OK => out_len,
         c.Z_MEM_ERROR => error.NotEnoughMemory,
@@ -53,7 +53,7 @@ fn cGzip(alloc: std.mem.Allocator, in: []u8, out: []u8) anyerror!usize {
     };
 }
 
-pub const lzmaDecompress = if (config.use_c_libs) cLzma else zigLzma;
+pub const lzmaDecompress = if (!config.use_zig_decomp) cLzma else zigLzma;
 
 fn zigLzma(alloc: std.mem.Allocator, in: []u8, out: []u8) anyerror!usize {
     var rdr: Reader = .fixed(in);
@@ -90,7 +90,7 @@ fn cLzma(alloc: std.mem.Allocator, in: []u8, out: []u8) anyerror!usize {
     };
 }
 
-// pub const lzoDecompress = if (config.use_c_libs) cLzo else zigLzo;
+// pub const lzoDecompress = if (!config.use_zig_decomp) cLzo else zigLzo;
 
 // fn zigLzo(alloc: std.mem.Allocator, in: []u8, out: []u8) anyerror!usize {
 //     _ = alloc;
@@ -123,7 +123,7 @@ pub fn cLzo(alloc: std.mem.Allocator, in: []u8, out: []u8) anyerror!usize {
     };
 }
 
-pub const xzDecompress = if (config.use_c_libs) cXz else zigXz;
+pub const xzDecompress = if (!config.use_zig_decomp) cXz else zigXz;
 
 fn zigXz(alloc: std.mem.Allocator, in: []u8, out: []u8) anyerror!usize {
     var rdr: Reader = .fixed(in);
@@ -161,7 +161,7 @@ fn cXz(alloc: std.mem.Allocator, in: []u8, out: []u8) anyerror!usize {
     };
 }
 
-// pub const lz4Decompress = if (config.use_c_libs) cLz4 else zigLz4;
+// pub const lz4Decompress = if (!config.use_zig_decomp) cLz4 else zigLz4;
 
 // fn zigLz4(alloc: std.mem.Allocator, in: []u8, out: []u8) anyerror!usize {
 //     _ = alloc;
@@ -176,7 +176,7 @@ pub fn cLz4(alloc: std.mem.Allocator, in: []u8, out: []u8) anyerror!usize {
     return error.Lz4DecompressFailed;
 }
 
-pub const zstdDecompress = if (config.use_c_libs) cZstd else zigZstd;
+pub const zstdDecompress = if (!config.use_zig_decomp) cZstd else zigZstd;
 
 pub fn zigZstd(alloc: std.mem.Allocator, in: []u8, out: []u8) anyerror!usize {
     var rdr: Reader = .fixed(in);

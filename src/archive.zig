@@ -18,7 +18,7 @@ const OffsetFile = @import("util/offset_file.zig");
 const XattrTable = @import("xattr.zig");
 
 const config = if (builtin.is_test) .{
-    .use_c_libs = true,
+    .use_zig_decomp = !builtin.link_libc,
     .allow_lzo = false,
 } else @import("config");
 
@@ -45,8 +45,8 @@ pub fn init(alloc: std.mem.Allocator, fil: File, offset: u64) !Archive {
         .lzma => Decomp.lzmaDecompress,
         .xz => Decomp.xzDecompress,
         .zstd => Decomp.zstdDecompress,
-        .lz4 => if (config.use_c_libs) Decomp.cLz4 else return error.Lz4Unsupported,
-        .lzo => if (config.use_c_libs and config.allow_lzo) Decomp.lzoDecompress else return error.LzoUnsupported,
+        .lz4 => if (!config.use_zig_decomp) Decomp.cLz4 else return error.Lz4Unsupported,
+        .lzo => if (!config.use_zig_decomp and config.allow_lzo) Decomp.lzoDecompress else return error.LzoUnsupported,
     };
     return .{
         .alloc = alloc,

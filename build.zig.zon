@@ -3,7 +3,20 @@
     .version = "0.0.6",
     .fingerprint = 0x37ba29474b87f145, // Changing this has security and trust implications.
     .minimum_zig_version = "0.15.2",
-    .dependencies = .{},
+    .dependencies = .{
+        .zlib_ng = .{
+            .url = "git+https://github.com/CalebQ42/zig-zlib-ng#8988c0850be6ad54ef53b8d85f323825b9fcb3ae",
+            .hash = "zlib_ng-2.3.3-pre1-2HYS4H5CAAD1PdTeOOZDvpLMXZzg0-4aBRUVdtq8LUXu",
+        },
+        .zstd = .{
+            .url = "git+https://github.com/allyourcodebase/zstd.git?ref=1.5.7-1#e1a501be57f42c541e8a5597e4b59a074dfd09a3",
+            .hash = "zstd-1.5.7-1-KEItkAMwAAD6OKY3m0OOmXG7aL-aLUfrDqbP5J5oYapU",
+        },
+        .lz4 = .{
+            .url = "git+https://github.com/allyourcodebase/lz4.git?ref=1.10.0-6#41f52ab227caf9d48cf88c89a4d2946caa12b102",
+            .hash = "lz4-1.10.0-6-ewyzw-4NAAAWDpY4xpiqr4LQhZQAC0x_rGnW2iPh6jk2",
+        },
+    },
     .paths = .{
         "build.zig",
         "build.zig.zon",
