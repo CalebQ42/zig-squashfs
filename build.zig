@@ -23,17 +23,26 @@ pub fn build(b: *std.Build) !void {
     });
     mod.addOptions("config", zig_squashfs_options);
     if (!use_zig_decomp) {
-        var zlib_ng = b.dependency("zlib_ng", .{});
+        var zlib_ng = b.dependency("zlib_ng", .{
+            .target = target,
+            .optimize = optimize,
+        });
         mod.linkLibrary(zlib_ng.artifact("zng"));
 
         mod.linkSystemLibrary("lzma", .{ .preferred_link_mode = .static });
         if (allow_lzo == true)
             mod.linkSystemLibrary("minilzo", .{ .preferred_link_mode = .static });
 
-        var lz4 = b.dependency("lz4", .{});
+        var lz4 = b.dependency("lz4", .{
+            .target = target,
+            .optimize = optimize,
+        });
         mod.linkLibrary(lz4.artifact("lz4"));
 
-        var zstd = b.dependency("zstd", .{});
+        var zstd = b.dependency("zstd", .{
+            .target = target,
+            .optimize = optimize,
+        });
         mod.linkLibrary(zstd.artifact("zstd"));
     }
 
