@@ -2,7 +2,6 @@ const std = @import("std");
 const Mutex = std.Thread.Mutex;
 
 const Archive = @import("archive.zig");
-const DecompFn = @import("decomp.zig").DecompFn;
 const BlockSize = @import("inode_data/file.zig").BlockSize;
 const InodeRef = @import("inode.zig").Ref;
 const Superblock = @import("super.zig").Superblock;

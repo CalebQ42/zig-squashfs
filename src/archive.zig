@@ -5,7 +5,10 @@ const std = @import("std");
 const File = std.fs.File;
 const builtin = @import("builtin");
 
-const Decomp = @import("decomp.zig");
+const config = @import("config");
+
+const cDecomp = @import("decomp/misc_c.zig");
+const Decomp = @import("decomp/zig_decomp.zig");
 const ExtractionOptions = @import("options.zig");
 const Inode = @import("inode.zig");
 const InodeRef = Inode.Ref;
@@ -17,21 +20,34 @@ const MetadataReader = @import("util/metadata.zig");
 const OffsetFile = @import("util/offset_file.zig");
 const XattrTable = @import("xattr.zig");
 
-const config = if (builtin.is_test) .{
-    .use_zig_decomp = !builtin.link_libc,
-    .allow_lzo = false,
-} else @import("config");
-
 const Archive = @This();
 
 alloc: std.mem.Allocator,
 
 fil: OffsetFile,
-decomp: Decomp.DecompFn,
 
 super: Superblock,
 
 tables: ?Tables = null,
+
+decomp: if (config.use_zig_decomp) Decomp.DecompFn else union(enum) {
+    gzip: @import("decomp/gzip.zig"),
+    lzma: @import("decomp/lzma.zig"),
+    lzo: void,
+    xz: @import("decomp/lzma.zig"),
+    lz4: void,
+    zstd: @import("decomp/zstd.zig"),
+
+    pub fn decomp(self: @This(), in: []u8, out: []u8) !usize {
+        return switch (self) {
+            .gzip => |*g| g.decompress(in, out),
+            .zstd => |*z| z.decompress(in, out),
+            .lzma, .xz => |*d| d.decompress(in, out),
+            .lz4 => cDecomp.lz4(in, out),
+            .lzo => cDecomp.lzo(in, out),
+        };
+    }
+},
 
 /// Default settings using std.Thread.getCpuCount() threads and the minimum of 4gb or half of system memory for memory usage.
 pub fn init(alloc: std.mem.Allocator, fil: File, offset: u64) !Archive {
@@ -40,18 +56,26 @@ pub fn init(alloc: std.mem.Allocator, fil: File, offset: u64) !Archive {
     std.debug.assert(red == @sizeOf(Superblock));
     try super.validate();
     const off_fil: OffsetFile = .init(fil, offset);
-    const decomp: Decomp.DecompFn = switch (super.compression) {
-        .gzip => Decomp.gzipDecompress,
-        .lzma => Decomp.lzmaDecompress,
-        .xz => Decomp.xzDecompress,
-        .zstd => Decomp.zstdDecompress,
-        .lz4 => if (!config.use_zig_decomp) Decomp.cLz4 else return error.Lz4Unsupported,
-        .lzo => if (!config.use_zig_decomp and config.allow_lzo) Decomp.lzoDecompress else return error.LzoUnsupported,
-    };
     return .{
         .alloc = alloc,
         .fil = off_fil,
-        .decomp = decomp,
+        .decomp = if (config.use_zig_decomp)
+            switch (super.compression) {
+                .lz4 => return error.Lz4Unsupported,
+                .lzo => return error.LzoUnsupported,
+                .gzip => Decomp.gzip,
+                .lzma => Decomp.lzma,
+                .xz => Decomp.xz,
+                .zstd => Decomp.zstd,
+            }
+        else switch (super.compression) {
+            .gzip => .{ .gzip = .init(alloc) },
+            .zstd => .{ .zstd = .init(alloc) },
+            .xz => .{ .xz = .init(alloc, true) },
+            .lzma => .{ .lzma = .init(alloc, false) },
+            .lzo => .{ .lzo = .{} },
+            .lz4 => .{ .lz4 = .{} },
+        },
         .super = super,
     };
 }

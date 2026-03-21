@@ -2,13 +2,13 @@ const std = @import("std");
 
 pub fn build(b: *std.Build) !void {
     const use_zig_decomp = b.option(bool, "use_zig_decomp", "Use zig standard library for decompression.") orelse false;
-    const allow_lzo = b.option(bool, "allow_lzo", "Compile with lzo support") orelse false;
+    // const allow_lzo = b.option(bool, "allow_lzo", "Compile with lzo support") orelse false;
     const debug = b.option(bool, "debug", "Enable options to make debugging easier.") orelse false;
     const version_string_option = b.option([]const u8, "version", "Version of the library/binary");
 
     const zig_squashfs_options = b.addOptions();
     zig_squashfs_options.addOption(bool, "use_zig_decomp", use_zig_decomp);
-    zig_squashfs_options.addOption(bool, "allow_lzo", allow_lzo);
+    // zig_squashfs_options.addOption(bool, "allow_lzo", allow_lzo);
 
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -30,8 +30,12 @@ pub fn build(b: *std.Build) !void {
         mod.linkLibrary(zlib_ng.artifact("zng"));
 
         mod.linkSystemLibrary("lzma", .{ .preferred_link_mode = .static });
-        if (allow_lzo == true)
-            mod.linkSystemLibrary("minilzo", .{ .preferred_link_mode = .static });
+
+        var minilzo = b.dependency("minilzo", .{
+            .target = target,
+            .optimize = optimize,
+        });
+        mod.linkLibrary(minilzo.artifact("minilzo"));
 
         var lz4 = b.dependency("lz4", .{
             .target = target,
@@ -85,15 +89,14 @@ pub fn build(b: *std.Build) !void {
 
     const mod_tests = b.addTest(.{
         .root_module = mod,
+        .test_runner = .{
+            .mode = .simple,
+            .path = b.path("src/test.zig"),
+        },
     });
     const run_mod_tests = b.addRunArtifact(mod_tests);
-    const exe_tests = b.addTest(.{
-        .root_module = exe.root_module,
-    });
-    const run_exe_tests = b.addRunArtifact(exe_tests);
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_mod_tests.step);
-    test_step.dependOn(&run_exe_tests.step);
 
     // zls build check steps
     const lib_check = b.addLibrary(.{

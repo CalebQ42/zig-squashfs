@@ -15,14 +15,12 @@ const ZlibErrors = error{
 const Self = @This();
 
 alloc: std.mem.Allocator,
-window_size: i16,
 
 streams: std.AutoHashMap(std.Thread.Id, zng_stream),
 
-pub fn init(alloc: std.mem.Allocator, window_size: i16) !Self {
+pub fn init(alloc: std.mem.Allocator) !Self {
     return .{
         .alloc = alloc,
-        .window_size = window_size,
         .streams = .init(alloc),
     };
 }
@@ -40,7 +38,7 @@ pub fn decompress(self: *Self, in: []u8, out: []u8) ZlibErrors!usize {
     stream.avail_in = in.len;
     stream.next_out = out.ptr;
     stream.avail_out = out.len;
-    var res = c.zng_inflateReset2(stream, self.window_size);
+    var res = c.zng_inflateReset(stream);
     switch (res) {
         c.Z_OK => {},
         c.Z_STREAM_ERROR => return ZlibErrors.StreamError,
@@ -73,17 +71,4 @@ fn zalloc(self_ptr: ?*anyopaque, items: c_uint, size: c_uint) ?*anyopaque {
 fn zfree(self_ptr: ?*anyopaque, alloc_ptr: ?*anyopaque) ?*anyopaque {
     var self: *Self = @ptrCast(self_ptr);
     self.alloc.rawFree(@ptrCast(alloc_ptr), .@"1", 0);
-}
-
-pub fn stateless(alloc: std.mem.Allocator, in: []u8, out: []u8) anyerror!usize {
-    _ = alloc;
-    var out_len: usize = out.len;
-    const res = c.zng_uncompress(out.ptr, &out_len, in.ptr, in.len);
-    return switch (res) {
-        c.Z_OK => out_len,
-        c.Z_MEM_ERROR => ZlibErrors.NotEnoughMemory,
-        c.Z_BUF_ERROR => ZlibErrors.OutputBufferTooSmall,
-        c.Z_DATA_ERROR => ZlibErrors.BadData,
-        else => ZlibErrors.Unknown,
-    };
 }
