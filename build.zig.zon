@@ -17,7 +17,8 @@
             .hash = "lz4-1.10.0-6-ewyzw-4NAAAWDpY4xpiqr4LQhZQAC0x_rGnW2iPh6jk2",
         },
         .minilzo = .{
-            .path = "../zig-minilzo",
+            .url = "git+https://github.com/CalebQ42/zig-minilzo.git#7cbae997b91a44d74b7cd6c073584dc9562a6c90",
+            .hash = "minilzo-2.10.0-Ij7BO8wLAADeWI4Pe4jp8XTDsDaquZR14oZ7_9yKKDWP",
         },
     },
     .paths = .{
