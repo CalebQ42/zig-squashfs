@@ -6,6 +6,9 @@ pub const Error = error{
     OutOfMemory,
     BadInput,
     OutputTooSmall,
+    ReadFailed,
+    WriteFailed,
+    EndOfStream,
 };
 
 vtable: *const struct {

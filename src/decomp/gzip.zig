@@ -1,4 +1,5 @@
 const std = @import("std");
+const Reader = std.Io.Reader;
 const builtin = @import("builtin");
 
 const Decompressor = @import("../decomp.zig");

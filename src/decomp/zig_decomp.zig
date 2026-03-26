@@ -2,7 +2,11 @@ const std = @import("std");
 const Reader = std.Io.Reader;
 const builtin = @import("builtin");
 
-pub const DecompFn = *const fn (alloc: std.mem.Allocator, in: []u8, out: []u8) anyerror!usize; // TODO: replace anyerror to definitive error types.
+const Decompressor = @import("../decomp.zig");
+
+pub const Gzip = struct {
+    interface: Decompressor = .{ .vtable = &.{ .stateless = gzip } },
+};
 
 pub fn gzip(alloc: std.mem.Allocator, in: []u8, out: []u8) anyerror!usize {
     var rdr: Reader = .fixed(in);
@@ -12,17 +16,29 @@ pub fn gzip(alloc: std.mem.Allocator, in: []u8, out: []u8) anyerror!usize {
     return decomp.reader.readSliceShort(out);
 }
 
+pub const Lzma = struct {
+    interface: Decompressor = .{ .vtable = &.{ .stateless = lzma } },
+};
+
 pub fn lzma(alloc: std.mem.Allocator, in: []u8, out: []u8) anyerror!usize {
     var rdr: Reader = .fixed(in);
     var decomp = try std.compress.lzma.decompress(alloc, rdr.adaptToOldInterface());
     return decomp.read(out);
 }
 
+pub const Xz = struct {
+    interface: Decompressor = .{ .vtable = &.{ .stateless = xz } },
+};
+
 pub fn xz(alloc: std.mem.Allocator, in: []u8, out: []u8) anyerror!usize {
     var rdr: Reader = .fixed(in);
     var decomp = try std.compress.xz.decompress(alloc, rdr.adaptToOldInterface());
     return decomp.read(out);
 }
+
+pub const Zstd = struct {
+    interface: Decompressor = .{ .vtable = &.{ .stateless = zstd } },
+};
 
 pub fn zstd(alloc: std.mem.Allocator, in: []u8, out: []u8) anyerror!usize {
     var rdr: Reader = .fixed(in);
