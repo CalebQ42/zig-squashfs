@@ -34,6 +34,15 @@ pub fn read(alloc: std.mem.Allocator, rdr: *Reader, block_size: u32) !Inode {
         },
     };
 }
+pub fn deinit(self: Inode, alloc: std.mem.Allocator) void {
+    switch (self.data) {
+        .file => |f| alloc.free(f.block_sizes),
+        .ext_file => |f| alloc.free(f.block_sizes),
+        .symlink => |s| alloc.free(s.target),
+        .ext_symlink => |s| alloc.free(s.target),
+        else => {},
+    }
+}
 
 // Types
 
