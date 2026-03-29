@@ -9,26 +9,27 @@ super: Superblock,
 pub fn init(fil: std.fs.File, offset: u64) !Archive {
     var super: Superblock = undefined;
     var fil_rdr = fil.reader(&[0]u8{});
-    try fil_rdr.seekTo(offset);
+    if (offset > 0)
+        try fil_rdr.seekTo(offset);
     try fil_rdr.interface.readSliceEndian(Superblock, @ptrCast(&super), .little);
+    try super.validate();
 
     return .{
         .super = super,
     };
 }
 
+pub const Error = error{
+    BadMagic,
+    BadBlockLog,
+    BadVersion,
+    BadCheck,
+};
+
 // Superblock
 
 const SQUASHFS_MAGIC: u32 = std.mem.readInt(u32, "hsqs", .little);
 
-const SuperblockError = error{
-    InvalidMagic,
-    InvalidBlockLog,
-    InvalidVersion,
-    InvalidCheck,
-};
-
-/// A squashfs Superblock
 pub const Superblock = packed struct {
     magic: u32,
     inode_count: u32,
@@ -36,7 +37,7 @@ pub const Superblock = packed struct {
     block_size: u32,
     frag_count: u32,
     compression: enum(u16) {
-        gzip = 1,
+        gzip = 1, // Though officially named gzip, it actually uses zlib.
         lzma,
         lzo,
         xz,
@@ -74,12 +75,12 @@ pub const Superblock = packed struct {
     /// Validate the Superblock. If an error is returned, it's likely the archive is corrupted or not a squashfs archive.
     fn validate(self: Superblock) !void {
         if (self.magic != SQUASHFS_MAGIC)
-            return SuperblockError.InvalidMagic;
+            return Error.BadMagic;
         if (self.flags.check)
-            return SuperblockError.InvalidCheck;
+            return Error.BadCheck;
         if (self.ver_maj != 4 or self.ver_min != 0)
-            return SuperblockError.InvalidVersion;
+            return Error.BadVersion;
         if (std.math.log2(self.block_size) != self.block_log)
-            return SuperblockError.InvalidBlockLog;
+            return Error.BadBlockLog;
     }
 };

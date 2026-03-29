@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const Error = error{
+pub const Error = error{
     OutOfMemory,
     EndOfStream,
     ReadFailed,
