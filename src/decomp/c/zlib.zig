@@ -14,7 +14,7 @@ err: ?Error = null,
 pub fn init(alloc: std.mem.Allocator) !Zlib {
     return .{
         .streams = try .init(alloc),
-        .interface = .{
+        .interface = &.{
             .alloc = alloc,
             .vtable = .{ .decompress = decompress, .stateless = stateless },
         },
@@ -29,6 +29,7 @@ fn getOrCreate(self: *Zlib) !*c.zng_stream {
         .zalloc = zalloc,
         .zfree = zfree,
     };
+    return res.value_ptr;
 }
 
 fn decompress(decomp: *Decompressor, in: []u8, out: []u8) Decompressor.Error!usize {

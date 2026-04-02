@@ -14,7 +14,7 @@ err: ?Error = null,
 pub fn init(alloc: std.mem.Allocator) !Zstd {
     return .{
         .streams = try .init(alloc),
-        .interface = .{
+        .interface = &.{
             .alloc = alloc,
             .vtable = .{ .decompress = decompress, .stateless = stateless },
         },
@@ -26,6 +26,7 @@ fn getOrCreate(self: *Zstd) !*c.ZSTD_DCtx {
     if (res.found_existing) return res.value_ptr;
     res.value_ptr.* = c.ZSTD_createDCtx();
     if (res.value_ptr.* == null) return Error.OutOfMemory;
+    return res.value_ptr;
 }
 
 fn decompress(decomp: *Decompressor, in: []u8, out: []u8) Decompressor.Error!usize {
