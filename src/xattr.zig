@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const DecompFn = @import("decomp.zig").DecompFn;
+const Decompressor = @import("decomp.zig");
 const Table = @import("tables.zig").Table;
 const MetadataReader = @import("util/metadata.zig");
 const OffsetFile = @import("util/offset_file.zig");
@@ -38,14 +38,14 @@ const XattrTable = @This();
 
 alloc: std.mem.Allocator,
 fil: OffsetFile,
-decomp: DecompFn,
+decomp: *Decompressor,
 
 count: u32,
 start: u64,
 
 table: Table(Entry),
 
-pub fn init(alloc: std.mem.Allocator, fil: OffsetFile, decomp: DecompFn, table_start: u64) !XattrTable {
+pub fn init(alloc: std.mem.Allocator, fil: OffsetFile, decomp: *Decompressor, table_start: u64) !XattrTable {
     var info = packed struct {
         start: u64 = undefined,
         count: u32 = undefined,

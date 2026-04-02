@@ -30,24 +30,7 @@ super: Superblock,
 
 tables: ?Tables = null,
 
-decomp: if (config.use_zig_decomp) Decomp.DecompFn else union(enum) {
-    gzip: @import("decomp/gzip.zig"),
-    lzma: @import("decomp/lzma.zig"),
-    lzo: void,
-    xz: @import("decomp/lzma.zig"),
-    lz4: void,
-    zstd: @import("decomp/zstd.zig"),
-
-    pub fn decomp(self: @This(), in: []u8, out: []u8) !usize {
-        return switch (self) {
-            .gzip => |*g| g.decompress(in, out),
-            .zstd => |*z| z.decompress(in, out),
-            .lzma, .xz => |*d| d.decompress(in, out),
-            .lz4 => cDecomp.lz4(in, out),
-            .lzo => cDecomp.lzo(in, out),
-        };
-    }
-},
+decomp: @import("decomp/types.zig").Decomp,
 
 /// Default settings using std.Thread.getCpuCount() threads and the minimum of 4gb or half of system memory for memory usage.
 pub fn init(alloc: std.mem.Allocator, fil: File, offset: u64) !Archive {
@@ -63,16 +46,16 @@ pub fn init(alloc: std.mem.Allocator, fil: File, offset: u64) !Archive {
             switch (super.compression) {
                 .lz4 => return error.Lz4Unsupported,
                 .lzo => return error.LzoUnsupported,
-                .gzip => Decomp.gzip,
-                .lzma => Decomp.lzma,
-                .xz => Decomp.xz,
-                .zstd => Decomp.zstd,
+                .gzip => .{ .gzip = .{} },
+                .lzma => .{ .lzma = .{} },
+                .xz => .{ .xz = .{} },
+                .zstd => .{ .zstd = .{} },
             }
         else switch (super.compression) {
             .gzip => .{ .gzip = .init(alloc) },
             .zstd => .{ .zstd = .init(alloc) },
-            .xz => .{ .xz = .init(alloc, true) },
-            .lzma => .{ .lzma = .init(alloc, false) },
+            .xz => .{ .xz = .init(alloc) },
+            .lzma => .{ .lzma = .init(alloc) },
             .lzo => .{ .lzo = .{} },
             .lz4 => .{ .lz4 = .{} },
         },
@@ -82,6 +65,7 @@ pub fn init(alloc: std.mem.Allocator, fil: File, offset: u64) !Archive {
 pub fn deinit(self: *Archive) void {
     if (self.tables != null)
         self.tables.?.deinit();
+    self.decomp.deinit();
 }
 
 pub fn inode(self: *Archive, alloc: std.mem.Allocator, num: u32) !Inode {

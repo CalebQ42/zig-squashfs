@@ -1,9 +1,3 @@
-const std = @import("std");
-const Reader = std.Io.Reader;
-const builtin = @import("builtin");
-
-const config = @import("config");
-
 pub const c = @cImport({
     @cInclude("zlib-ng.h");
     @cInclude("lzma.h");

@@ -8,6 +8,7 @@ const Superblock = @import("super.zig").Superblock;
 const MetadataReader = @import("util/metadata.zig");
 const OffsetFile = @import("util/offset_file.zig");
 const XattrTable = @import("xattr.zig");
+const Decompressor = @import("decomp.zig");
 
 /// Information about a fragment section. Multiple fragments are contained in the block described by a single FragEntry.
 /// The offset into the block and fragment size is stored in the file's inode.
@@ -48,7 +49,7 @@ pub fn Table(T: anytype) type {
 
         alloc: std.mem.Allocator,
         fil: OffsetFile,
-        decomp: DecompFn,
+        decomp: *Decompressor,
         tab_start: u64,
 
         tab: std.AutoHashMap(u32, []T),
@@ -56,7 +57,7 @@ pub fn Table(T: anytype) type {
 
         mut: Mutex = .{},
 
-        pub fn init(alloc: std.mem.Allocator, fil: OffsetFile, decomp: DecompFn, tab_start: u64, values: u32) !Self {
+        pub fn init(alloc: std.mem.Allocator, fil: OffsetFile, decomp: *Decompressor, tab_start: u64, values: u32) !Self {
             return .{
                 .alloc = alloc,
                 .fil = fil,
