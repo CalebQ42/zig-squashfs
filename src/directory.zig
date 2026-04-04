@@ -36,7 +36,7 @@ pub fn readDirectory(alloc: std.mem.Allocator, rdr: *Reader, size: u32) []Entry 
 
 // Types
 
-const Entry = struct {
+pub const Entry = struct {
     block_start: u32,
     block_offset: u16,
     num: u32,

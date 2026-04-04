@@ -20,7 +20,7 @@ pub fn stateless(comptime T: anytype, fil: OffsetFile, decomp: *const Decompress
     return out;
 }
 
-pub fn Table(comptime T: anytype) type {
+pub fn CachedTable(comptime T: anytype) type {
     return struct {
         const Self = @This();
 

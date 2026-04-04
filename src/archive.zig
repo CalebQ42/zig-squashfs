@@ -3,7 +3,12 @@ const std = @import("std");
 const DecompTypes = @import("decomp/types.zig");
 const Decompressor = @import("decomp.zig");
 const ExtractionOptions = @import("options.zig");
+const File = @import("file.zig");
 const Inode = @import("inode.zig");
+const BlockSize = @import("inode/file.zig").BlockSize;
+const LookupTable = @import("lookup_table.zig");
+const MetadataReader = @import("util/metadata.zig");
+const OffsetFile = @import("util/offset_file.zig");
 
 pub const Error = error{
     BadMagic,
@@ -13,6 +18,8 @@ pub const Error = error{
 };
 
 const Archive = @This();
+
+file: OffsetFile,
 
 super: Superblock,
 
@@ -28,6 +35,7 @@ pub fn init(fil: std.fs.File, offset: u64) !Archive {
     try super.validate();
 
     return .{
+        .file = .{ .fil = fil, .offset = offset },
         .super = super,
         .stateless_decomp = .{ .vtable = &.{ .stateless = try DecompTypes.getStatelessFn(super.compression) } },
     };
@@ -39,6 +47,34 @@ pub fn extract(self: Archive, alloc: std.mem.Allocator, path: []const u8, option
     _ = path;
     _ = options;
     return error.TODO;
+}
+
+pub fn root(self: Archive, alloc: std.mem.Allocator) !File {
+    return .{
+        .alloc = alloc,
+
+        .inode = try self.refToInode(alloc, self.super.root_ref),
+        .name = "",
+    };
+}
+pub fn open(self: Archive, alloc: std.mem.Allocator, path: []const u8) !File {}
+
+pub fn fragEntry(self: Archive, idx: u32) !FragEntry {
+    return LookupTable.stateless(FragEntry, self.fil, &self.stateless_decomp, self.super.frag_start, idx);
+}
+pub fn id(self: Archive, idx: u32) !u16 {
+    return LookupTable.stateless(u16, self.fil, &self.stateless_decomp, self.super.id_start, idx);
+}
+pub fn inode(self: Archive, alloc: std.mem.Allocator, inode_num: u32) !Inode {
+    const ref = try LookupTable.stateless(Inode.Ref, self.file, &self.stateless_decomp, self.super.export_start, inode_num - 1);
+    return self.refToInode(alloc, ref);
+}
+
+inline fn refToInode(self: Archive, alloc: std.mem.Allocator, ref: Inode.Ref) !Inode {
+    var rdr = self.file.readerAt(self.super.inode_start + ref.block_start, &[0]u8{});
+    var meta: MetadataReader = .init(&rdr.interface, &self.stateless_decomp);
+    try meta.interface.discardAll(ref.block_offset);
+    return .read(alloc, &meta.interface, self.super.block_size);
 }
 
 // Superblock
@@ -91,4 +127,24 @@ pub const Superblock = packed struct {
         if (std.math.log2(self.block_size) != self.block_log)
             return Error.BadBlockLog;
     }
+};
+
+pub const MinimalSuperblock = struct {
+    block_size: u32,
+    frag_count: u32,
+    id_count: u16,
+    id_start: u64,
+    xattr_start: u64,
+    inode_start: u64,
+    dir_start: u64,
+    frag_start: u64,
+    export_start: u64,
+};
+
+// Frag Entry
+
+pub const FragEntry = packed struct {
+    block_start: u64,
+    size: BlockSize,
+    _: u32,
 };
