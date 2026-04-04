@@ -9,6 +9,7 @@ const BlockSize = @import("inode/file.zig").BlockSize;
 const LookupTable = @import("lookup_table.zig");
 const MetadataReader = @import("util/metadata.zig");
 const OffsetFile = @import("util/offset_file.zig");
+const Utils = @import("util/utils.zig");
 
 pub const Error = error{
     BadMagic,
@@ -53,11 +54,23 @@ pub fn root(self: Archive, alloc: std.mem.Allocator) !File {
     return .{
         .alloc = alloc,
 
-        .inode = try self.refToInode(alloc, self.super.root_ref),
+        .inode = try Utils.refToInode(
+            alloc,
+            &self.stateless_decomp,
+            self.file,
+            self.super.inode_start,
+            self.super.block_size,
+            self.super.root_ref,
+        ),
         .name = "",
     };
 }
-pub fn open(self: Archive, alloc: std.mem.Allocator, path: []const u8) !File {}
+pub fn open(self: Archive, alloc: std.mem.Allocator, path: []const u8) !File {
+    if (Utils.pathIsSelf(path)) return self.root(alloc);
+    var root_file = self.root(alloc);
+    defer root_file.deinit();
+    return root_file.open(alloc, path);
+}
 
 pub fn fragEntry(self: Archive, idx: u32) !FragEntry {
     return LookupTable.stateless(FragEntry, self.fil, &self.stateless_decomp, self.super.frag_start, idx);
@@ -67,14 +80,7 @@ pub fn id(self: Archive, idx: u32) !u16 {
 }
 pub fn inode(self: Archive, alloc: std.mem.Allocator, inode_num: u32) !Inode {
     const ref = try LookupTable.stateless(Inode.Ref, self.file, &self.stateless_decomp, self.super.export_start, inode_num - 1);
-    return self.refToInode(alloc, ref);
-}
-
-inline fn refToInode(self: Archive, alloc: std.mem.Allocator, ref: Inode.Ref) !Inode {
-    var rdr = self.file.readerAt(self.super.inode_start + ref.block_start, &[0]u8{});
-    var meta: MetadataReader = .init(&rdr.interface, &self.stateless_decomp);
-    try meta.interface.discardAll(ref.block_offset);
-    return .read(alloc, &meta.interface, self.super.block_size);
+    return Utils.refToInode(alloc, &self.stateless_decomp, self.file, self.super.inode_start, self.super.block_size, ref);
 }
 
 // Superblock
@@ -127,9 +133,25 @@ pub const Superblock = packed struct {
         if (std.math.log2(self.block_size) != self.block_log)
             return Error.BadBlockLog;
     }
+
+    pub fn toMinimal(self: Superblock) MinimalSuperblock {
+        return .{
+            .inode_count = self.inode_count,
+            .block_size = self.block_size,
+            .frag_count = self.frag_count,
+            .id_count = self.id_count,
+            .id_start = self.id_start,
+            .xattr_start = self.xattr_start,
+            .inode_start = self.inode_start,
+            .dir_start = self.dir_start,
+            .frag_start = self.frag_start,
+            .export_start = self.export_start,
+        };
+    }
 };
 
 pub const MinimalSuperblock = struct {
+    inode_count: u32,
     block_size: u32,
     frag_count: u32,
     id_count: u16,

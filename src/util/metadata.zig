@@ -40,10 +40,11 @@ fn advanceBuffer(self: *MetadataReader) Reader.Error!void {
         self.interface.end = hdr.size;
         return;
     }
-    self.interface.end = self.decomp.decompress(self.read_buf[0..hdr.size], self.interface.buffer) catch |err| return switch (err) {
-        error.OutOfMemory => error.ReadFailed,
-        else => err,
-    };
+    self.interface.end = self.decomp.decompress(self.read_buf[0..hdr.size], self.interface.buffer) catch |err|
+        return switch (err) {
+            error.OutOfMemory => error.ReadFailed,
+            else => err,
+        };
 }
 
 fn stream(rdr: *Reader, wrt: *Writer, limit: Limit) Reader.StreamError!usize {
