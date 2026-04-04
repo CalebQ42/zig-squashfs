@@ -20,6 +20,13 @@ pub fn init(alloc: std.mem.Allocator) !Xz {
         },
     };
 }
+pub fn deinit(self: *Xz) void {
+    var values = self.streams.valueIterator();
+    while (values.next()) |val| {
+        c.lzma_end(val);
+    }
+    self.streams.deinit();
+}
 
 fn getOrCreate(self: *Xz) !*c.lzma_stream {
     const res = try self.streams.getOrPut(std.Thread.getCurrentId());
@@ -34,7 +41,7 @@ fn getOrCreate(self: *Xz) !*c.lzma_stream {
     return res.value_ptr;
 }
 
-fn decompress(decomp: *Decompressor, in: []u8, out: []u8) Decompressor.Error!usize {
+fn decompress(decomp: *const Decompressor, in: []u8, out: []u8) Decompressor.Error!usize {
     var self: *Xz = @fieldParentPtr("interface", decomp);
 
     const stream = try self.getOrCreate();
@@ -43,16 +50,22 @@ fn decompress(decomp: *Decompressor, in: []u8, out: []u8) Decompressor.Error!usi
     stream.next_out = out.ptr;
     stream.avail_out = out.len;
     var res = c.lzma_stream_decoder(stream, out.len, 0);
-    decodeResult(res) catch |err| xzErrorToDecompError(err);
+    decodeResult(res) catch |err| {
+        self.err = err;
+        xzErrorToDecompError(err);
+    };
     while (true) {
         res = c.lzma_code(&stream, c.LZMA_RUN);
         if (res == c.LZMA_OK) continue;
         if (res == c.LZMA_STREAM_END) break;
-        decodeResult(res) catch |err| xzErrorToDecompError(err);
+        decodeResult(res) catch |err| {
+            self.err = err;
+            xzErrorToDecompError(err);
+        };
     }
     return stream.total_out;
 }
-fn stateless(alloc: std.mem.Allocator, in: []u8, out: []u8) Decompressor.Error!usize {
+pub fn stateless(alloc: std.mem.Allocator, in: []u8, out: []u8) Decompressor.Error!usize {
     var stream: c.lzma_stream = .{
         .next_in = in.ptr,
         .avail_in = in.len,

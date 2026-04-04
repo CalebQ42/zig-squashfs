@@ -20,6 +20,13 @@ pub fn init(alloc: std.mem.Allocator) !Zlib {
         },
     };
 }
+pub fn deinit(self: *Zlib) void {
+    var values = self.streams.valueIterator();
+    while (values.next()) |val| {
+        _ = c.zng_deflateEnd(val);
+    }
+    self.streams.deinit();
+}
 
 fn getOrCreate(self: *Zlib) !*c.zng_stream {
     const res = try self.streams.getOrPut(std.Thread.getCurrentId());
@@ -32,7 +39,7 @@ fn getOrCreate(self: *Zlib) !*c.zng_stream {
     return res.value_ptr;
 }
 
-fn decompress(decomp: *Decompressor, in: []u8, out: []u8) Decompressor.Error!usize {
+fn decompress(decomp: *const Decompressor, in: []u8, out: []u8) Decompressor.Error!usize {
     var self: *Zlib = @fieldParentPtr("interface", decomp);
 
     var stream = try self.getOrCreate();
@@ -55,7 +62,7 @@ fn decompress(decomp: *Decompressor, in: []u8, out: []u8) Decompressor.Error!usi
     };
 }
 
-fn stateless(alloc: std.mem.Allocator, in: []u8, out: []u8) Decompressor.Error!usize {
+pub fn stateless(alloc: std.mem.Allocator, in: []u8, out: []u8) Decompressor.Error!usize {
     _ = alloc;
     var out_len = out.len;
     const res = c.zng_uncompress(out.ptr, &out_len, in.ptr, in.len);

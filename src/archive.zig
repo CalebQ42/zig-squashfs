@@ -1,10 +1,14 @@
 const std = @import("std");
 
+const DecompTypes = @import("decomp/types.zig");
+const Decompressor = @import("decomp.zig");
 const Inode = @import("inode.zig");
 
 const Archive = @This();
 
 super: Superblock,
+
+stateless_decomp: Decompressor.StatelessDecomp,
 
 pub fn init(fil: std.fs.File, offset: u64) !Archive {
     var super: Superblock = undefined;
@@ -16,6 +20,7 @@ pub fn init(fil: std.fs.File, offset: u64) !Archive {
 
     return .{
         .super = super,
+        .stateless_decomp = DecompTypes.getStatelessFn(super.compression),
     };
 }
 
@@ -36,14 +41,7 @@ pub const Superblock = packed struct {
     mod_time: u32,
     block_size: u32,
     frag_count: u32,
-    compression: enum(u16) {
-        gzip = 1, // Though officially named gzip, it actually uses zlib.
-        lzma,
-        lzo,
-        xz,
-        lz4,
-        zstd,
-    },
+    compression: DecompTypes.Enum,
     block_log: u16,
     flags: packed struct {
         inode_uncompressed: bool,

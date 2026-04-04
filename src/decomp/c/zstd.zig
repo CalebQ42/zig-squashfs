@@ -20,6 +20,13 @@ pub fn init(alloc: std.mem.Allocator) !Zstd {
         },
     };
 }
+pub fn deinit(self: *Zstd) void {
+    var values = self.context.valueIterator();
+    while (values.next()) |val| {
+        _ = c.ZSTD_freeDCtx(val.*);
+    }
+    self.context.deinit();
+}
 
 fn getOrCreate(self: *Zstd) !*c.ZSTD_DCtx {
     const res = try self.context.getOrPut(std.Thread.getCurrentId());
@@ -29,7 +36,7 @@ fn getOrCreate(self: *Zstd) !*c.ZSTD_DCtx {
     return res.value_ptr;
 }
 
-fn decompress(decomp: *Decompressor, in: []u8, out: []u8) Decompressor.Error!usize {
+fn decompress(decomp: *const Decompressor, in: []u8, out: []u8) Decompressor.Error!usize {
     var self: *Zstd = @fieldParentPtr("interface", decomp);
 
     const ctx = self.getOrCreate();
@@ -40,7 +47,7 @@ fn decompress(decomp: *Decompressor, in: []u8, out: []u8) Decompressor.Error!usi
     };
     return res;
 }
-fn stateless(alloc: std.mem.Allocator, in: []u8, out: []u8) Decompressor.Error!usize {
+pub fn stateless(alloc: std.mem.Allocator, in: []u8, out: []u8) Decompressor.Error!usize {
     _ = alloc;
     const res = c.ZSTD_decompress(out.ptr, out.len, in.ptr, in.len);
     decodeError(res) catch |err| return ZstdErrorToDecompError(err);
