@@ -13,7 +13,7 @@ const Header = packed struct {
 const MetadataReader = @This();
 
 rdr: *Reader,
-decomp: *Decompressor,
+decomp: *const Decompressor,
 
 read_buf: [8192]u8 = undefined,
 interface: Reader = .{
@@ -27,7 +27,7 @@ interface: Reader = .{
     },
 },
 
-pub fn init(rdr: *Reader, decomp: *Decompressor) MetadataReader {
+pub fn init(rdr: *Reader, decomp: *const Decompressor) MetadataReader {
     return .{ .rdr = rdr, .decomp = decomp };
 }
 fn advanceBuffer(self: *MetadataReader) Reader.Error!void {

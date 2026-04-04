@@ -2,8 +2,8 @@ const std = @import("std");
 
 const DecompTypes = @import("decomp/types.zig");
 const Decompressor = @import("decomp.zig");
-const Inode = @import("inode.zig");
 const ExtractionOptions = @import("options.zig");
+const Inode = @import("inode.zig");
 
 pub const Error = error{
     BadMagic,
@@ -33,7 +33,7 @@ pub fn init(fil: std.fs.File, offset: u64) !Archive {
     };
 }
 
-pub fn extract(self: Archive, alloc: std.mem.Allocator, path: []const u8, options: ExtractionOptions) !void{
+pub fn extract(self: Archive, alloc: std.mem.Allocator, path: []const u8, options: ExtractionOptions) !void {
     _ = self;
     _ = alloc;
     _ = path;
