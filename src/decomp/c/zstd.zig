@@ -57,7 +57,6 @@ pub fn stateless(alloc: std.mem.Allocator, in: []u8, out: []u8) Decompressor.Err
 inline fn decodeError(res: usize) Error!void {
     if (c.ZSTD_isError(res) == 0) return;
     return switch (c.ZSTD_getErrorCode(res)) {
-        c.ZSTD_error_GENERIC => Error.Generic,
         c.ZSTD_error_prefix_unknown => Error.PrefixUnknown,
         c.ZSTD_error_version_unsupported => Error.VersionUnsupported,
         c.ZSTD_error_frameParameter_unsupported => Error.FrameParameterUnsupported,
@@ -91,11 +90,12 @@ inline fn decodeError(res: usize) Error!void {
         c.ZSTD_error_srcBuffer_wrong => Error.SrcBufferWrong,
         c.ZSTD_error_sequenceProducer_failed => Error.SequenceProducerFailed,
         c.ZSTD_error_externalSequences_invalid => Error.ExternalSequencesInvalid,
+        else => Error.Generic,
     };
 }
 inline fn ZstdErrorToDecompError(err: Error) Decompressor.Error {
     return switch (err) {
-        Error.OutOfMemory => err,
+        Error.OutOfMemory => Decompressor.Error.OutOfMemory,
         Error.Generic => Decompressor.Error.ReadFailed,
         Error.PrefixUnknown => Decompressor.Error.ReadFailed,
         Error.VersionUnsupported => Decompressor.Error.ReadFailed,

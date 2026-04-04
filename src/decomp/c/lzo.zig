@@ -3,7 +3,7 @@ const std = @import("std");
 const c = @import("../../c_libs.zig").c;
 const Decompressor = @import("../../decomp.zig");
 
-interface: Decompressor = .{ .vtable = .{ .stateless = stateless } },
+interface: Decompressor = .{ .vtable = &.{ .stateless = stateless } },
 
 pub fn stateless(_: std.mem.Allocator, in: []u8, out: []u8) Decompressor.Error!usize {
     var out_len = out.len;

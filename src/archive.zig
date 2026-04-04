@@ -3,13 +3,22 @@ const std = @import("std");
 const DecompTypes = @import("decomp/types.zig");
 const Decompressor = @import("decomp.zig");
 const Inode = @import("inode.zig");
+const ExtractionOptions = @import("options.zig");
+
+pub const Error = error{
+    BadMagic,
+    BadBlockLog,
+    BadVersion,
+    BadCheck,
+};
 
 const Archive = @This();
 
 super: Superblock,
 
-stateless_decomp: Decompressor.StatelessDecomp,
+stateless_decomp: Decompressor,
 
+/// Create an Archive from a File.
 pub fn init(fil: std.fs.File, offset: u64) !Archive {
     var super: Superblock = undefined;
     var fil_rdr = fil.reader(&[0]u8{});
@@ -20,16 +29,17 @@ pub fn init(fil: std.fs.File, offset: u64) !Archive {
 
     return .{
         .super = super,
-        .stateless_decomp = DecompTypes.getStatelessFn(super.compression),
+        .stateless_decomp = .{ .vtable = &.{ .stateless = try DecompTypes.getStatelessFn(super.compression) } },
     };
 }
 
-pub const Error = error{
-    BadMagic,
-    BadBlockLog,
-    BadVersion,
-    BadCheck,
-};
+pub fn extract(self: Archive, alloc: std.mem.Allocator, path: []const u8, options: ExtractionOptions) !void{
+    _ = self;
+    _ = alloc;
+    _ = path;
+    _ = options;
+    return error.TODO;
+}
 
 // Superblock
 

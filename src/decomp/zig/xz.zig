@@ -4,7 +4,7 @@ const Reader = std.Io.Reader;
 
 const Decompressor = @import("../../decomp.zig");
 
-interface: Decompressor = .{ .vtable = .{ .stateless = stateless } },
+interface: Decompressor = .{ .vtable = &.{ .stateless = stateless } },
 
 pub fn stateless(alloc: std.mem.Allocator, in: []u8, out: []u8) Decompressor.Error!usize {
     var rdr: Reader = .static(in);

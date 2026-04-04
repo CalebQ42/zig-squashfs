@@ -23,12 +23,12 @@ pub fn init(alloc: std.mem.Allocator) !Xz {
 pub fn deinit(self: *Xz) void {
     var values = self.streams.valueIterator();
     while (values.next()) |val| {
-        c.lzma_end(val);
+        c.xz_end(val);
     }
     self.streams.deinit();
 }
 
-fn getOrCreate(self: *Xz) !*c.lzma_stream {
+fn getOrCreate(self: *Xz) !*c.xz_stream {
     const res = try self.streams.getOrPut(std.Thread.getCurrentId());
     if (res.found_existing) return res.value_ptr;
     res.value_ptr.* = .{
@@ -49,10 +49,10 @@ fn decompress(decomp: *const Decompressor, in: []u8, out: []u8) Decompressor.Err
     stream.avail_in = in.len;
     stream.next_out = out.ptr;
     stream.avail_out = out.len;
-    var res = c.lzma_stream_decoder(stream, out.len, 0);
+    var res = c.lzma_alone_decoder(stream, out.len);
     decodeResult(res) catch |err| {
         self.err = err;
-        xzErrorToDecompError(err);
+        return xzErrorToDecompError(err);
     };
     while (true) {
         res = c.lzma_code(&stream, c.LZMA_RUN);
@@ -60,7 +60,7 @@ fn decompress(decomp: *const Decompressor, in: []u8, out: []u8) Decompressor.Err
         if (res == c.LZMA_STREAM_END) break;
         decodeResult(res) catch |err| {
             self.err = err;
-            xzErrorToDecompError(err);
+            return xzErrorToDecompError(err);
         };
     }
     return stream.total_out;
@@ -71,19 +71,19 @@ pub fn stateless(alloc: std.mem.Allocator, in: []u8, out: []u8) Decompressor.Err
         .avail_in = in.len,
         .next_out = out.ptr,
         .avail_out = out.len,
-        .allocator = .{
+        .allocator = &.{
             .alloc = lzmaAlloc,
             .free = lzmaFree,
-            .@"opaque" = &alloc,
+            .@"opaque" = @ptrCast(@constCast(&alloc)),
         },
     };
-    var res = c.lzma_stream_decoder(&stream, out.len, 0);
-    decodeResult(res) catch |err| xzErrorToDecompError(err);
+    var res = c.lzma_alone_decoder(&stream, out.len);
+    decodeResult(res) catch |err| return xzErrorToDecompError(err);
     while (true) {
         res = c.lzma_code(&stream, c.LZMA_RUN);
         if (res == c.LZMA_OK) continue;
         if (res == c.LZMA_STREAM_END) break;
-        decodeResult(res) catch |err| xzErrorToDecompError(err);
+        decodeResult(res) catch |err| return xzErrorToDecompError(err);
     }
     return stream.total_out;
 }
@@ -107,7 +107,7 @@ inline fn decodeResult(res: c_uint) Error!void {
 }
 fn xzErrorToDecompError(err: Error) Decompressor.Error {
     switch (err) {
-        Error.OutOfMemory => return err,
+        Error.OutOfMemory => return Decompressor.Error.OutOfMemory,
         Error.UnsupportedCheck => return Decompressor.Error.ReadFailed,
         Error.Format => return Decompressor.Error.ReadFailed,
         Error.Options => return Decompressor.Error.ReadFailed,
@@ -120,12 +120,12 @@ fn xzErrorToDecompError(err: Error) Decompressor.Error {
 }
 
 fn lzmaAlloc(ptr: ?*anyopaque, _: usize, size: usize) callconv(.c) ?*anyopaque {
-    var alloc: *std.mem.Allocator = @ptrCast(ptr);
-    return alloc.rawAlloc(size, .@"1", 0) catch return null;
+    var alloc: *std.mem.Allocator = @alignCast(@ptrCast(ptr));
+    return alloc.rawAlloc(size, .@"1", 0);
 }
 fn lzmaFree(ptr: ?*anyopaque, alloc_ptr: ?*anyopaque) callconv(.c) void {
     if (alloc_ptr == null) return;
-    var alloc: *std.mem.Allocator = @ptrCast(ptr);
+    var alloc: *std.mem.Allocator = @alignCast(@ptrCast(ptr));
     alloc.rawFree(@ptrCast(alloc_ptr), .@"1", 0);
 }
 

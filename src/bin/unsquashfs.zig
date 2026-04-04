@@ -51,18 +51,17 @@ pub fn main() !void {
     }
     var fil: std.fs.File = try std.fs.cwd().openFile(archive, .{}); //TODO: Handle error gracefully.
     defer fil.close();
-    // var arc: squashfs.Archive = try .init(fil, offset); //TODO: Update when memory size matters. //TODO: Handle error gracefully.
-    // defer arc.deinit();
-    // const options: squashfs.ExtractionOptions = .{
-    //     .threads = if (threads == 0) try std.Thread.getCpuCount() else threads,
-    //     .verbose = verbose,
-    //     .verbose_writer = if (verbose) &out.interface else null,
-    //     .ignore_xattr = ignore_xattrs,
-    //     .ignore_permissions = ignore_permissions,
-    // };
-    // if (force)
-    //     try std.fs.cwd().deleteTree(extLoc);
-    // try arc.extract(alloc, extLoc, options); //TODO: Handle error gracefully.
+    var arc: squashfs.Archive = try .init(fil, offset); //TODO: Handle error gracefully.
+    const options: squashfs.ExtractionOptions = .{
+        .threads = if (threads == 0) try std.Thread.getCpuCount() else threads,
+        .verbose = verbose,
+        .verbose_writer = if (verbose) &out.interface else null,
+        .ignore_xattr = ignore_xattrs,
+        .ignore_permissions = ignore_permissions,
+    };
+    if (force)
+        try std.fs.cwd().deleteTree(extLoc);
+    try arc.extract(alloc, extLoc, options); //TODO: Handle error gracefully.
 }
 
 fn handleArgs(alloc: std.mem.Allocator, out: *Writer) !void {
