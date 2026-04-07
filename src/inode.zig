@@ -1,10 +1,19 @@
+//! This is the raw squashfs representation of a file/directory.
+//! Most of the time using File is a better experience and using Inodes directory
+//! is only required for more technical use cases.
+
 const std = @import("std");
 const Reader = std.Io.Reader;
 
+const Decompressor = @import("decomp.zig");
+const Directory = @import("directory.zig");
 const Dir = @import("inode/dir.zig");
 const File = @import("inode/file.zig");
 const Misc = @import("inode/misc.zig");
 const Sym = @import("inode/sym.zig");
+const MinimalSuperblock = @import("archive.zig").MinimalSuperblock;
+const MetadataReader = @import("util/metadata.zig");
+const OffsetFile = @import("util/offset_file.zig");
 
 const Inode = @This();
 
@@ -41,6 +50,75 @@ pub fn deinit(self: Inode, alloc: std.mem.Allocator) void {
         .symlink => |s| alloc.free(s.target),
         .ext_symlink => |s| alloc.free(s.target),
         else => {},
+    }
+}
+pub fn copy(self: Inode, alloc: std.mem.Allocator) !Inode {
+    switch (self.data) {
+        .dir,
+        .ext_dir,
+        .block,
+        .ext_block,
+        .char,
+        .ext_char,
+        .fifo,
+        .ext_fifo,
+        .sock,
+        .ext_sock,
+        => return self,
+        .file => |f| {
+            const new_sizes = try alloc.alloc(File.BlockSize, f.block_sizes.len);
+            @memcpy(new_sizes, f.block_sizes);
+            return .{
+                .hdr = self.hdr,
+                .data = .{ .file = .{
+                    .block_start = f.block_start,
+                    .frag_idx = f.frag_idx,
+                    .block_offset = f.block_offset,
+                    .size = f.size,
+                    .block_sizes = new_sizes,
+                } },
+            };
+        },
+        .ext_file => |f| {
+            const new_sizes = try alloc.alloc(File.BlockSize, f.block_sizes.len);
+            @memcpy(new_sizes, f.block_sizes);
+            return .{
+                .hdr = self.hdr,
+                .data = .{ .ext_file = .{
+                    .block_start = self.block_start,
+                    .size = self.size,
+                    .sparse = self.sparse,
+                    .hard_links = self.hard_links,
+                    .frag_idx = self.frag_idx,
+                    .block_offset = self.block_offset,
+                    .xattr_idx = self.xattr_idx,
+                    .block_sizes = new_sizes,
+                } },
+            };
+        },
+        .symlink => |s| {
+            const new_target = try alloc.alloc(u8, s.target.len);
+            @memcpy(new_target, s.target);
+            return .{
+                .hdr = self.hdr,
+                .data = .{ .symlink = .{
+                    .hard_links = s.hard_links,
+                    .target = new_target,
+                } },
+            };
+        },
+        .ext_symlink => |s| {
+            const new_target = try alloc.alloc(u8, s.target.len);
+            @memcpy(new_target, s.target);
+            return .{
+                .hdr = self.hdr,
+                .data = .{ .ext_symlink = .{
+                    .hard_links = s.hard_links,
+                    .xattr_idx = s.xattr_idx,
+                    .target = new_target,
+                } },
+            };
+        },
     }
 }
 
@@ -94,3 +172,123 @@ pub const Data = union(Type) {
     ext_fifo: Misc.ExtIpc,
     ext_sock: Misc.ExtIpc,
 };
+
+// Errors
+
+pub const Error = error{
+    NotDirectory,
+    NotFound,
+    NotRegularFile,
+};
+
+// Utils functions
+
+/// For directory inodes, tries to find the inode at the given path. Returns both the inode, and it's file name. If the path is empty or "." then a copy of this inode is returned with no name ("").
+pub fn findInode(
+    inode: Inode,
+    alloc: std.mem.Allocator,
+    decomp: *const Decompressor,
+    fil: OffsetFile,
+    dir_start: u64,
+    inode_start: u64,
+    block_size: u32,
+    filepath: []const u8,
+) !struct { inode: Inode, name: []const u8 } {
+    switch (inode.data) {
+        .dir => |d| {
+            const path: []const u8 = std.mem.trim(u8, filepath, "/");
+            if (path.len == 0 or (path.len == 1 and path[0] == '.'))
+                return .{ .inode = inode.copy(alloc), .name = "" };
+            return findInodeRaw(
+                alloc,
+                decomp,
+                fil,
+                dir_start,
+                inode_start,
+                block_size,
+                path,
+                d,
+            );
+        },
+        .ext_dir => |d| {
+            const path: []const u8 = std.mem.trim(u8, filepath, "/");
+            if (path.len == 0 or (path.len == 1 and path[0] == '.'))
+                return .{ .inode = inode.copy(alloc), .name = "" };
+            return findInodeRaw(
+                alloc,
+                decomp,
+                fil,
+                dir_start,
+                inode_start,
+                block_size,
+                path,
+                d,
+            );
+        },
+        else => return Error.NotDirectory,
+    }
+}
+inline fn findInodeRaw(
+    inode: Inode,
+    alloc: std.mem.Allocator,
+    decomp: *const Decompressor,
+    fil: OffsetFile,
+    dir_start: u64,
+    inode_start: u64,
+    block_size: u32,
+    path: []const u8,
+    dat: anytype,
+) !struct { inode: Inode, name: []const u8 } {
+    const first_element: []const u8 = std.mem.sliceTo(path, '/');
+
+    const dirs = try readDirRaw(alloc, decomp, fil, dir_start, dat);
+    defer {
+        for (dirs) |dir|
+            dir.deinit(alloc);
+        alloc.free(dirs);
+    }
+
+    // Directories are stored ASCIIbetically, so we can use binary search.
+    var cur_slice = dirs;
+    var idx: usize = 0;
+    while (cur_slice.len > 0) {
+        idx = cur_slice.len / 2;
+        const mid_name = cur_slice[idx].name;
+        switch (std.mem.order(u8, first_element, mid_name)) {
+            .gt => {
+                cur_slice = cur_slice[idx + 1 ..];
+                continue;
+            },
+            .lt => {
+                cur_slice = cur_slice[0..idx];
+                continue;
+            },
+            .eq => break,
+        }
+    } else return Error.NotFound;
+    const entry = cur_slice[idx];
+    var rdr = try fil.readerAt(inode_start + entry.block_start, &[0]u8{});
+    var meta_rdr: MetadataReader = .init(&rdr.interface, decomp);
+    try meta_rdr.interface.discardAll(entry.block_offset);
+    const ret_inode: Inode = try .read(alloc, &meta_rdr.interface, block_size);
+    if (first_element.len == path.len) {
+        const name_copy = try alloc.alloc(u8, entry.name.len);
+        @memcpy(name_copy, entry.name.len);
+        return .{ .inode = ret_inode, .name = name_copy };
+    }
+    return inode.findInode(alloc, decomp, fil, dir_start, inode_start, block_size, path[first_element.len..]);
+}
+
+pub fn readDirectory(inode: Inode, alloc: std.mem.Allocator, decomp: *const Decompressor, fil: OffsetFile, dir_start: u64) ![]Directory.Entry {
+    return switch (inode.data) {
+        .dir => |d| readDirRaw(alloc, decomp, fil, dir_start, d),
+        .ext_dir => |d| readDirRaw(alloc, decomp, fil, dir_start, d),
+        else => Error.NotDirectory,
+    };
+}
+inline fn readDirRaw(alloc: std.mem.Allocator, decomp: *const Decompressor, fil: OffsetFile, dir_start: u64, dat: anytype) ![]Directory.Entry {
+    var rdr = try fil.readerAt(dir_start + dat.block_start, &[0]u8{});
+    var meta_rdr: MetadataReader = .init(&rdr.interface, decomp);
+    try meta_rdr.interface.discardAll(dat.block_offset);
+    return Directory.readDirectory(alloc, meta_rdr, dat.size);
+}

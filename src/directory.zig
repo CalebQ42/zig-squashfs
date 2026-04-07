@@ -42,6 +42,10 @@ pub const Entry = struct {
     num: u32,
     inode_type: InodeType,
     name: []u8,
+
+    pub fn deinit(self: Entry, alloc: std.mem.Allocator) void {
+        alloc.free(self.name);
+    }
 };
 
 // extern instead of packed due to alignment issues (packed will read it as 16 bytes instead of 12).

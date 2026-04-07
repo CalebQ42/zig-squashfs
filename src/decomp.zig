@@ -17,6 +17,11 @@ vtable: *const struct {
     stateless: StatelessDecomp,
 },
 
+/// Create a copy of the decompressor using it's stateless function and the new allocator.
+pub fn statelessCopy(self: Decompressor, alloc: std.mem.Allocator) Decompressor {
+    return &.{ .alloc = alloc, .vtable = &.{ .stateless = self.vtable.stateless } };
+}
+
 pub fn decompress(self: *const Decompressor, in: []u8, out: []u8) Error!usize {
     return self.vtable.decompress(self, in, out);
 }

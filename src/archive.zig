@@ -42,25 +42,20 @@ pub fn init(fil: std.fs.File, offset: u64) !Archive {
     };
 }
 
-pub fn extract(self: Archive, alloc: std.mem.Allocator, path: []const u8, options: ExtractionOptions) !void {
-    _ = self;
-    _ = alloc;
-    _ = path;
-    _ = options;
-    return error.TODO;
-}
-
 pub fn root(self: Archive, alloc: std.mem.Allocator) !File {
     return .{
-        .alloc = alloc,
+        .file = self.file,
+        .super = self.super.toMinimal(),
+        .decomp = self.stateless_decomp.statelessCopy(alloc),
 
-        .inode = try Utils.refToInode(
+        .inode = try Utils.readInode(
             alloc,
             &self.stateless_decomp,
             self.file,
             self.super.inode_start,
             self.super.block_size,
-            self.super.root_ref,
+            self.super.root_ref.block_start,
+            self.super.root_ref.block_offset,
         ),
         .name = "",
     };
@@ -80,7 +75,23 @@ pub fn id(self: Archive, idx: u32) !u16 {
 }
 pub fn inode(self: Archive, alloc: std.mem.Allocator, inode_num: u32) !Inode {
     const ref = try LookupTable.stateless(Inode.Ref, self.file, &self.stateless_decomp, self.super.export_start, inode_num - 1);
-    return Utils.refToInode(alloc, &self.stateless_decomp, self.file, self.super.inode_start, self.super.block_size, ref);
+    return Utils.readInode(
+        alloc,
+        &self.stateless_decomp,
+        self.file,
+        self.super.inode_start,
+        self.super.block_size,
+        ref.block_start,
+        ref.block_offset,
+    );
+}
+
+pub fn extract(self: Archive, alloc: std.mem.Allocator, path: []const u8, options: ExtractionOptions) !void {
+    _ = self;
+    _ = alloc;
+    _ = path;
+    _ = options;
+    return error.TODO;
 }
 
 // Superblock

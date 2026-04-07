@@ -108,6 +108,6 @@ pub fn build(b: *std.Build) !void {
         .root_module = exe_mod,
     });
     const check = b.step("check", "Check if unsquashfs compiles");
-    check.dependOn(&lib_check.step);
     check.dependOn(&exe_check.step);
+    check.dependOn(&lib_check.step);
 }

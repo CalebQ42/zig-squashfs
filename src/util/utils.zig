@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const Decompressor = @import("../decomp.zig");
+const DirEntry = @import("../directory.zig").Entry;
 const Inode = @import("../inode.zig");
 const MetadataReader = @import("metadata.zig");
 const OffsetFile = @import("offset_file.zig");
@@ -16,9 +17,9 @@ pub fn pathIsSelf(path: []const u8) bool {
     return std.mem.eql(u8, path, "./");
 }
 
-pub fn refToInode(alloc: std.mem.Allocator, decomp: *const Decompressor, fil: OffsetFile, inode_start: u64, block_size: u32, ref: Inode.Ref) !Inode {
-    var rdr = try fil.readerAt(inode_start + ref.block_start, &[0]u8{});
+pub fn readInode(alloc: std.mem.Allocator, decomp: *const Decompressor, fil: OffsetFile, inode_start: u64, block_size: u32, block_start: u32, block_offset: u16) !Inode {
+    var rdr = try fil.readerAt(inode_start + block_start, &[0]u8{});
     var meta: MetadataReader = .init(&rdr.interface, decomp);
-    try meta.interface.discardAll(ref.block_offset);
+    try meta.interface.discardAll(block_offset);
     return .read(alloc, &meta.interface, block_size);
 }
