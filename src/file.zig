@@ -32,10 +32,7 @@ pub fn init(alloc: std.mem.Allocator, archive: Archive, entry: Directory.Entry) 
     return .{
         .file = archive.file,
         .super = archive.super,
-        .decomp = .{
-            .alloc = alloc,
-            .vtable = &.{ .stateless = archive.stateless_decomp.vtable.stateless },
-        },
+        .decomp = archive.stateless_decomp.statelessCopy(alloc),
         .name = new_name,
         .inode = try Utils.readInode(
             alloc,
@@ -63,34 +60,26 @@ pub fn isDir(self: File) bool {
 }
 /// Opens a sub-file. If the given path is "" or "." (after trimming /) a copy of the File is returned.
 pub fn open(self: File, alloc: std.mem.Allocator, filepath: []const u8) !File {
-    switch (self.inode.hdr.inode_type) {
-        .dir, .ext_dir => {
-            var res = try self.inode.findInode(
-                alloc,
-                &self.decomp,
-                self.file,
-                self.super.dir_start,
-                self.super.inode_start,
-                self.super.block_size,
-                filepath,
-            );
-            if (res.name.len == 0) {
-                res.name = try alloc.alloc(u8, self.name.len);
-                @memcpy(res.name, self.name);
-            }
-            return .{
-                .file = self.file,
-                .super = self.super,
-                .decomp = .{
-                    .alloc = alloc,
-                    .vtable = &.{ .stateless = self.decomp.vtable.stateless },
-                },
-                .name = res.name,
-                .inode = res.inode,
-            };
-        },
-        else => Error.NotDirectory,
+    var res = try self.inode.findInode(
+        alloc,
+        &self.decomp,
+        self.file,
+        self.super.dir_start,
+        self.super.inode_start,
+        self.super.block_size,
+        filepath,
+    );
+    if (res.name.len == 0) {
+        res.name = try alloc.alloc(u8, self.name.len);
+        @memcpy(res.name, self.name);
     }
+    return .{
+        .file = self.file,
+        .super = self.super,
+        .decomp = self.decomp.statelessCopy(alloc),
+        .name = res.name,
+        .inode = res.inode,
+    };
 }
 pub fn iter(self: File, alloc: std.mem.Allocator) !FileIter {
     return .{
@@ -107,10 +96,14 @@ pub fn isRegularFile(self: File) bool {
         else => false,
     };
 }
+// a std.Io.Reader compatible reader that reads a regular file's data.
 pub fn dataReader(self: File, alloc: std.mem.Allocator) !DataReader {
-    if (!self.isRegularFile()) return Error.NotRegularFile;
-    _ = alloc;
-    return error.TODO;
+    return self.inode.dataReader(
+        &self.decomp.statelessCopy(alloc),
+        self.file,
+        self.super.frag_start,
+        self.super.block_size,
+    );
 }
 
 // Universal functions

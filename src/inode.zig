@@ -7,11 +7,14 @@ const Reader = std.Io.Reader;
 
 const Decompressor = @import("decomp.zig");
 const Directory = @import("directory.zig");
+const FragEntry = @import("archive.zig").FragEntry;
 const Dir = @import("inode/dir.zig");
 const File = @import("inode/file.zig");
 const Misc = @import("inode/misc.zig");
 const Sym = @import("inode/sym.zig");
+const LookupTable = @import("lookup_table.zig");
 const MinimalSuperblock = @import("archive.zig").MinimalSuperblock;
+const DataReader = @import("util/data_reader.zig");
 const MetadataReader = @import("util/metadata.zig");
 const OffsetFile = @import("util/offset_file.zig");
 
@@ -183,7 +186,19 @@ pub const Error = error{
 
 // Utils functions
 
-/// For directory inodes, tries to find the inode at the given path. Returns both the inode, and it's file name. If the path is empty or "." then a copy of this inode is returned with no name ("").
+// Universal
+
+pub fn uid(self: Inode, decomp: *const Decompressor, fil: OffsetFile, id_start: u64) !u16 {
+    return LookupTable.stateless(u16, fil, decomp, id_start, self.hdr.uid_idx);
+}
+pub fn gid(self: Inode, decomp: *const Decompressor, fil: OffsetFile, id_start: u64) !u16 {
+    return LookupTable.stateless(u16, fil, decomp, id_start, self.hdr.gid_idx);
+}
+
+// Dir inodes
+
+/// For directory inodes, tries to find the inode at the given path. Returns both the inode, and it's file name.
+/// If the path is empty or "." then a copy of this inode is returned with no name ("").
 pub fn findInode(
     inode: Inode,
     alloc: std.mem.Allocator,
@@ -279,6 +294,7 @@ inline fn findInodeRaw(
     return inode.findInode(alloc, decomp, fil, dir_start, inode_start, block_size, path[first_element.len..]);
 }
 
+/// Get the directory entries for a directory inode.
 pub fn readDirectory(inode: Inode, alloc: std.mem.Allocator, decomp: *const Decompressor, fil: OffsetFile, dir_start: u64) ![]Directory.Entry {
     return switch (inode.data) {
         .dir => |d| readDirRaw(alloc, decomp, fil, dir_start, d),
@@ -291,4 +307,30 @@ inline fn readDirRaw(alloc: std.mem.Allocator, decomp: *const Decompressor, fil:
     var meta_rdr: MetadataReader = .init(&rdr.interface, decomp);
     try meta_rdr.interface.discardAll(dat.block_offset);
     return Directory.readDirectory(alloc, meta_rdr, dat.size);
+}
+
+// file inodes
+
+/// Gets the data reader for a file inode.
+pub fn dataReader(inode: Inode, decomp: *const Decompressor, fil: OffsetFile, frag_start: u64, block_size: u32) !DataReader {
+    return switch (inode.data) {
+        .file => |f| dataReaderRaw(decomp, fil, frag_start, block_size, f),
+        .ext_file => |f| dataReaderRaw(decomp, fil, frag_start, block_size, f),
+        else => Error.NotRegularFile,
+    };
+}
+inline fn dataReaderRaw(decomp: *const Decompressor, fil: OffsetFile, frag_start: u64, block_size: u32, dat: anytype) !DataReader {
+    return .init(
+        decomp,
+        fil,
+        block_size,
+        dat.block_sizes,
+        dat.size,
+        dat.block_start,
+        if (dat.frag_idx != 0xFFFFFFFF)
+            try LookupTable.stateless(FragEntry, fil, decomp, frag_start, dat.frag_idx)
+        else
+            null,
+        dat.frag_offset,
+    );
 }

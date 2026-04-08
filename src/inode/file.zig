@@ -9,7 +9,7 @@ pub const BlockSize = packed struct {
 pub const File = struct {
     block_start: u32,
     frag_idx: u32,
-    block_offset: u32,
+    frag_offset: u32,
     size: u32,
     block_sizes: []BlockSize,
 
@@ -27,7 +27,7 @@ pub const File = struct {
         return .{
             .block_start = std.mem.readVarInt(u32, buf[0..4], .little),
             .frag_idx = frag_idx,
-            .block_offset = std.mem.readVarInt(u32, buf[8..12], .little),
+            .frag_offset = std.mem.readVarInt(u32, buf[8..12], .little),
             .size = size,
             .block_sizes = sizes,
         };
@@ -40,7 +40,7 @@ pub const ExtFile = struct {
     sparse: u64,
     hard_links: u32,
     frag_idx: u32,
-    block_offset: u32,
+    frag_offset: u32,
     xattr_idx: u32,
     block_sizes: []BlockSize,
 
@@ -61,7 +61,7 @@ pub const ExtFile = struct {
             .sparse = std.mem.readVarInt(u64, buf[16..24], .little),
             .hard_links = std.mem.readVarInt(u32, buf[24..28], .little),
             .frag_idx = frag_idx,
-            .block_offset = std.mem.readVarInt(u32, buf[32..36], .little),
+            .frag_offset = std.mem.readVarInt(u32, buf[32..36], .little),
             .xattr_idx = std.mem.readVarInt(u32, buf[36..40], .little),
             .block_sizes = sizes,
         };
