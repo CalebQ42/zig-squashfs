@@ -191,8 +191,27 @@ pub const Error = error{
 pub fn uid(self: Inode, decomp: *const Decompressor, fil: OffsetFile, id_start: u64) !u16 {
     return LookupTable.stateless(u16, fil, decomp, id_start, self.hdr.uid_idx);
 }
+pub fn uidCached(self: Inode, table: LookupTable.CachedTable(u16)) !u16 {
+    return table.get(self.hdr.uid_idx);
+}
 pub fn gid(self: Inode, decomp: *const Decompressor, fil: OffsetFile, id_start: u64) !u16 {
     return LookupTable.stateless(u16, fil, decomp, id_start, self.hdr.gid_idx);
+}
+pub fn gidCached(self: Inode, table: LookupTable.CachedTable(u16)) !u16 {
+    return table.get(self.hdr.gid_idx);
+}
+pub fn xattr(self: Inode, alloc: std.mem.Allocator, decomp: *const Decompressor, fil: OffsetFile, xattr_start: u64) !?LookupTable.XattrValues {
+    if (@intFromEnum(self.hdr.inode_type) < 8) return null;
+    const idx: u32 = switch (self.data) {
+        .ext_dir => |d| d.xattr_idx,
+        .ext_file => |f| f.xattr_idx,
+        .ext_symlink => |s| s.xattr_idx,
+        .ext_block, .ext_char => |d| d.xattr_idx,
+        .ext_fifo, .ext_sock => |d| d.xattr_idx,
+        else => unreachable,
+    };
+    if (idx == 0xFFFFFFFF) return null;
+    return LookupTable.statelessXattr(alloc, fil, decomp, xattr_start, idx);
 }
 
 // Dir inodes
