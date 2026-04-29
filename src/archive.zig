@@ -1,105 +1,88 @@
-//! A squashfs archive read from a file.
-//! Can be used to directly access File's contents or extract to the filesystem.
-
 const std = @import("std");
-const File = std.fs.File;
-const builtin = @import("builtin");
+const Io = std.Io;
 
-const config = @import("config");
-
-const cDecomp = @import("decomp/misc_c.zig");
-const Decomp = @import("decomp/zig_decomp.zig");
-const ExtractionOptions = @import("options.zig");
 const Inode = @import("inode.zig");
-const InodeRef = Inode.Ref;
-const BlockSize = @import("inode_data/file.zig").BlockSize;
-const SfsFile = @import("file.zig");
-const Superblock = @import("super.zig").Superblock;
-const Tables = @import("tables.zig");
-const MetadataReader = @import("util/metadata.zig");
 const OffsetFile = @import("util/offset_file.zig");
-const XattrTable = @import("xattr.zig");
 
 const Archive = @This();
 
-alloc: std.mem.Allocator,
-
-fil: OffsetFile,
-
+file: OffsetFile,
 super: Superblock,
 
-tables: ?Tables = null,
-
-decomp: @import("decomp/types.zig").Decomp,
-
-/// Default settings using std.Thread.getCpuCount() threads and the minimum of 4gb or half of system memory for memory usage.
-pub fn init(alloc: std.mem.Allocator, fil: File, offset: u64) !Archive {
+pub fn init(io: Io, file: std.Io.File, offset: u64) !Archive {
+    var rdr = file.reader(io, &[0]u8{});
+    try rdr.seekTo(offset);
     var super: Superblock = undefined;
-    const red = try fil.pread(@ptrCast(&super), offset);
-    std.debug.assert(red == @sizeOf(Superblock));
-    try super.validate();
-    const off_fil: OffsetFile = .init(fil, offset);
+    try rdr.interface.readSliceEndian(Superblock, @ptrCast(&super), .little);
     return .{
-        .alloc = alloc,
-        .fil = off_fil,
-        .decomp = if (config.use_zig_decomp)
-            switch (super.compression) {
-                .lz4 => return error.Lz4Unsupported,
-                .lzo => return error.LzoUnsupported,
-                .gzip => .{ .gzip = .{} },
-                .lzma => .{ .lzma = .{} },
-                .xz => .{ .xz = .{} },
-                .zstd => .{ .zstd = .{} },
-            }
-        else switch (super.compression) {
-            .gzip => .{ .gzip = .init(alloc) },
-            .zstd => .{ .zstd = .init(alloc) },
-            .xz => .{ .xz = .init(alloc) },
-            .lzma => .{ .lzma = .init(alloc) },
-            .lzo => .{ .lzo = .{} },
-            .lz4 => .{ .lz4 = .{} },
-        },
+        .file = .init(file, offset),
         .super = super,
     };
 }
-pub fn deinit(self: *Archive) void {
-    if (self.tables != null)
-        self.tables.?.deinit();
-    self.decomp.deinit();
-}
 
-pub fn inode(self: *Archive, alloc: std.mem.Allocator, num: u32) !Inode {
-    if (self.tables == null)
-        self.tables = try .init(alloc, self);
-    const ref = try self.export_table.get(num - 1);
-    var rdr = try self.fil.readerAt(ref.block_start + self.super.inode_start, &[0]u8{});
-    var meta: MetadataReader = .init(alloc, &rdr.interface, &self.decomp);
-    try meta.interface.discardAll(ref.block_offset);
-    return try .read(alloc, &meta.interface, self.super.block_size);
-}
+// Superblock
 
-pub fn root(self: *Archive, alloc: std.mem.Allocator) !SfsFile {
-    if (self.tables == null)
-        self.tables = try .init(alloc, self);
-    var rdr = try self.fil.readerAt(self.super.root_ref.block_start + self.super.inode_start, &[0]u8{});
-    var meta: MetadataReader = .init(alloc, &rdr.interface, self.decomp);
-    try meta.interface.discardAll(self.super.root_ref.block_offset);
-    const in: Inode = try .read(alloc, &meta.interface, self.super.block_size);
-    return .init(self, in, "");
-}
+const SQUASHFS_MAGIC: u32 = std.mem.readInt(u32, "hsqs", .little);
 
-pub fn open(self: *Archive, alloc: std.mem.Allocator, path: []const u8) !SfsFile {
-    if (self.tables == null)
-        self.tables = try .init(alloc, self);
-    var root_fil = try self.root(alloc);
-    defer if (!SfsFile.pathIsSelf(path)) root_fil.deinit();
-    return root_fil.open(path);
-}
+const SuperblockError = error{
+    InvalidMagic,
+    InvalidBlockLog,
+    InvalidVersion,
+    InvalidCheck,
+};
 
-pub fn extract(self: Archive, alloc: std.mem.Allocator, path: []const u8, options: ExtractionOptions) !void {
-    var rdr = try self.fil.readerAt(self.super.root_ref.block_start + self.super.inode_start, &[0]u8{});
-    var meta: MetadataReader = .init(self.alloc, &rdr.interface, self.decomp);
-    try meta.interface.discardAll(self.super.root_ref.block_offset);
-    const in: Inode = try .read(self.alloc, &meta.interface, self.super.block_size);
-    try in.extractTo(alloc, self, path, options);
-}
+/// A squashfs Superblock
+pub const Superblock = packed struct {
+    magic: u32,
+    inode_count: u32,
+    mod_time: u32,
+    block_size: u32,
+    frag_count: u32,
+    compression: enum(u16) {
+        gzip = 1,
+        lzma,
+        lzo,
+        xz,
+        lz4,
+        zstd,
+    },
+    block_log: u16,
+    flags: packed struct {
+        inode_uncompressed: bool,
+        data_uncompressed: bool,
+        check: bool,
+        frag_uncompressed: bool,
+        fragment_never: bool,
+        fragment_always: bool,
+        duplicates: bool,
+        exportable: bool,
+        xattr_uncompressed: bool,
+        xattr_never: bool,
+        compression_options: bool,
+        ids_uncompressed: bool,
+        _: u4,
+    },
+    id_count: u16,
+    ver_maj: u16,
+    ver_min: u16,
+    root_ref: Inode.Ref,
+    size: u64,
+    id_start: u64,
+    xattr_start: u64,
+    inode_start: u64,
+    dir_start: u64,
+    frag_start: u64,
+    export_start: u64,
+
+    /// Validate the Superblock. If an error is returned, it's likely the archive is corrupted or not a squashfs archive.
+    pub fn validate(self: Superblock) !void {
+        if (self.magic != SQUASHFS_MAGIC)
+            return SuperblockError.InvalidMagic;
+        if (self.flags.check)
+            return SuperblockError.InvalidCheck;
+        if (self.ver_maj != 4 or self.ver_min != 0)
+            return SuperblockError.InvalidVersion;
+        if (std.math.log2(self.block_size) != self.block_log)
+            return SuperblockError.InvalidBlockLog;
+    }
+};

@@ -1,5 +1,6 @@
 const std = @import("std");
-const Writer = std.Io.Writer;
+const Io = std.Io;
+const Writer = Io.Writer;
 const builtin = @import("builtin");
 
 const config = @import("config");
@@ -38,21 +39,21 @@ var ignore_xattrs: bool = false;
 var ignore_permissions: bool = false;
 var force: bool = false;
 
-pub fn main() !void {
-    const alloc = std.heap.smp_allocator;
-    var stdout = std.fs.File.stdout();
-    var out = stdout.writer(&[0]u8{});
+pub fn main(init: std.process.Init) !void {
+    const alloc = init.gpa;
+    const io = init.io;
+    var stdout = std.Io.File.stdout();
+    var out = stdout.writer(io, &[0]u8{});
     defer out.interface.flush() catch {};
-    try handleArgs(alloc, &out.interface);
+    try handleArgs(init.minimal.args, &out.interface);
     if (archive.len == 0) {
         try out.interface.print("You must provide a squashfs archive\n", .{});
         try out.interface.print(help_mgs, .{});
         return;
     }
-    var fil: std.fs.File = try std.fs.cwd().openFile(archive, .{}); //TODO: Handle error gracefully.
-    defer fil.close();
-    var arc: squashfs.Archive = try .init(alloc, fil, offset); //TODO: Update when memory size matters. //TODO: Handle error gracefully.
-    defer arc.deinit();
+    var fil = try Io.Dir.cwd().openFile(io, archive, .{}); //TODO: Handle error gracefully.
+    defer fil.close(io);
+    var arc: squashfs.Archive = try .init(io, fil, offset); //TODO: Update when memory size matters. //TODO: Handle error gracefully.
     const options: squashfs.ExtractionOptions = .{
         .threads = if (threads == 0) try std.Thread.getCpuCount() else threads,
         .verbose = verbose,
@@ -61,17 +62,17 @@ pub fn main() !void {
         .ignore_permissions = ignore_permissions,
     };
     if (force)
-        try std.fs.cwd().deleteTree(extLoc);
+        try Io.Dir.cwd().deleteTree(io, extLoc);
     try arc.extract(alloc, extLoc, options); //TODO: Handle error gracefully.
 }
 
-fn handleArgs(alloc: std.mem.Allocator, out: *Writer) !void {
-    var args = try std.process.argsWithAllocator(alloc);
-    defer args.deinit();
-    _ = args.next(); // args[0] is the application launch command.
-    while (args.next()) |arg| {
+fn handleArgs(args: std.process.Args, out: *Writer) !void {
+    var arg_iter = args.iterate();
+    defer arg_iter.deinit();
+    _ = arg_iter.next(); // args[0] is the application launch command.
+    while (arg_iter.next()) |arg| {
         if (std.mem.eql(u8, arg, "-o")) {
-            const nxt = args.next();
+            const nxt = arg_iter.next();
             if (nxt == null or nxt.?.len == 0) {
                 try out.print("-o must be followed by a number\n", .{});
                 return errors.InvalidArguments;
@@ -82,7 +83,7 @@ fn handleArgs(alloc: std.mem.Allocator, out: *Writer) !void {
             };
             continue;
         } else if (std.mem.eql(u8, arg, "-d")) {
-            const nxt = args.next();
+            const nxt = arg_iter.next();
             if (nxt == null or nxt.?.len == 0) {
                 try out.print("-d must be followed by a location\n", .{});
                 return errors.InvalidArguments;
@@ -90,7 +91,7 @@ fn handleArgs(alloc: std.mem.Allocator, out: *Writer) !void {
             extLoc = nxt.?;
             continue;
         } else if (std.mem.eql(u8, arg, "-p")) {
-            const nxt = args.next();
+            const nxt = arg_iter.next();
             if (nxt == null or nxt.?.len == 0) {
                 try out.print("-p must be followed by a number\n", .{});
                 return errors.InvalidArguments;
