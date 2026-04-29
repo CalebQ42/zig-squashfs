@@ -1,7 +1,7 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) !void {
-    const use_zig_decomp = b.option(bool, "use_zig_decomp", "Use zig standard library for decompression.") orelse false;
+    const use_zig_decomp = b.option(bool, "use_zig_decomp", "Use zig standard library for decompression.") orelse true;
     // const allow_lzo = b.option(bool, "allow_lzo", "Compile with lzo support") orelse false;
     const debug = b.option(bool, "debug", "Enable options to make debugging easier.") orelse false;
     const version_string_option = b.option([]const u8, "version", "Version of the library/binary");
@@ -16,13 +16,21 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = if (debug == true) .Debug else optimize,
-        .link_libc = !use_zig_decomp,
         .valgrind = debug,
         .error_tracing = debug,
         .strip = if (debug == true) false else null,
     });
     mod.addOptions("config", zig_squashfs_options);
     if (!use_zig_decomp) {
+        mod.link_libc = true;
+
+        const c_imports = b.addTranslateC(.{
+            .optimize = optimize,
+            .target = target,
+            .root_source_file = b.path("src/imports.c"),
+        });
+        mod.addImport("c", c_imports.createModule());
+
         var zlib_ng = b.dependency("zlib_ng", .{
             .target = target,
             .optimize = optimize,

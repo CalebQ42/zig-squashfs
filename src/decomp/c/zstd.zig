@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const c = @import("../../c_libs.zig").c;
+const c = @import("c");
 const Decompressor = @import("../../decomp.zig");
 
 const Zstd = @This();

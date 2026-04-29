@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const c = @import("../../c_libs.zig").c;
+const c = @import("c");
 const Decompressor = @import("../../decomp.zig");
 
 const Xz = @This();
@@ -120,12 +120,12 @@ fn xzErrorToDecompError(err: Error) Decompressor.Error {
 }
 
 fn lzmaAlloc(ptr: ?*anyopaque, _: usize, size: usize) callconv(.c) ?*anyopaque {
-    var alloc: *std.mem.Allocator = @alignCast(@ptrCast(ptr));
+    var alloc: *std.mem.Allocator = @ptrCast(@alignCast(ptr));
     return alloc.rawAlloc(size, .@"1", 0);
 }
 fn lzmaFree(ptr: ?*anyopaque, alloc_ptr: ?*anyopaque) callconv(.c) void {
     if (alloc_ptr == null) return;
-    var alloc: *std.mem.Allocator = @alignCast(@ptrCast(ptr));
+    var alloc: *std.mem.Allocator = @ptrCast(@alignCast(ptr));
     alloc.rawFree(@ptrCast(alloc_ptr), .@"1", 0);
 }
 

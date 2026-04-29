@@ -1,4 +1,5 @@
 const std = @import("std");
+const Io = std.Io;
 
 const DecompTypes = @import("decomp/types.zig");
 const Decompressor = @import("decomp.zig");
@@ -27,9 +28,9 @@ super: Superblock,
 stateless_decomp: Decompressor,
 
 /// Create an Archive from a File.
-pub fn init(fil: std.fs.File, offset: u64) !Archive {
+pub fn init(io: Io, fil: Io.File, offset: u64) !Archive {
     var super: Superblock = undefined;
-    var fil_rdr = fil.reader(&[0]u8{});
+    var fil_rdr = fil.reader(io, &[0]u8{});
     if (offset > 0)
         try fil_rdr.seekTo(offset);
     try fil_rdr.interface.readSliceEndian(Superblock, @ptrCast(&super), .little);

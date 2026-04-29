@@ -7,17 +7,16 @@ const Decompressor = @import("../../decomp.zig");
 interface: Decompressor = .{ .vtable = &.{ .stateless = stateless } },
 
 pub fn stateless(alloc: std.mem.Allocator, in: []u8, out: []u8) Decompressor.Error!usize {
-    var rdr: Reader = .static(in);
-    var decomp = try xz.decompress(alloc, rdr.adaptToOldInterface());
+    var rdr: Reader = .fixed(in);
+    const buf = try alloc.alloc(u8, in.len);
+    defer alloc.free(buf);
+
+    var decomp = xz.Decompress.init(&rdr, alloc, buf) catch |err|
+        return switch (err) {
+            error.WrongChecksum => Decompressor.Error.ReadFailed,
+            error.NotXzStream => Decompressor.Error.ReadFailed,
+            else => @errorCast(err),
+        };
     defer decomp.deinit();
-    const len = decomp.read(out) catch |err| return switch (err) {
-        error.CorruptInput => Decompressor.Error.ReadFailed,
-        error.EndOfStream => Decompressor.Error.ReadFailed,
-        error.EndOfStreamWithNoError => Decompressor.Error.ReadFailed,
-        error.WrongChecksum => Decompressor.Error.ReadFailed,
-        error.Unsupported => Decompressor.Error.ReadFailed,
-        error.Overflow => Decompressor.Error.WriteFailed,
-        else => err,
-    };
-    return len;
+    return decomp.reader.readSliceShort(out);
 }

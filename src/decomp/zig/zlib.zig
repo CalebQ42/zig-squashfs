@@ -7,9 +7,10 @@ const Decompressor = @import("../../decomp.zig");
 interface: Decompressor = .{ .vtable = &.{ .stateless = stateless } },
 
 pub fn stateless(alloc: std.mem.Allocator, in: []u8, out: []u8) Decompressor.Error!usize {
+    var rdr: Reader = .fixed(in);
     const buf = try alloc.alloc(u8, out.len);
     defer alloc.free(buf);
-    var rdr: Reader = .static(in);
+
     var decomp = flate.Decompress.init(&rdr, .zlib, buf);
     return decomp.reader.readSliceShort(out);
 }

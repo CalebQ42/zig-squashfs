@@ -1,4 +1,5 @@
 const std = @import("std");
+const Io = std.Io;
 
 const Archive = @import("archive.zig");
 const Decompressor = @import("decomp.zig");
