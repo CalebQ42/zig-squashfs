@@ -15,14 +15,14 @@ const This = @This();
 
 alloc: std.mem.Allocator,
 rdr: *Reader,
-decomp: *Decompressor,
+decomp: *const Decompressor,
 
 buf: [8192]u8 = undefined,
 
 interface: Reader,
 err: ?anyerror = null,
 
-pub fn init(alloc: std.mem.Allocator, rdr: *Reader, decomp: *Decompressor) This {
+pub fn init(alloc: std.mem.Allocator, rdr: *Reader, decomp: *const Decompressor) This {
     return .{
         .alloc = alloc,
         .rdr = rdr,
@@ -68,22 +68,22 @@ fn stream(rdr: *Reader, wrt: *Writer, limit: Limit) StreamError!usize {
     self.interface.seek += wrote;
     return wrote;
 }
-fn discard(rdr: *Reader, limit: Limit) error{ EndOfStream, ReadFailed }!usize {
+fn discard(rdr: *Reader, limit: Limit) Reader.Error!usize {
     const self: *This = @fieldParentPtr("interface", rdr);
     if (rdr.end == rdr.seek) self.advance() catch |err| {
         self.err = err;
-        return StreamError.ReadFailed;
+        return error.ReadFailed;
     };
     if (@intFromEnum(limit) == 0) return 0;
     const to_skip = @min(rdr.end - rdr.seek, @intFromEnum(limit));
     rdr.seek += to_skip;
     return to_skip;
 }
-fn readVec(rdr: *Reader, vec: [][]u8) error{ EndOfStream, ReadFailed }!usize {
+fn readVec(rdr: *Reader, vec: [][]u8) Reader.Error!usize {
     const self: *This = @fieldParentPtr("interface", rdr);
     if (rdr.end == rdr.seek) self.advance() catch |err| {
         self.err = err;
-        return StreamError.ReadFailed;
+        return error.ReadFailed;
     };
     var cur_red: usize = 0;
     for (vec) |s| {

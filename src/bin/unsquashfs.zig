@@ -63,7 +63,7 @@ pub fn main(init: std.process.Init) !void {
     };
     if (force)
         try Io.Dir.cwd().deleteTree(io, extLoc);
-    try arc.extract(alloc, extLoc, options); //TODO: Handle error gracefully.
+    try arc.extract(alloc, io, extLoc, options); //TODO: Handle error gracefully.
 }
 
 fn handleArgs(args: std.process.Args, out: *Writer) !void {

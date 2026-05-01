@@ -12,28 +12,37 @@ const Inode = @This();
 hdr: Header,
 data: Data,
 
-pub fn read(alloc: std.mem.Allocator, rdr: *Reader, block_size: u16) !Inode {
+pub fn read(alloc: std.mem.Allocator, rdr: *Reader, block_size: u32) !Inode {
     var hdr: Header = undefined;
     try rdr.readSliceEndian(Header, @ptrCast(&hdr), .little);
     return .{
         .hdr = hdr,
         .data = switch (hdr.inode_type) {
-            .dir => .{ .dir = .read(rdr) },
-            .file => .{ .file = .read(alloc, rdr, block_size) },
-            .symlink => .{ .symlink = .read(alloc, rdr) },
-            .block_dev => .{ .block_dev = .read(rdr) },
-            .char_dev => .{ .char_dev = .read(rdr) },
-            .fifo => .{ .fifo = .read(rdr) },
-            .socket => .{ .socket = .read(rdr) },
-            .ext_dir => .{ .ext_dir = .read(rdr) },
-            .ext_file => .{ .ext_file = .read(alloc, rdr, block_size) },
-            .ext_symlink => .{ .ext_symlink = .read(alloc, rdr) },
-            .ext_block_dev => .{ .ext_block_dev = .read(rdr) },
-            .ext_char_dev => .{ .ext_char_dev = .read(rdr) },
-            .ext_fifo => .{ .ext_fifo = .read(rdr) },
-            .ext_socket => .{ .ext_socket = .read(rdr) },
+            .dir => .{ .dir = try .read(rdr) },
+            .file => .{ .file = try .read(alloc, rdr, block_size) },
+            .symlink => .{ .symlink = try .read(alloc, rdr) },
+            .block_dev => .{ .block_dev = try .read(rdr) },
+            .char_dev => .{ .char_dev = try .read(rdr) },
+            .fifo => .{ .fifo = try .read(rdr) },
+            .socket => .{ .socket = try .read(rdr) },
+            .ext_dir => .{ .ext_dir = try .read(rdr) },
+            .ext_file => .{ .ext_file = try .read(alloc, rdr, block_size) },
+            .ext_symlink => .{ .ext_symlink = try .read(alloc, rdr) },
+            .ext_block_dev => .{ .ext_block_dev = try .read(rdr) },
+            .ext_char_dev => .{ .ext_char_dev = try .read(rdr) },
+            .ext_fifo => .{ .ext_fifo = try .read(rdr) },
+            .ext_socket => .{ .ext_socket = try .read(rdr) },
         },
     };
+}
+pub fn deinit(self: Inode, alloc: std.mem.Allocator) void {
+    switch (self.data) {
+        .file => |d| d.deinit(alloc),
+        .symlink => |d| d.deinit(alloc),
+        .ext_file => |d| d.deinit(alloc),
+        .ext_symlink => |d| d.deinit(alloc),
+        else => {},
+    }
 }
 
 // Types

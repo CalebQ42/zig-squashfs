@@ -41,11 +41,11 @@ pub fn build(b: *std.Build) !void {
             .root_source_file = b.path("src/bin/unsquashfs.zig"),
             .imports = &.{
                 .{ .name = "zig_squashfs", .module = lib.root_module },
-                .{ .name = "config", .module = unsquashfs_options.createModule() },
             },
         }),
         .use_llvm = debug,
     });
+    exe.root_module.addOptions("config", unsquashfs_options);
 
     b.installArtifact(lib);
     b.installArtifact(exe);
@@ -54,12 +54,8 @@ pub fn build(b: *std.Build) !void {
         .root_module = b.createModule(.{
             .optimize = optimize,
             .target = target,
-            .root_source_file = b.path("src/root.zig"),
+            .root_source_file = b.path("src/test.zig"),
         }),
-        .test_runner = .{
-            .mode = .simple,
-            .path = b.path("src/test.zig"),
-        },
     });
     const run_mod_tests = b.addRunArtifact(mod_tests);
     const test_step = b.step("test", "Run tests");
@@ -68,21 +64,13 @@ pub fn build(b: *std.Build) !void {
     // zls build check steps
     const lib_check = b.addLibrary(.{
         .name = "squashfs",
-        .root_module = b.createModule(.{
-            .optimize = optimize,
-            .target = target,
-            .root_source_file = b.path("src/root.zig"),
-        }),
+        .root_module = exe.root_module,
     });
-    // const exe_check = b.addExecutable(.{
-    //     .name = "unsquashfs",
-    //     .root_module = b.createModule(.{
-    //         .optimize = optimize,
-    //         .target = target,
-    //         .root_source_file = b.path("src/bin/unsquashfs.zig"),
-    //     }),
-    // });
+    const exe_check = b.addExecutable(.{
+        .name = "unsquashfs",
+        .root_module = lib.root_module,
+    });
     const check = b.step("check", "Check if unsquashfs compiles");
     check.dependOn(&lib_check.step);
-    // check.dependOn(&exe_check.step);
+    check.dependOn(&exe_check.step);
 }

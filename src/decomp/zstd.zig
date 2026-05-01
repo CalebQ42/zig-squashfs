@@ -1,6 +1,6 @@
 const std = @import("std");
 const Reader = std.Io.Reader;
-const flate = std.compress.flate;
+const zstd = std.compress.zstd;
 const Node = std.SinglyLinkedList.Node;
 
 const Decompressor = @import("../util/decompressor.zig");
@@ -39,25 +39,25 @@ fn decomp(d: ?*const Decompressor, alloc: std.mem.Allocator, in: []u8, out: []u8
     if (d == null) {
         const buf = try alloc.alloc(u8, in.len * 2);
         defer alloc.free(buf);
-        return zlibDecomp(buf, in, out);
+        return zstdDecomp(buf, in, out);
     }
     var self: Self = @fieldParentPtr("interface", d.?);
     const buf_node = self.buffer_queue.popFirst();
     var buf: *Buffer = undefined;
     if (buf_node == null) {
         const new_buf = try self.buffers.addOne(self.alloc);
-        new_buf.* = .{ .{}, try self.alloc.alloc(u8, self.block_size) };
+        new_buf.* = .{ .{}, try self.alloc.alloc(u8, self.block_size + zstd.block_size_max) };
         buf = new_buf;
     } else {
         buf = @fieldParentPtr("node", buf_node);
     }
     defer self.buffer_queue.prepend(&buf.node);
-    return zlibDecomp(buf.buf, in, out);
+    return zstdDecomp(buf.buf, in, out);
 }
 
-inline fn zlibDecomp(buffer: []u8, in: []u8, out: []u8) !usize {
+inline fn zstdDecomp(buffer: []u8, in: []u8, out: []u8) !usize {
     var rdr: Reader = .fixed(in);
-    var d = flate.Decompress.init(&rdr, .zlib, buffer);
+    var d = zstd.Decompress.init(&rdr, buffer, .{ .window_len = @truncate(in.len) });
 
     return d.reader.readSliceShort(out);
 }
@@ -67,7 +67,7 @@ inline fn zlibDecomp(buffer: []u8, in: []u8, out: []u8) !usize {
 pub const stateless_decompressor: Decompressor = .{ .decomp_fn = statelessDecomp };
 
 fn statelessDecomp(_: ?*const Decompressor, alloc: std.mem.Allocator, in: []u8, out: []u8) Error!usize {
-    const buf = try alloc.alloc(u8, in.len * 2);
+    const buf = try alloc.alloc(u8, in.len + zstd.block_size_max);
     defer alloc.free(buf);
-    return zlibDecomp(buf, in, out);
+    return zstdDecomp(buf, in, out);
 }
