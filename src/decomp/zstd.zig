@@ -57,7 +57,7 @@ fn decomp(d: ?*const Decompressor, alloc: std.mem.Allocator, in: []u8, out: []u8
 
 inline fn zstdDecomp(buffer: []u8, in: []u8, out: []u8) !usize {
     var rdr: Reader = .fixed(in);
-    var d = zstd.Decompress.init(&rdr, buffer, .{ .window_len = @truncate(in.len) });
+    var d = zstd.Decompress.init(&rdr, buffer, .{ .window_len = @truncate(out.len) });
 
     return d.reader.readSliceShort(out);
 }
@@ -67,7 +67,7 @@ inline fn zstdDecomp(buffer: []u8, in: []u8, out: []u8) !usize {
 pub const stateless_decompressor: Decompressor = .{ .decomp_fn = statelessDecomp };
 
 fn statelessDecomp(_: ?*const Decompressor, alloc: std.mem.Allocator, in: []u8, out: []u8) Error!usize {
-    const buf = try alloc.alloc(u8, in.len + zstd.block_size_max);
+    const buf = try alloc.alloc(u8, out.len + zstd.block_size_max);
     defer alloc.free(buf);
     return zstdDecomp(buf, in, out);
 }

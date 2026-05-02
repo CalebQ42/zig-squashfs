@@ -87,7 +87,7 @@ pub const Data = union(Type) {
     ext_socket: misc.ExtIPC,
 };
 
-pub const Header = packed struct {
+pub const Header = extern struct {
     inode_type: Type,
     permissions: u16,
     uid_idx: u16,

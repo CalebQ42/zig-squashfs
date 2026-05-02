@@ -48,7 +48,7 @@ pub fn root(self: Archive, alloc: std.mem.Allocator, io: Io) !File {
         self.super.block_size,
         self.super.root_ref,
     );
-    return .init(alloc, root_inode, "");
+    return .init(alloc, self, root_inode, "");
 }
 /// Opens a File within the archive.
 pub fn open(self: Archive, alloc: std.mem.Allocator, io: Io, filepath: []const u8) !File {
@@ -61,9 +61,16 @@ pub fn open(self: Archive, alloc: std.mem.Allocator, io: Io, filepath: []const u
 }
 /// Extract the entire archive contents to the given directory.
 pub fn extract(self: Archive, alloc: std.mem.Allocator, io: Io, extract_dir: []const u8, options: ExtractionOptions) !void {
-    _ = self;
-    _ = alloc;
-    _ = io;
+    const root_inode = try Utils.inodeFromRef(
+        alloc,
+        io,
+        self.file,
+        &self.stateless_decomp,
+        self.super.inode_start,
+        self.super.block_size,
+        self.super.root_ref,
+    );
+    _ = root_inode;
     _ = extract_dir;
     _ = options;
     return error.TODO;
@@ -74,7 +81,15 @@ pub fn extract(self: Archive, alloc: std.mem.Allocator, io: Io, extract_dir: []c
 pub fn inode(self: Archive, alloc: std.mem.Allocator, io: Io, num: u32) !Inode {
     if (!self.super.flags.exportable)
         return error.NotExportable;
-    const ref = try LookupTable.lookupValue(Inode.Ref, alloc, io, &self.stateless_decomp, self.file, self.super.export_start, num + 1);
+    const ref = try LookupTable.lookupValue(
+        Inode.Ref,
+        alloc,
+        io,
+        &self.stateless_decomp,
+        self.file,
+        self.super.export_start,
+        num + 1,
+    );
     return Utils.inodeFromRef(
         alloc,
         io,
@@ -83,6 +98,18 @@ pub fn inode(self: Archive, alloc: std.mem.Allocator, io: Io, num: u32) !Inode {
         self.super.inode_start,
         self.super.block_size,
         ref,
+    );
+}
+/// Returns a value at the given index from the Archive's id (uid/gid) table.
+pub fn idTable(self: Archive, alloc: std.mem.Allocator, io: Io, idx: u32) !u16 {
+    return LookupTable.lookupValue(
+        u16,
+        alloc,
+        io,
+        &self.stateless_decomp,
+        self.file,
+        self.super.id_start,
+        idx,
     );
 }
 
@@ -98,7 +125,7 @@ const SuperblockError = error{
 };
 
 /// A squashfs Superblock
-pub const Superblock = packed struct(u768) {
+pub const Superblock = extern struct {
     magic: u32,
     inode_count: u32,
     mod_time: u32,
@@ -113,7 +140,7 @@ pub const Superblock = packed struct(u768) {
         zstd,
     },
     block_log: u16,
-    flags: packed struct {
+    flags: packed struct(u16) {
         inode_uncompressed: bool,
         data_uncompressed: bool,
         check: bool,

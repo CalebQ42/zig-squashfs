@@ -1,6 +1,6 @@
 const Reader = @import("std").Io.Reader;
 
-pub const Dir = packed struct {
+pub const Dir = extern struct {
     block_start: u32,
     hard_links: u32,
     size: u16,
@@ -14,7 +14,7 @@ pub const Dir = packed struct {
     }
 };
 
-pub const ExtDir = packed struct {
+pub const ExtDir = extern struct {
     hard_links: u32,
     size: u32,
     block_start: u32,
@@ -26,7 +26,7 @@ pub const ExtDir = packed struct {
 
     pub fn read(rdr: *Reader) !ExtDir {
         var d: ExtDir = undefined;
-        try rdr.readSliceEndian(Dir, @ptrCast(&d), .little);
+        try rdr.readSliceEndian(ExtDir, @ptrCast(&d), .little);
         return d;
     }
 };

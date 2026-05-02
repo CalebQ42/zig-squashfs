@@ -13,10 +13,7 @@ test "Basics" {
     var fil = try Io.Dir.cwd().openFile(io, TestArchive, .{});
     defer fil.close(io);
     var sfs: Archive = try .init(io, fil, 0);
-    if (sfs.super != LinuxPATestCorrectSuperblock) {
-        std.debug.print("Superblock wrong\nShould be: {}\n\nis: {}\n", .{ LinuxPATestCorrectSuperblock, sfs.super });
-        return error.BadSuperblock;
-    }
+    try std.testing.expectEqualDeep(sfs.super, LinuxPATestCorrectSuperblock);
     const root_file = try sfs.root(alloc, io);
     defer root_file.deinit();
 }

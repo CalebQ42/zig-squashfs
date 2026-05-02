@@ -6,7 +6,7 @@ const StreamError = std.Io.Reader.StreamError;
 
 const Decompressor = @import("decompressor.zig");
 
-const BlockHeader = packed struct {
+const BlockHeader = packed struct(u16) {
     size: u15,
     uncompressed: bool,
 };
