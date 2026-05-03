@@ -7,6 +7,7 @@ const Archive = @import("archive.zig");
 const DirEntry = @import("directory.zig");
 const ExtractionOptions = @import("options.zig");
 const Inode = @import("inode.zig");
+const DataExtractor = @import("util/data_extractor.zig");
 const MetadataReader = @import("util/metadata.zig");
 
 const File = @This();
