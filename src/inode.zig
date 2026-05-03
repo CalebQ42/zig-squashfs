@@ -2,10 +2,15 @@
 
 const std = @import("std");
 const Reader = std.Io.Reader;
+const Io = std.Io;
 
+const DirEntry = @import("directory.zig");
 const dir = @import("inode_data/dir.zig");
 const file = @import("inode_data/file.zig");
 const misc = @import("inode_data/misc.zig");
+const Decompressor = @import("util/decompressor.zig");
+const MetadataReader = @import("util/metadata.zig");
+const OffsetFile = @import("util/offset_file.zig");
 
 const Inode = @This();
 
@@ -45,7 +50,30 @@ pub fn deinit(self: Inode, alloc: std.mem.Allocator) void {
     }
 }
 
+// Utility Functions
+
+pub fn readDirectory(self: Inode, alloc: std.mem.Allocator, io: Io, fil: OffsetFile, decomp: *const Decompressor, dir_offset: u64) ![]DirEntry {
+    return switch (self.data) {
+        .dir => |d| readDirFromData(alloc, io, fil, decomp, dir_offset, d),
+        .ext_dir => |d| readDirFromData(alloc, io, fil, decomp, dir_offset, d),
+        else => Error.NotDirectory,
+    };
+}
+fn readDirFromData(alloc: std.mem.Allocator, io: Io, fil: OffsetFile, decomp: *const Decompressor, dir_offset: u64, d: anytype) ![]DirEntry {
+    var rdr = try fil.readerAt(io, dir_offset + d.block_start, &[0]u8{});
+    var meta: MetadataReader = .init(alloc, &rdr.interface, decomp);
+    try meta.interface.discardAll(d.block_offset);
+
+    return DirEntry.readDirectory(alloc, &meta.interface, d.size);
+}
+
 // Types
+
+pub const Error = error{
+    NotDirectory,
+    NotRegularFile,
+    NotExtended,
+};
 
 pub const Ref = packed struct(u64) {
     block_offset: u16,

@@ -7,6 +7,7 @@ const Archive = @import("archive.zig");
 const DirEntry = @import("directory.zig");
 const ExtractionOptions = @import("options.zig");
 const Inode = @import("inode.zig");
+const MetadataReader = @import("util/metadata.zig");
 
 const File = @This();
 
@@ -31,24 +32,64 @@ pub fn init(alloc: std.mem.Allocator, archive: Archive, in: Inode, name: []const
         .name = new_name,
     };
 }
+pub fn fromDirEntry(alloc: std.mem.Allocator, io: Io, archive: Archive, ent: DirEntry) !File {
+    var rdr = try archive.file.readerAt(io, archive.super.inode_start + ent.block_start, &[0]u8{});
+    var meta: MetadataReader = .init(alloc, &rdr.interface, &archive.stateless_decomp);
+    try meta.interface.discardAll(ent.block_offset);
+
+    var in: Inode = try .read(alloc, &meta.interface, archive.super.block_size);
+    errdefer in.deinit(alloc);
+    return .init(alloc, archive, in, ent.name);
+}
 pub fn deinit(self: File) void {
     self.alloc.free(self.name);
     self.inode.deinit(self.alloc);
 }
 
 pub fn open(self: File, alloc: std.mem.Allocator, io: Io, filepath: []const u8) !File {
-    switch (self.inode.hdr.inode_type) {
-        .dir, .ext_dir => {},
-        else => return Error.NotDirectory,
+    const entries = try self.inode.readDirectory(
+        alloc,
+        io,
+        self.archive.file,
+        &self.archive.stateless_decomp,
+        self.archive.super.dir_start,
+    );
+    defer {
+        for (entries) |ent|
+            alloc.free(ent.name);
+        alloc.free(entries);
     }
-    return error.TODO;
+    const path = std.mem.trim(u8, filepath, "/");
+    const first_element: []u8 = std.mem.sliceTo(path, "/");
+
+    var search_slice = entries;
+    var idx: usize = undefined;
+    while (search_slice.len > 0) {
+        idx = search_slice / 2;
+        const middle = search_slice[idx];
+        switch (std.mem.order(u8, first_element, middle.name)) {
+            .eq => break,
+            .lt => search_slice = search_slice[0..idx],
+            .gt => search_slice = search_slice[idx + 1 ..],
+        }
+    } else return Error.FileNotFound;
+
+    const first_elem_file = try fromDirEntry(alloc, io, self.archive, search_slice[idx]);
+    if (first_element.len == path.len)
+        return first_elem_file;
+    defer first_elem_file.deinit();
+    return first_elem_file.open(alloc, io, path[first_element.len + 1 ..]);
 }
 
 pub fn extract(self: File, alloc: std.mem.Allocator, io: Io, filepath: []const u8, options: ExtractionOptions) !void {
-    _ = self;
+    switch (self.inode.hdr.inode_type) {
+        .file, .ext_file => {
+            var atomic_file = try Io.Dir.cwd().createFileAtomic(io, filepath, .{});
+            defer atomic_file.deinit(io);
+        },
+        else => return error.TODO,
+    }
     _ = alloc;
-    _ = io;
-    _ = filepath;
     _ = options;
     return error.TODO;
 }
@@ -56,8 +97,5 @@ pub fn extract(self: File, alloc: std.mem.Allocator, io: Io, filepath: []const u
 // Types
 
 pub const Error = error{
-    NotDirectory,
-    NotRegularFile,
-    NotSymlink,
-    NotDevice,
-};
+    FileNotFound,
+} || Inode.Error;
