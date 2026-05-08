@@ -49,11 +49,13 @@ fn advance(self: *This) !void {
         self.interface.end = hdr.size;
         self.interface.buffer = self.buf[0..hdr.size];
         return;
+    } else {
+        @branchHint(.likely);
+        var tmp_buf: [8192]u8 = undefined;
+        try self.rdr.readSliceAll(tmp_buf[0..hdr.size]);
+        self.interface.end = try self.decomp.Decompress(self.alloc, tmp_buf[0..hdr.size], &self.buf);
+        self.interface.buffer = self.buf[0..self.interface.end];
     }
-    var tmp_buf: [8192]u8 = undefined;
-    try self.rdr.readSliceAll(tmp_buf[0..hdr.size]);
-    self.interface.end = try self.decomp.Decompress(self.alloc, tmp_buf[0..hdr.size], &self.buf);
-    self.interface.buffer = self.buf[0..self.interface.end];
 }
 
 fn stream(rdr: *Reader, wrt: *Writer, limit: Limit) StreamError!usize {

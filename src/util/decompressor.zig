@@ -13,7 +13,3 @@ decomp_fn: *const fn (?*const Decompressor, std.mem.Allocator, in: []u8, out: []
 pub fn Decompress(self: *const Decompressor, alloc: std.mem.Allocator, in: []u8, out: []u8) Error!usize {
     return self.decomp_fn(self, alloc, in, out);
 }
-
-pub fn StatelessDecompression(self: Decompressor, alloc: std.mem.Allocator, in: []u8, out: []u8) Error!usize {
-    return self.decomp_fn(null, alloc, in, out);
-}

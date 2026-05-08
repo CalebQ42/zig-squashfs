@@ -8,9 +8,12 @@ const DirEntry = @import("directory.zig");
 const dir = @import("inode_data/dir.zig");
 const file = @import("inode_data/file.zig");
 const misc = @import("inode_data/misc.zig");
+const DataExtractor = @import("util/data_extractor.zig");
+const DataReader = @import("util/data_reader.zig");
 const Decompressor = @import("util/decompressor.zig");
 const MetadataReader = @import("util/metadata.zig");
 const OffsetFile = @import("util/offset_file.zig");
+const SharedCache = @import("util/shared_cache.zig");
 
 const Inode = @This();
 
@@ -52,6 +55,7 @@ pub fn deinit(self: Inode, alloc: std.mem.Allocator) void {
 
 // Utility Functions
 
+/// Read the directory entries
 pub fn readDirectory(self: Inode, alloc: std.mem.Allocator, io: Io, fil: OffsetFile, decomp: *const Decompressor, dir_offset: u64) ![]DirEntry {
     return switch (self.data) {
         .dir => |d| readDirFromData(alloc, io, fil, decomp, dir_offset, d),
@@ -65,6 +69,38 @@ fn readDirFromData(alloc: std.mem.Allocator, io: Io, fil: OffsetFile, decomp: *c
     try meta.interface.discardAll(d.block_offset);
 
     return DirEntry.readDirectory(alloc, &meta.interface, d.size);
+}
+/// Get a reader for a regular file's data.
+pub fn dataReader(self: Inode, alloc: std.mem.Allocator, io: Io, fil: OffsetFile, cache: *SharedCache, decomp: *const Decompressor, block_size: u32) !DataReader {
+    return switch (self.data) {
+        .file => |f| getReaderFromData(alloc, io, fil, cache, decomp, block_size, f),
+        .ext_file => |f| getReaderFromData(alloc, io, fil, cache, decomp, block_size, f),
+        else => Error.NotRegularFile,
+    };
+}
+fn getReaderFromData(alloc: std.mem.Allocator, io: Io, fil: OffsetFile, cache: *SharedCache, decomp: *const Decompressor, block_size: u32, d: anytype) !DataReader {
+    const ext: DataReader = .init(alloc, io, fil, cache, decomp, block_size, d.size, d.block_start, d.blocks);
+    if (d.frag_block_offset == 0xFFFFFFFF) {
+        // TODO:
+        return error.TODO;
+    }
+    return ext;
+}
+/// Get an extractor for a regular file's data.
+pub fn dataExtractor(self: Inode, fil: OffsetFile, cache: *SharedCache, decomp: *const Decompressor, block_size: u32) !DataExtractor {
+    return switch (self.data) {
+        .file => |f| getExtractorFromData(fil, cache, decomp, block_size, f),
+        .ext_file => |f| getExtractorFromData(fil, cache, decomp, block_size, f),
+        else => Error.NotRegularFile,
+    };
+}
+fn getExtractorFromData(fil: OffsetFile, cache: *SharedCache, decomp: *const Decompressor, block_size: u32, d: anytype) !DataExtractor {
+    const ext: DataExtractor = .init(fil, cache, decomp, block_size, d.size, d.block_start, d.blocks);
+    if (d.frag_block_offset == 0xFFFFFFFF) {
+        // TODO:
+        return error.TODO;
+    }
+    return ext;
 }
 
 // Types
