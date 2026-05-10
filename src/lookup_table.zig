@@ -2,8 +2,8 @@ const std = @import("std");
 const Io = std.Io;
 
 const Decompressor = @import("util/decompressor.zig");
-const OffsetFile = @import("util/offset_file.zig");
 const MetadataReader = @import("util/metadata.zig");
+const OffsetFile = @import("util/offset_file.zig");
 
 pub fn lookupValue(comptime T: anytype, alloc: std.mem.Allocator, io: Io, decomp: *Decompressor, file: OffsetFile, table_start: u64, idx: u16) !T {
     const T_PER_BLOCK: u16 = 8192 / @sizeOf(T);
@@ -48,6 +48,10 @@ pub fn CachedTable(comptime T: anytype) type {
 
                 .table = .init(alloc),
             };
+        }
+        pub fn deinit(self: *Table, io: Io) void {
+            self.mut.lockUncancelable(io);
+            self.table.deinit();
         }
 
         pub fn get(self: *Table, io: Io, idx: u32) !T {

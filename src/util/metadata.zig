@@ -17,26 +17,28 @@ alloc: std.mem.Allocator,
 rdr: *Reader,
 decomp: *const Decompressor,
 
+cur_block_start: u32 = 0,
+next_start_start: u32 = 0,
 buf: [8192]u8 = undefined,
 
-interface: Reader,
 err: ?anyerror = null,
+interface: Reader = .{
+    .buffer = &[0]u8{},
+    .end = 0,
+    .seek = 0,
+    .vtable = &.{
+        .stream = stream,
+        .discard = discard,
+        .readVec = readVec,
+        // TODO: Potentially add rebase so that we can guarentee that self.block_start & interface.seek is correct.
+    },
+},
 
-pub fn init(alloc: std.mem.Allocator, rdr: *Reader, decomp: *const Decompressor) This {
+pub fn init(alloc: std.mem.Allocator, rdr: *Reader, decomp: *const Decompressor) This {]
     return .{
         .alloc = alloc,
         .rdr = rdr,
         .decomp = decomp,
-        .interface = .{
-            .buffer = &[0]u8{},
-            .end = 0,
-            .seek = 0,
-            .vtable = &.{
-                .stream = stream,
-                .discard = discard,
-                .readVec = readVec,
-            },
-        },
     };
 }
 
@@ -44,6 +46,8 @@ fn advance(self: *This) !void {
     self.interface.seek = 0;
     var hdr: BlockHeader = undefined;
     try self.rdr.readSliceEndian(BlockHeader, @ptrCast(&hdr), .little);
+    self.cur_block_start = self.next_start_start;
+    self.next_start_start += hdr.size;
     if (hdr.uncompressed) {
         try self.rdr.readSliceEndian(u8, self.buf[0..hdr.size], .little);
         self.interface.end = hdr.size;
