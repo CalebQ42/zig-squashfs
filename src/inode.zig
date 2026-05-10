@@ -4,10 +4,13 @@ const std = @import("std");
 const Reader = std.Io.Reader;
 const Io = std.Io;
 
+const Archive = @import("archive.zig");
 const DirEntry = @import("directory.zig");
+const ExtractionOptions = @import("options.zig");
 const dir = @import("inode_data/dir.zig");
 const file = @import("inode_data/file.zig");
 const misc = @import("inode_data/misc.zig");
+const LookupTable = @import("lookup_table.zig");
 const DataExtractor = @import("util/data_extractor.zig");
 const DataReader = @import("util/data_reader.zig");
 const Decompressor = @import("util/decompressor.zig");
@@ -102,12 +105,31 @@ fn getExtractorFromData(fil: OffsetFile, cache: *SharedCache, decomp: *const Dec
     }
     return ext;
 }
+// Get a symlink's target path
+pub fn symlinkTarget(self: Inode) ![]const u8 {
+    return switch (self.data) {
+        .symlink => |s| s.target,
+        .ext_symlink => |s| s.target,
+        else => Error.NotSymlink,
+    };
+}
+// Get inode's gid
+pub fn gid(self: Inode, alloc: std.mem.Allocator, io: Io, fil: OffsetFile, decomp: *const Decompressor, id_table_start: u64) !u16 {
+    return LookupTable.lookupValue(u16, alloc, io, decomp, fil, id_table_start, self.hdr.gid_idx);
+}
+// Get inode's uid
+pub fn uid(self: Inode, alloc: std.mem.Allocator, io: Io, fil: OffsetFile, decomp: *const Decompressor, id_table_start: u64) !u16 {
+    return LookupTable.lookupValue(u16, alloc, io, decomp, fil, id_table_start, self.hdr.uid_idx);
+}
+// Get an extended inode's xattr values.
+pub fn xattrValues(self: Inode, alloc: std.mem.Allocator, io: Io, fil: OffsetFile, decomp: *const Decompressor, xattr_table_start: u64) !Xattr {}
 
 // Types
 
 pub const Error = error{
     NotDirectory,
     NotRegularFile,
+    NotSymlink,
     NotExtended,
 };
 
@@ -159,3 +181,10 @@ pub const Header = extern struct {
     mod_time: u32,
     num: u32,
 };
+
+// Extract
+
+pub fn extract(self: Inode, alloc: std.mem.Allocator, io: Io, fil: OffsetFile, super: Archive.Superblock, path: []const u8, options: ExtractionOptions) !void {}
+pub fn extractDir(self: Inode, alloc: std.mem.Allocator, io: Io, fil: OffsetFile, super: Archive.Superblock, path: []const u8, options: ExtractionOptions) !void {}
+pub fn extractRegFile(self: Inode, alloc: std.mem.Allocator, io: Io, fil: OffsetFile, super: Archive.Superblock, path: []const u8, options: ExtractionOptions) !void {}
+pub fn extractSymlink(self: Inode, alloc: std.mem.Allocator, io: Io, fil: OffsetFile, super: Archive.Superblock, path: []const u8, options: ExtractionOptions) !void {}
