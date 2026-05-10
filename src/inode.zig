@@ -17,6 +17,7 @@ const Decompressor = @import("util/decompressor.zig");
 const MetadataReader = @import("util/metadata.zig");
 const OffsetFile = @import("util/offset_file.zig");
 const SharedCache = @import("util/shared_cache.zig");
+const XattrTable = @import("xattr_table.zig");
 
 const Inode = @This();
 
@@ -121,8 +122,21 @@ pub fn gid(self: Inode, alloc: std.mem.Allocator, io: Io, fil: OffsetFile, decom
 pub fn uid(self: Inode, alloc: std.mem.Allocator, io: Io, fil: OffsetFile, decomp: *const Decompressor, id_table_start: u64) !u16 {
     return LookupTable.lookupValue(u16, alloc, io, decomp, fil, id_table_start, self.hdr.uid_idx);
 }
-// Get an extended inode's xattr values.
-pub fn xattrValues(self: Inode, alloc: std.mem.Allocator, io: Io, fil: OffsetFile, decomp: *const Decompressor, xattr_table_start: u64) !Xattr {}
+// Get an inode's xattr values. If the inode does not have xattr values (including if the inode is not an extended type), an empty slice is returned.
+pub fn xattrValues(self: Inode, alloc: std.mem.Allocator, io: Io, fil: OffsetFile, decomp: *const Decompressor, xattr_table_start: u64) ![]XattrTable.XattrOwned {
+    const idx = switch (self.data) {
+        .ext_dir => |e| e.xattr_idx,
+        .ext_file => |e| e.xattr_idx,
+        .ext_symlink => |e| e.xattr_idx,
+        .ext_block_dev => |e| e.xattr_idx,
+        .ext_char_dev => |e| e.xattr_idx,
+        .ext_fifo => |e| e.xattr_idx,
+        .ext_socket => |e| e.xattr_idx,
+        else => return &[0]XattrTable.XattrOwned{},
+    };
+    if (idx == 0xFFFFFFFF) return &[0]XattrTable.XattrOwned{};
+    return XattrTable.statelessLookup(alloc, io, decomp, fil, xattr_table_start, idx);
+}
 
 // Types
 
@@ -188,3 +202,5 @@ pub fn extract(self: Inode, alloc: std.mem.Allocator, io: Io, fil: OffsetFile, s
 pub fn extractDir(self: Inode, alloc: std.mem.Allocator, io: Io, fil: OffsetFile, super: Archive.Superblock, path: []const u8, options: ExtractionOptions) !void {}
 pub fn extractRegFile(self: Inode, alloc: std.mem.Allocator, io: Io, fil: OffsetFile, super: Archive.Superblock, path: []const u8, options: ExtractionOptions) !void {}
 pub fn extractSymlink(self: Inode, alloc: std.mem.Allocator, io: Io, fil: OffsetFile, super: Archive.Superblock, path: []const u8, options: ExtractionOptions) !void {}
+pub fn extractDevice(self: Inode, alloc: std.mem.Allocator, io: Io, fil: OffsetFile, super: Archive.Superblock, path: []const u8, options: ExtractionOptions) !void {}
+pub fn extractIPC(self: Inode, alloc: std.mem.Allocator, io: Io, fil: OffsetFile, super: Archive.Superblock, path: []const u8, options: ExtractionOptions) !void {}

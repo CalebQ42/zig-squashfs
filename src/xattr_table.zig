@@ -111,6 +111,7 @@ pub fn get(self: *XattrCachedTable, alloc: std.mem.Allocator, io: Io, idx: u32) 
         try meta.interface.readSliceEndian(val_size, @ptrCast(&val_size), .little);
 
         const val = try self.alloc.alloc(u8, val_size);
+        errdefer alloc.free(val);
         try meta.interface.readSliceEndian(u8, val, .little);
 
         try self.value_cache.put(val_ref, val);
@@ -271,6 +272,7 @@ pub fn statelessLookup(alloc: std.mem.Allocator, io: Io, decomp: *const Decompre
         try meta.interface.readSliceEndian(val_size, @ptrCast(&val_size), .little);
 
         const val = try alloc.alloc(u8, val_size);
+        errdefer alloc.free(val);
         try meta.interface.readSliceEndian(u8, val, .little);
 
         out[i] = .{
