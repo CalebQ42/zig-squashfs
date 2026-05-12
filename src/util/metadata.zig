@@ -34,7 +34,7 @@ interface: Reader = .{
     },
 },
 
-pub fn init(alloc: std.mem.Allocator, rdr: *Reader, decomp: *const Decompressor) This {]
+pub fn init(alloc: std.mem.Allocator, rdr: *Reader, decomp: *const Decompressor) This {
     return .{
         .alloc = alloc,
         .rdr = rdr,

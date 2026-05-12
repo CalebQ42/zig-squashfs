@@ -46,14 +46,18 @@ fn numBlocks(self: DataExtractor) usize {
     return num;
 }
 
-pub fn extract(self: DataExtractor, alloc: std.mem.Allocator, io: Io, fil: Io.File) !void {
-    _ = self;
-    _ = alloc;
-    _ = io;
-    _ = fil;
+/// Starts extracting the data using the given group to spawn async tasks.
+pub fn extractAsync(self: DataExtractor, alloc: std.mem.Allocator, io: Io, group: *Io.Group, fil: Io.File) void {
+    var read_offset: u64 = self.start;
+    for (0..self.blocks.len) |idx| {
+        group.async(io, blockThread, .{ self, alloc, io, fil, read_offset, idx });
+        read_offset += self.blocks[idx].size;
+    }
+    if (self.frag_entry != null)
+        group.async(io, fragThread, .{ self, alloc, io, fil });
 }
 
-fn blockThread(self: DataExtractor, alloc: std.mem.Allocator, io: Io, fil: Io.File, read_offset: u64, offset: u64, idx: u32) !void {
+fn blockThread(self: DataExtractor, alloc: std.mem.Allocator, io: Io, fil: Io.File, read_offset: u64, idx: u32) !void {
     const block = self.blocks[idx];
 
     const cur_block_size = if (idx == self.numBlocks() - 1)
@@ -62,7 +66,7 @@ fn blockThread(self: DataExtractor, alloc: std.mem.Allocator, io: Io, fil: Io.Fi
         self.block_size;
 
     var wrt = fil.writer(io, &[0]u8{});
-    try wrt.seekTo(offset);
+    try wrt.seekTo(self.block_size * idx);
     defer wrt.flush() catch {};
 
     if (block.size == 0) {
@@ -87,12 +91,12 @@ fn blockThread(self: DataExtractor, alloc: std.mem.Allocator, io: Io, fil: Io.Fi
         try wrt.interface.writeAll(tmp.cache[0..cur_block_size]);
     }
 }
-fn fragThread(self: DataExtractor, alloc: std.mem.Allocator, io: Io, fil: Io.File, offset: u64) !void {
+fn fragThread(self: DataExtractor, alloc: std.mem.Allocator, io: Io, fil: Io.File) !void {
     const frag = self.frag_entry.?;
     const cur_block_size = self.file_size % self.block_size;
 
     var wrt = fil.writer(io, &[0]u8{});
-    try wrt.seekTo(offset);
+    try wrt.seekTo(self.blocks.len * self.block_size);
     defer wrt.flush() catch {};
 
     var rdr = try self.fil.readerAt(io, frag.start, &[0]u8{});
