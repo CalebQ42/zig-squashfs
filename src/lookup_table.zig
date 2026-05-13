@@ -32,6 +32,8 @@ pub fn CachedTable(comptime T: anytype) type {
 
         alloc: std.mem.Allocator,
         fil: OffsetFile,
+        decomp: *const Decompressor,
+
         table_start: u64,
         total_num: u32,
 
@@ -39,10 +41,12 @@ pub fn CachedTable(comptime T: anytype) type {
 
         mut: Io.Mutex = .init,
 
-        pub fn init(alloc: std.mem.Allocator, fil: OffsetFile, offset: u64, total_num: u32) Table {
+        pub fn init(alloc: std.mem.Allocator, fil: OffsetFile, decomp: *const Decompressor, offset: u64, total_num: u32) Table {
             return .{
                 .alloc = alloc,
                 .fil = fil,
+                .decomp = decomp,
+
                 .table_start = offset,
                 .total_num = total_num,
 

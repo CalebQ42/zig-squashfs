@@ -85,36 +85,7 @@ pub fn open(self: File, alloc: std.mem.Allocator, io: Io, filepath: []const u8) 
 }
 
 pub fn extract(self: File, alloc: std.mem.Allocator, io: Io, filepath: []const u8, options: ExtractionOptions) !void {
-    var cache: SharedCache = try .init(alloc, 10); // TODO: calculate a good initial cache size.
-    defer cache.deinit();
-    var decomp = switch (self.archive.super.compression) {
-        .gzip => {},
-        .lzma => {},
-        .xz => {},
-        .zstd => {},
-        else => unreachable,
-    };
-    return self.extractReal(alloc, io, &cache, &decomp.interface, filepath, options);
-}
-fn extractReal(self: File, alloc: std.mem.Allocator, io: Io, cache: *SharedCache, decomp: *const Decompressor, filepath: []const u8, options: ExtractionOptions) !void {
-    _ = options;
-    switch (self.inode.hdr.inode_type) {
-        .file, .ext_file => {
-            var ext = try self.inode.dataExtractor(
-                self.archive.file,
-                cache,
-                decomp,
-                self.archive.super.block_size,
-            );
-
-            var atomic_file = try Io.Dir.cwd().createFileAtomic(io, filepath, .{});
-            defer atomic_file.deinit(io);
-
-            try ext.extract(alloc, io, atomic_file.file);
-            try atomic_file.link(io);
-        },
-        else => return error.TODO,
-    }
+    return self.inode.extract(alloc, io, self.archive.file, self.archive.super, filepath, options);
 }
 
 // Types

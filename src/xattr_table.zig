@@ -40,8 +40,8 @@ pub fn init(alloc: std.mem.Allocator, io: Io, fil: OffsetFile, decomp: *const De
         .value_cache = .init(alloc),
     };
 }
-pub fn deinit(self: *XattrCachedTable) void {
-    self.table.deinit();
+pub fn deinit(self: *XattrCachedTable, io: Io) void {
+    self.table.deinit(io);
     self.value_cache.deinit();
 }
 
