@@ -12,7 +12,7 @@ const SharedCache = @import("shared_cache.zig");
 const DataExtractor = @This();
 
 fil: OffsetFile,
-cache: *SharedCache,
+// cache: *SharedCache,
 decomp: *const Decompressor,
 block_size: u32,
 
@@ -23,10 +23,10 @@ blocks: []BlockSize,
 frag_offset: u32 = 0,
 frag_entry: ?FragEntry = null,
 
-pub fn init(fil: OffsetFile, cache: *SharedCache, decomp: *const Decompressor, block_size: u32, file_size: u64, data_start: u64, blocks: []BlockSize) DataExtractor {
+pub fn init(fil: OffsetFile, decomp: *const Decompressor, block_size: u32, file_size: u64, data_start: u64, blocks: []BlockSize) DataExtractor {
     return .{
         .fil = fil,
-        .cache = cache,
+        // .cache = cache,
         .decomp = decomp,
         .block_size = block_size,
 

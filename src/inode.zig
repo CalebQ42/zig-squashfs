@@ -224,7 +224,7 @@ const Tables = struct {
 pub fn extract(self: Inode, alloc: std.mem.Allocator, io: Io, fil: OffsetFile, super: Archive.Superblock, path: []const u8, options: ExtractionOptions) !void {
     var decomp = switch (super.compression) {
         .gzip => try @import("decomp/zlib.zig").init(alloc, super.block_size),
-        .lzma => try @import("decomp/lzma.zig").init(alloc, super.block_sizee),
+        .lzma => try @import("decomp/lzma.zig").init(alloc, super.block_size),
         .xz => try @import("decomp/xz.zig").init(alloc, super.block_size),
         .zstd => try @import("decomp/zstd.zig").init(alloc, super.block_size),
         else => unreachable,
@@ -240,15 +240,33 @@ pub fn extract(self: Inode, alloc: std.mem.Allocator, io: Io, fil: OffsetFile, s
     defer que.close(io);
 
     switch (self.hdr.inode_type) {
-        .dir, .ext_dir => group.async(io, extractDir, .{ self, alloc, io, fil, super, path, options, &que }),
-        .file, .ext_file => group.async(io, extractRegFile, .{ self, alloc, io, file, super, path, options, &que }),
-        .symlink, .ext_symlink => group.async(Io, extractSymlink, .{ self, alloc, io, super, path, options, &que }),
-        .char_dev,
-        .block_dev,
-        .ext_char_dev,
-        .ext_block_dev,
-        => group.async(io, extractDevice, .{ self, alloc, io, super, path, options, &que }),
-        else => group.async(io, extractIPC, .{ self, alloc, io, super, path, options, &que }),
+        .dir, .ext_dir => group.async(io, extractDir, .{
+            self,
+            alloc,
+            io,
+            fil,
+            &decomp.interface,
+            &frag_table,
+            super.block_size,
+            super.dir_start,
+            path,
+            options,
+            &que,
+        }),
+        .file, .ext_file => group.async(io, extractRegFile, .{
+            self,
+            alloc,
+            io,
+            file,
+            &decomp.interface,
+            &frag_table,
+            super.block_size,
+            path,
+            options,
+            &que,
+        }),
+        .symlink, .ext_symlink => group.async(Io, extractSymlink, .{ self, io, path, options, &que }),
+        else => group.async(io, extractDevice, .{ self, alloc, io, super, path, options, &que }),
     }
 
     var id_table: LookupTable.CachedTable(u16) = .init(alloc, fil, decomp, super.id_start, super.id_count);
@@ -271,7 +289,7 @@ pub fn extract(self: Inode, alloc: std.mem.Allocator, io: Io, fil: OffsetFile, s
                     // TODO: Check error.
                     const xattr_res = std.os.linux.fsetxattr(ret_file.handle, x.key, x.value.ptr, x.value.len, 0);
                     if (xattr_res != 0 and options.verbose)
-                        options.verbose_writer.?.print("setxattr failed with code: {}\n", .{xattr_res});
+                        options.verbose_writer.?.print("setxattr failed with code: {}\n", .{xattr_res}) catch {};
                 }
             }
         }
@@ -279,7 +297,7 @@ pub fn extract(self: Inode, alloc: std.mem.Allocator, io: Io, fil: OffsetFile, s
             try ret_file.setPermissions(io, inode.hdr.permissions);
             try ret_file.setOwner(io, try id_table.get(io, inode.hdr.uid_idx), try id_table.get(io, inode.hdr.gid_idx));
         }
-        if (group.token.raw == null and !que.type_erased.closed) que.close(io);
+        if (!que.type_erased.closed and group.token.raw == null) que.close(io);
     }
 }
 pub fn extractDir(
@@ -288,12 +306,70 @@ pub fn extractDir(
     io: Io,
     fil: OffsetFile,
     decomp: *const Decompressor,
+    frag: *LookupTable.CachedTable(FragEntry),
     block_size: u32,
     dir_start: u64,
+    inode_start: u64,
     path: []const u8,
     options: ExtractionOptions,
     que: *Io.Queue(FileRet),
-) !void {}
+) !void {
+    defer alloc.free(path);
+
+    const dirs = try self.readDirectory(alloc, io, fil, decomp, dir_start);
+    defer {
+        for (dirs) |d|
+            d.deinit(alloc);
+        alloc.free(dirs);
+    }
+
+    var group: Io.Group = .init;
+    defer group.cancel(io);
+
+    for (dirs) |d| {
+        var rdr = try fil.readerAt(io, d.block_start + inode_start, &[0]u8{});
+        var meta: MetadataReader = .init(alloc, &rdr.interface, decomp);
+        try meta.interface.discardAll(d.block_offset);
+
+        const inode = try read(alloc, &meta.interface, block_size);
+
+        const new_path = try std.mem.concat(alloc, u8, &[_][]const u8{ path, "/", d.name });
+
+        switch (inode.hdr.inode_type) {
+            .dir, .ext_dir => group.async(io, extractDir, .{
+                self,
+                alloc,
+                io,
+                fil,
+                &decomp.interface,
+                &frag,
+                block_size,
+                dir_start,
+                new_path,
+                options,
+                &que,
+            }),
+            .file, .ext_file => group.async(io, extractRegFile, .{
+                self,
+                alloc,
+                io,
+                file,
+                &decomp.interface,
+                &frag,
+                block_size,
+                new_path,
+                options,
+                &que,
+            }),
+            .symlink, .ext_symlink => group.async(Io, extractSymlink, .{ self, alloc, io, new_path, options, &que }),
+            else => group.async(io, extractDevice, .{ self, alloc, io, new_path, options, &que }),
+        }
+    }
+
+    try group.await(io);
+
+    try que.putOne(io, .{ .file = try Io.Dir.cwd().openFile(io, path, .{}), .inode = self });
+}
 pub fn extractRegFile(
     self: Inode,
     alloc: std.mem.Allocator,
@@ -306,6 +382,9 @@ pub fn extractRegFile(
     options: ExtractionOptions,
     que: *Io.Queue(FileRet),
 ) !void {
+    _ = options;
+    defer alloc.free(path);
+
     const atom = try Io.Dir.cwd().createFileAtomic(io, path, .{});
     defer atom.deinit(io);
 
@@ -332,7 +411,7 @@ pub fn extractRegFile(
         else => unreachable,
     }
 
-    const ext: DataExtractor = .init(fil, cache, decomp, block_size, size, start, blocks);
+    const ext: DataExtractor = .init(fil, decomp, block_size, size, start, blocks);
     ext.addFrag(frag_offset, try frag.get(io, frag_idx));
 
     var group: Io.Group = .init;
@@ -353,7 +432,18 @@ pub fn extractSymlink(
     path: []const u8,
     options: ExtractionOptions,
     que: *Io.Queue(FileRet),
-) !void {}
+) !void {
+    defer alloc.free(path);
+
+    _ = options;
+    _ = que;
+    // TODO: handle symlink options
+    const target = try self.symlinkTarget();
+
+    try Io.Dir.cwd().symLink(io, target, path, .{});
+
+    // TODO: On Linux you can't set permission & xattrs on symlinks (they inherit from their target), but on Mac you can.
+}
 pub fn extractDevice(
     self: Inode,
     alloc: std.mem.Allocator,
@@ -361,15 +451,45 @@ pub fn extractDevice(
     path: []const u8,
     options: ExtractionOptions,
     que: *Io.Queue(FileRet),
-) !void {}
-pub fn extractIPC(
-    self: Inode,
-    alloc: std.mem.Allocator,
-    io: Io,
-    path: []const u8,
-    options: ExtractionOptions,
-    que: *Io.Queue(FileRet),
-) !void {}
+) !void {
+    defer alloc.free(path);
+
+    var dev: u32 = 0;
+    var mode: u32 = undefined;
+
+    switch (self.data) {
+        .char_dev => |d| {
+            dev = d.dev;
+            mode = std.posix.DT.CHR;
+        },
+        .block_dev => |d| {
+            dev = d.dev;
+            mode = std.posix.DT.BLK;
+        },
+        .ext_char_dev => |d| {
+            dev = d.dev;
+            mode = std.posix.DT.BLK;
+        },
+        .ext_block_dev => |d| {
+            dev = d.dev;
+            mode = std.posix.DT.BLK;
+        },
+        .fifo, .ext_fifo => mode = std.posix.DT.FIFO,
+        .socket, .ext_socket => mode = std.posix.DT.SOCK,
+        else => unreachable,
+    }
+
+    const sentinel_path = try std.mem.concatMaybeSentinel(alloc, u8, &[1][]const u8{path}, 0);
+    defer alloc.free(sentinel_path);
+    const res = std.os.linux.mknod(sentinel_path, mode, dev);
+    if (res != 0 and options.verbose)
+        options.verbose_writer.?.print("mknod failed with code: {}\n", .{res}) catch {};
+
+    try que.putOne(io, .{
+        .file = try Io.Dir.cwd().openFile(io, path, .{}),
+        .inode = self,
+    });
+}
 
 fn applyMetadataLoop(alloc: std.mem.Allocator, io: Io, fil: OffsetFile, decomp: *const Decompressor, super: Archive.Superblock, que: *Io.Queue(FileRet), options: ExtractionOptions) !void {
     var id_table: LookupTable.CachedTable(u16) = .init(alloc, fil, decomp, super.id_start, super.id_count);

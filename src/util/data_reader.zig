@@ -18,7 +18,7 @@ alloc: std.mem.Allocator,
 
 fil: OffsetFile,
 io: Io,
-cache: *SharedCache,
+// cache: *SharedCache,
 decomp: *const Decompressor,
 block_size: u32,
 
@@ -34,7 +34,7 @@ sparse_block: bool = false,
 
 interface: Io.Reader,
 
-pub fn init(alloc: std.mem.Allocator, io: Io, fil: OffsetFile, cache: *SharedCache, decomp: *const Decompressor, block_size: u32, file_size: u64, data_start: u64, blocks: []BlockSize) !DataReader {
+pub fn init(alloc: std.mem.Allocator, io: Io, fil: OffsetFile, decomp: *const Decompressor, block_size: u32, file_size: u64, data_start: u64, blocks: []BlockSize) !DataReader {
     return .{
         .alloc = alloc,
 
@@ -48,7 +48,7 @@ pub fn init(alloc: std.mem.Allocator, io: Io, fil: OffsetFile, cache: *SharedCac
         .blocks = blocks,
 
         .interface = .{
-            .buffer = try cache.getCache(io),
+            .buffer = try alloc.alloc(u8, block_size),
             .seek = 0,
             .end = 0,
             .vtable = &.{
@@ -60,10 +60,7 @@ pub fn init(alloc: std.mem.Allocator, io: Io, fil: OffsetFile, cache: *SharedCac
     };
 }
 pub fn deinit(self: *DataReader) void {
-    if (self.interface.buffer.len > 0) {
-        const buf_nod: *SharedCache.BufferNode = @fieldParentPtr("cache", self.interface.buffer);
-        self.cache.returnCache(buf_nod);
-    }
+    self.alloc.free(self.interface.buffer);
 }
 pub fn addFrag(self: *DataReader, frag_offset: u32, entry: FragEntry) void {
     self.frag_offset = frag_offset;

@@ -63,12 +63,12 @@ pub fn open(self: File, alloc: std.mem.Allocator, io: Io, filepath: []const u8) 
         alloc.free(entries);
     }
     const path = std.mem.trim(u8, filepath, "/");
-    const first_element: []u8 = std.mem.sliceTo(path, "/");
+    const first_element: []const u8 = std.mem.sliceTo(path, '/');
 
     var search_slice = entries;
     var idx: usize = undefined;
     while (search_slice.len > 0) {
-        idx = search_slice / 2;
+        idx = search_slice.len / 2;
         const middle = search_slice[idx];
         switch (std.mem.order(u8, first_element, middle.name)) {
             .eq => break,

@@ -19,7 +19,7 @@ alloc: std.mem.Allocator,
 
 block_size: u32,
 buffers: std.ArrayList(Buffer),
-buffer_queue: std.SinglyLinkedList,
+buffer_queue: std.SinglyLinkedList = .{},
 
 pub fn init(alloc: std.mem.Allocator, block_size: u32) !Self {
     return .{
@@ -37,22 +37,31 @@ pub fn deinit(self: Self) void {
 
 fn decomp(d: ?*const Decompressor, alloc: std.mem.Allocator, in: []u8, out: []u8) Error!usize {
     if (d == null) {
-        const buf = try alloc.alloc(u8, in.len * 2);
+        var buf = try alloc.alloc(u8, in.len * 2);
         defer alloc.free(buf);
-        return lzmaDecomp(buf, in, out);
+        return lzmaDecomp(alloc, &buf, in, out) catch |err| return switch (err) {
+            error.OutOfMemory => Error.OutOfMemory,
+            else => Error.ReadFailed,
+        };
     }
-    var self: Self = @fieldParentPtr("interface", d.?);
+    var self: *Self = @fieldParentPtr("interface", @constCast(d.?));
     const buf_node = self.buffer_queue.popFirst();
     var buf: *Buffer = undefined;
     if (buf_node == null) {
         const new_buf = try self.buffers.addOne(self.alloc);
-        new_buf.* = .{ .{}, try self.alloc.alloc(u8, self.block_size + lzma.block_size_max) };
+        new_buf.* = .{ .node = .{}, .buf = try self.alloc.alloc(u8, self.block_size) };
         buf = new_buf;
     } else {
-        buf = @fieldParentPtr("node", buf_node);
+        buf = @fieldParentPtr("node", buf_node.?);
     }
     defer self.buffer_queue.prepend(&buf.node);
-    return lzmaDecomp(self.alloc, &buf.buf, in, out);
+    return lzmaDecomp(self.alloc, &buf.buf, in, out) catch |err| {
+        // self.err = err;
+        return switch (err) {
+            error.OutOfMemory => Error.OutOfMemory,
+            else => Error.ReadFailed,
+        };
+    };
 }
 
 inline fn lzmaDecomp(alloc: std.mem.Allocator, buffer: *[]u8, in: []u8, out: []u8) !usize {

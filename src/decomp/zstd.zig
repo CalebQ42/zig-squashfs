@@ -19,7 +19,7 @@ alloc: std.mem.Allocator,
 
 block_size: u32,
 buffers: std.ArrayList(Buffer),
-buffer_queue: std.SinglyLinkedList,
+buffer_queue: std.SinglyLinkedList = .{},
 
 pub fn init(alloc: std.mem.Allocator, block_size: u32) !Self {
     return .{
@@ -41,15 +41,15 @@ fn decomp(d: ?*const Decompressor, alloc: std.mem.Allocator, in: []u8, out: []u8
         defer alloc.free(buf);
         return zstdDecomp(buf, in, out);
     }
-    var self: Self = @fieldParentPtr("interface", d.?);
+    var self: *Self = @fieldParentPtr("interface", @constCast(d.?));
     const buf_node = self.buffer_queue.popFirst();
     var buf: *Buffer = undefined;
     if (buf_node == null) {
         const new_buf = try self.buffers.addOne(self.alloc);
-        new_buf.* = .{ .{}, try self.alloc.alloc(u8, self.block_size + zstd.block_size_max) };
+        new_buf.* = .{ .node = .{}, .buf = try self.alloc.alloc(u8, self.block_size + zstd.block_size_max) };
         buf = new_buf;
     } else {
-        buf = @fieldParentPtr("node", buf_node);
+        buf = @fieldParentPtr("node", buf_node.?);
     }
     defer self.buffer_queue.prepend(&buf.node);
     return zstdDecomp(buf.buf, in, out);

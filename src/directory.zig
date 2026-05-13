@@ -31,7 +31,7 @@ pub fn readDirectory(alloc: std.mem.Allocator, rdr: *Reader, size: u32) ![]DirEn
 
         tot_red += @sizeOf(Header);
 
-        for (hdr.count + 1) |_| {
+        for (0..hdr.count + 1) |_| {
             try rdr.readSliceEndian(RawEntry, @ptrCast(&raw), .little);
 
             const new_name = try alloc.alloc(u8, raw.name_size + 1);
