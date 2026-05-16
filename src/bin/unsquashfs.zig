@@ -18,7 +18,7 @@ const help_mgs =
     \\  -dx             Don't set xattr values
     \\  -dp             Don't set permissions (includes setting uid & gid owner)
     \\
-    \\  -p <threads>    Specify how many threads to use. If no present or zero, the system's logical cores count is used.
+    \\  -p <threads>    Specify how many threads to use. If not present or zero, the system's logical cores count is used.
     \\  -v              Verbose
     \\
     \\  --force         Force extraction. If the destination already exists, it will be deleted.
@@ -42,18 +42,23 @@ var force: bool = false;
 pub fn main(init: std.process.Init) !void {
     const alloc = init.gpa;
     const io = init.io;
+
     var stdout = std.Io.File.stdout();
+    defer stdout.close(io);
     var out = stdout.writer(io, &[0]u8{});
     defer out.interface.flush() catch {};
+
     try handleArgs(init.minimal.args, &out.interface);
     if (archive.len == 0) {
         try out.interface.print("You must provide a squashfs archive\n", .{});
         try out.interface.print(help_mgs, .{});
         return;
     }
+
     var fil = try Io.Dir.cwd().openFile(io, archive, .{}); //TODO: Handle error gracefully.
     defer fil.close(io);
-    var arc: squashfs.Archive = try .init(io, fil, offset); //TODO: Update when memory size matters. //TODO: Handle error gracefully.
+
+    var arc: squashfs.Archive = try .init(io, fil, offset); //TODO: Handle error gracefully.
     const options: squashfs.ExtractionOptions = .{
         .threads = if (threads == 0) try std.Thread.getCpuCount() else threads,
         .verbose = verbose,
@@ -61,6 +66,7 @@ pub fn main(init: std.process.Init) !void {
         .ignore_xattr = ignore_xattrs,
         .ignore_permissions = ignore_permissions,
     };
+
     if (force)
         try Io.Dir.cwd().deleteTree(io, extLoc);
     try arc.extract(alloc, io, extLoc, options); //TODO: Handle error gracefully.

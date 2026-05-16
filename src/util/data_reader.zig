@@ -10,7 +10,8 @@ const FragEntry = @import("../frag.zig").FragEntry;
 const BlockSize = @import("../inode_data/file.zig").BlockSize;
 const Decompressor = @import("decompressor.zig");
 const OffsetFile = @import("offset_file.zig");
-const SharedCache = @import("shared_cache.zig");
+
+// const SharedCache = @import("shared_cache.zig");
 
 const DataReader = @This();
 
@@ -18,8 +19,8 @@ alloc: std.mem.Allocator,
 
 fil: OffsetFile,
 io: Io,
-// cache: *SharedCache,
 decomp: *const Decompressor,
+cache: *Io.Queue([]u8),
 block_size: u32,
 
 file_size: u64,
@@ -34,13 +35,14 @@ sparse_block: bool = false,
 
 interface: Io.Reader,
 
-pub fn init(alloc: std.mem.Allocator, io: Io, fil: OffsetFile, decomp: *const Decompressor, block_size: u32, file_size: u64, data_start: u64, blocks: []BlockSize) !DataReader {
+pub fn init(alloc: std.mem.Allocator, io: Io, fil: OffsetFile, decomp: *const Decompressor, cache: *Io.Queue([]u8), block_size: u32, file_size: u64, data_start: u64, blocks: []BlockSize) !DataReader {
     return .{
         .alloc = alloc,
 
         .fil = fil,
         .io = io,
         .decomp = decomp,
+        .cache = cache,
         .block_size = block_size,
 
         .file_size = file_size,
@@ -91,8 +93,8 @@ fn advanceBuffer(self: *DataReader) !void {
             try rdr.interface.readSliceAll(self.interface.buffer[0..self.interface.end]);
         } else {
             @branchHint(.likely);
-            const tmp = try self.cache.getCache(self.io);
-            defer self.cache.returnCache(tmp);
+            const tmp = try self.cache.getOne(self.io);
+            defer self.cache.putOne(tmp) catch {};
 
             var rdr = try self.fil.readerAt(self.io, entry.start, &[0]u8{});
             try rdr.interface.readSliceAll(tmp.cache[0..entry.size.size]);
@@ -117,8 +119,8 @@ fn advanceBuffer(self: *DataReader) !void {
         self.cur_offset += self.interface.end;
     } else {
         @branchHint(.likely);
-        const tmp = try self.cache.getCache(self.io);
-        defer self.cache.returnCache(tmp);
+        const tmp = try self.cache.getOne(self.io);
+        defer self.cache.putOne(tmp) catch {};
 
         var rdr = try self.fil.readerAt(self.io, self.cur_offset, &[0]u8{});
         try rdr.interface.readSliceAll(tmp.cache[0..block.size]);

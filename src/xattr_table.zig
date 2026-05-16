@@ -18,7 +18,7 @@ kv_start: u64,
 
 table: LookupTable.CachedTable(TableValue),
 value_cache: std.AutoHashMap(InodeRef, []const u8),
-value_mut: Io.Mutex,
+value_mut: Io.Mutex = .init,
 
 pub fn init(alloc: std.mem.Allocator, io: Io, fil: OffsetFile, decomp: *const Decompressor, xattr_start: u64) !XattrCachedTable {
     var rdr = try fil.readerAt(io, xattr_start, &[0]u8{});
@@ -36,7 +36,7 @@ pub fn init(alloc: std.mem.Allocator, io: Io, fil: OffsetFile, decomp: *const De
 
         .kv_start = start,
 
-        .table = .init(alloc, fil, xattr_start + 16, num),
+        .table = .init(alloc, fil, decomp, xattr_start + 16, num),
         .value_cache = .init(alloc),
     };
 }
@@ -56,37 +56,39 @@ pub fn get(self: *XattrCachedTable, alloc: std.mem.Allocator, io: Io, idx: u32) 
     errdefer alloc.free(out);
 
     for (0..lookup.count) |i| {
-        const key_entry: KeyEntry = undefined;
+        var key_entry: KeyEntry = undefined;
         try meta.interface.readSliceEndian(KeyEntry, @ptrCast(&key_entry), .little);
 
-        const key = switch (key_entry.type.namespace) {
+        const key: [:0]u8 = switch (key_entry.type.namespace) {
             .user => blk: {
                 const tmp = try alloc.alloc(u8, key_entry.name_size + 1 + 5);
                 errdefer alloc.free(tmp);
                 try meta.interface.readSliceEndian(u8, tmp[5 .. tmp.len - 1], .little);
-                @memset(tmp[0..5], "user.");
-                break :blk tmp;
+                @memcpy(tmp[0..5], "user.");
+                tmp[tmp.len - 1] = 0;
+                break :blk @ptrCast(tmp);
             },
             .trusted => blk: {
                 const tmp = try alloc.alloc(u8, key_entry.name_size + 1 + 8);
                 errdefer alloc.free(tmp);
                 try meta.interface.readSliceEndian(u8, tmp[8 .. tmp.len - 1], .little);
-                @memset(tmp[0..8], "trusted.");
-                break :blk tmp;
+                @memcpy(tmp[0..8], "trusted.");
+                tmp[tmp.len - 1] = 0;
+                break :blk @ptrCast(tmp);
             },
             .security => blk: {
                 const tmp = try alloc.alloc(u8, key_entry.name_size + 1 + 9);
                 errdefer alloc.free(tmp);
                 try meta.interface.readSliceEndian(u8, tmp[9 .. tmp.len - 1], .little);
-                @memset(tmp[0..9], "security.");
-                break :blk tmp;
+                @memcpy(tmp[0..9], "security.");
+                tmp[tmp.len - 1] = 0;
+                break :blk @ptrCast(tmp);
             },
         };
-        key[key.len - 1] = 0;
         errdefer alloc.free(key);
 
         if (key_entry.type.out_of_line) {
-            const value: ValueOutOfLineEntry = undefined;
+            var value: ValueOutOfLineEntry = undefined;
             try meta.interface.readSliceEndian(ValueOutOfLineEntry, @ptrCast(&value), .little);
 
             out[i] = .{
@@ -95,7 +97,7 @@ pub fn get(self: *XattrCachedTable, alloc: std.mem.Allocator, io: Io, idx: u32) 
             };
             continue;
         }
-        const val_ref: InodeRef = .{ .block_start = meta.cur_block_start, .block_offset = meta.interface.seek };
+        const val_ref: InodeRef = .{ .block_start = meta.cur_block_start, .block_offset = @truncate(meta.interface.seek) };
 
         try self.value_mut.lock(io);
         defer self.value_mut.unlock(io);
@@ -108,7 +110,7 @@ pub fn get(self: *XattrCachedTable, alloc: std.mem.Allocator, io: Io, idx: u32) 
         }
 
         var val_size: u32 = undefined;
-        try meta.interface.readSliceEndian(val_size, @ptrCast(&val_size), .little);
+        try meta.interface.readSliceEndian(u32, @ptrCast(&val_size), .little);
 
         const val = try self.alloc.alloc(u8, val_size);
         errdefer alloc.free(val);
@@ -134,7 +136,7 @@ fn valueAt(self: *XattrCachedTable, io: Io, ref: InodeRef) ![]const u8 {
     try meta.interface.discardAll(ref.block_offset);
 
     var val_size: u32 = undefined;
-    try meta.interface.readSliceEndian(val_size, @ptrCast(&val_size), .little);
+    try meta.interface.readSliceEndian(u32, @ptrCast(&val_size), .little);
 
     const val = try self.alloc.alloc(u8, val_size);
     errdefer self.alloc.free(val);

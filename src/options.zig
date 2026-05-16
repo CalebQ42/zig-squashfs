@@ -6,7 +6,7 @@ const Writer = std.Io.Writer;
 const ExtractionOptions = @This();
 
 /// The number of threads used for extraction. 0 implies single threaded.
-threads: usize = 1,
+threads: usize = 1, // TODO: Update to better integrate with zig 0.16 Io. Maybe limit to only single or multi-threaded.
 /// Don't set the file's owner & permissions after extraction
 ignore_permissions: bool = false,
 /// Don't set xattr values. Currently xattrs are never set anyway.

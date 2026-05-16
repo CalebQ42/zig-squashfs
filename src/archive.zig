@@ -70,10 +70,7 @@ pub fn extract(self: Archive, alloc: std.mem.Allocator, io: Io, extract_dir: []c
         self.super.block_size,
         self.super.root_ref,
     );
-    _ = root_inode;
-    _ = extract_dir;
-    _ = options;
-    return error.TODO;
+    return root_inode.extract(alloc, io, self.file, self.super, extract_dir, options);
 }
 
 /// Returns the inode with the given inode number.

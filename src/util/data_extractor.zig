@@ -7,13 +7,14 @@ const FragEntry = @import("../frag.zig").FragEntry;
 const BlockSize = @import("../inode_data/file.zig").BlockSize;
 const Decompressor = @import("decompressor.zig");
 const OffsetFile = @import("offset_file.zig");
-const SharedCache = @import("shared_cache.zig");
+
+// const SharedCache = @import("shared_cache.zig");
 
 const DataExtractor = @This();
 
 fil: OffsetFile,
-// cache: *SharedCache,
 decomp: *const Decompressor,
+cache: *Io.Queue([1024 * 1024]u8),
 block_size: u32,
 
 file_size: u64,
@@ -23,11 +24,11 @@ blocks: []BlockSize,
 frag_offset: u32 = 0,
 frag_entry: ?FragEntry = null,
 
-pub fn init(fil: OffsetFile, decomp: *const Decompressor, block_size: u32, file_size: u64, data_start: u64, blocks: []BlockSize) DataExtractor {
+pub fn init(fil: OffsetFile, decomp: *const Decompressor, cache: *Io.Queue([1024 * 1024]u8), block_size: u32, file_size: u64, data_start: u64, blocks: []BlockSize) DataExtractor {
     return .{
         .fil = fil,
-        // .cache = cache,
         .decomp = decomp,
+        .cache = cache,
         .block_size = block_size,
 
         .file_size = file_size,
@@ -57,7 +58,7 @@ pub fn extractAsync(self: DataExtractor, alloc: std.mem.Allocator, io: Io, group
         group.async(io, fragThread, .{ self, alloc, io, fil });
 }
 
-fn blockThread(self: DataExtractor, alloc: std.mem.Allocator, io: Io, fil: Io.File, read_offset: u64, idx: u32) !void {
+fn blockThread(self: DataExtractor, alloc: std.mem.Allocator, io: Io, fil: Io.File, read_offset: u64, idx: usize) !void {
     const block = self.blocks[idx];
 
     const cur_block_size = if (idx == self.numBlocks() - 1)
@@ -76,19 +77,19 @@ fn blockThread(self: DataExtractor, alloc: std.mem.Allocator, io: Io, fil: Io.Fi
 
     var rdr = try self.fil.readerAt(io, read_offset, &[0]u8{});
     if (block.uncompressed) {
-        try rdr.interface.streamExact(&wrt, cur_block_size);
+        try rdr.interface.streamExact(&wrt.interface, cur_block_size);
         return;
     } else {
         @branchHint(.likely);
-        var cache = try self.cache.getCache(io);
-        defer self.cache.returnCache(cache);
+        var cache = try self.cache.getOne(io);
+        defer self.cache.putOne(io, cache) catch {};
 
-        var tmp = try self.cache.getCache(io);
-        defer self.cache.returnCache(tmp);
+        var tmp = try self.cache.getOne(io);
+        defer self.cache.putOne(io, tmp) catch {};
 
-        try rdr.interface.readSliceAll(cache.cache[0..block.size]);
-        _ = try self.decomp.Decompress(alloc, cache.cache[0..block.size], tmp.cache[0..cur_block_size]);
-        try wrt.interface.writeAll(tmp.cache[0..cur_block_size]);
+        try rdr.interface.readSliceAll(cache[0..block.size]);
+        _ = try self.decomp.Decompress(alloc, cache[0..block.size], tmp[0..cur_block_size]);
+        try wrt.interface.writeAll(tmp[0..cur_block_size]);
     }
 }
 fn fragThread(self: DataExtractor, alloc: std.mem.Allocator, io: Io, fil: Io.File) !void {
@@ -102,18 +103,18 @@ fn fragThread(self: DataExtractor, alloc: std.mem.Allocator, io: Io, fil: Io.Fil
     var rdr = try self.fil.readerAt(io, frag.start, &[0]u8{});
     if (frag.size.uncompressed) {
         try rdr.interface.discardAll(self.frag_offset);
-        try rdr.interface.streamExact(&wrt, cur_block_size);
+        try rdr.interface.streamExact(&wrt.interface, cur_block_size);
         return;
     } else {
         @branchHint(.likely);
-        var cache = try self.cache.getCache(io);
-        defer self.cache.returnCache(cache);
+        var cache = try self.cache.getOne(io);
+        defer self.cache.putOne(io, cache) catch {};
 
-        var tmp = try self.cache.getCache(io);
-        defer self.cache.returnCache(tmp);
+        var tmp = try self.cache.getOne(io);
+        defer self.cache.putOne(io, tmp) catch {};
 
-        try rdr.interface.readSliceAll(cache.cache[0..frag.size.size]);
-        _ = try self.decomp.Decompress(alloc, cache.cache[0..frag.size.size], tmp.cache[0..self.block_size]);
-        try wrt.interface.writeAll(tmp.cache[0..cur_block_size]);
+        try rdr.interface.readSliceAll(cache[0..frag.size.size]);
+        _ = try self.decomp.Decompress(alloc, cache[0..frag.size.size], tmp[0..self.block_size]);
+        try wrt.interface.writeAll(tmp[0..cur_block_size]);
     }
 }

@@ -75,14 +75,17 @@ pub fn CachedTable(comptime T: anytype) type {
             try rdr.interface.readSliceEndian(u64, @ptrCast(&offset), .little);
 
             const len: u16 = if (self.total_num % T_PER_BLOCK != 0 and block == (self.total_num - 1) / T_PER_BLOCK)
-                self.total_num % T_PER_BLOCK
+                @truncate(self.total_num % T_PER_BLOCK)
             else
                 T_PER_BLOCK;
 
             rdr = try self.fil.readerAt(io, offset, &[0]u8{});
-            var meta: MetadataReader = .init(self.alloc, &rdr, self.decomp);
+            var meta: MetadataReader = .init(self.alloc, &rdr.interface, self.decomp);
 
-            try self.table.put(block, try meta.interface.readSliceEndianAlloc(self.alloc, T, len, .little));
+            const slice = try meta.interface.readSliceEndianAlloc(self.alloc, T, len, .little);
+            try self.table.put(block, slice);
+
+            return slice[block_offset];
         }
     };
 }

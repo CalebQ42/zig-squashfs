@@ -29,9 +29,9 @@ pub fn init(alloc: std.mem.Allocator, block_size: u32) !Self {
         .buffers = try .initCapacity(alloc, 5),
     };
 }
-pub fn deinit(self: Self) void {
-    for (self.buffers) |buf|
-        self.alloc.free(buf);
+pub fn deinit(self: *Self) void {
+    for (self.buffers.items) |buf|
+        self.alloc.free(buf.buf);
     self.buffers.deinit(self.alloc);
 }
 
