@@ -108,7 +108,7 @@ fn getExtractorFromData(fil: OffsetFile, cache: *SharedCache, decomp: *const Dec
     }
     return ext;
 }
-// Get a symlink's target path
+/// Get a symlink's target path
 pub fn symlinkTarget(self: Inode) ![]const u8 {
     return switch (self.data) {
         .symlink => |s| s.target,
@@ -116,28 +116,17 @@ pub fn symlinkTarget(self: Inode) ![]const u8 {
         else => Error.NotSymlink,
     };
 }
-// Get inode's gid
+/// Get inode's gid
 pub fn gid(self: Inode, alloc: std.mem.Allocator, io: Io, fil: OffsetFile, decomp: *const Decompressor, id_table_start: u64) !u16 {
     return LookupTable.lookupValue(u16, alloc, io, decomp, fil, id_table_start, self.hdr.gid_idx);
 }
-// Get inode's uid
+/// Get inode's uid
 pub fn uid(self: Inode, alloc: std.mem.Allocator, io: Io, fil: OffsetFile, decomp: *const Decompressor, id_table_start: u64) !u16 {
     return LookupTable.lookupValue(u16, alloc, io, decomp, fil, id_table_start, self.hdr.uid_idx);
 }
+/// Get the inode's xattr values as an index into the Archive's xattr table.
+/// Returns error.NoXattr if the inode doesn't have extended attributes.
 pub fn xattrIndex(self: Inode) !u32 {
-    return switch (self.data) {
-        .ext_dir => |e| e.xattr_idx,
-        .ext_file => |e| e.xattr_idx,
-        .ext_symlink => |e| e.xattr_idx,
-        .ext_block_dev => |e| e.xattr_idx,
-        .ext_char_dev => |e| e.xattr_idx,
-        .ext_fifo => |e| e.xattr_idx,
-        .ext_socket => |e| e.xattr_idx,
-        else => Error.NotExtended,
-    };
-}
-// Get an inode's xattr values. If the inode does not have xattr values (including if the inode is not an extended type), an empty slice is returned.
-pub fn xattrValues(self: Inode, alloc: std.mem.Allocator, io: Io, fil: OffsetFile, decomp: *const Decompressor, xattr_table_start: u64) ![]XattrTable.XattrOwned {
     const idx = switch (self.data) {
         .ext_dir => |e| e.xattr_idx,
         .ext_file => |e| e.xattr_idx,
@@ -146,9 +135,14 @@ pub fn xattrValues(self: Inode, alloc: std.mem.Allocator, io: Io, fil: OffsetFil
         .ext_char_dev => |e| e.xattr_idx,
         .ext_fifo => |e| e.xattr_idx,
         .ext_socket => |e| e.xattr_idx,
-        else => return &[0]XattrTable.XattrOwned{},
+        else => Error.NoXattr,
     };
-    if (idx == 0xFFFFFFFF) return &[0]XattrTable.XattrOwned{};
+    if (idx == 0xFFFFFFFF) return Error.NoXattr;
+    return idx;
+}
+// Get an inode's xattr values. If the inode does not have xattr values (including if the inode is not an extended type), an empty slice is returned.
+pub fn xattrValues(self: Inode, alloc: std.mem.Allocator, io: Io, fil: OffsetFile, decomp: *const Decompressor, xattr_table_start: u64) ![]XattrTable.XattrOwned {
+    const idx = self.xattrIndex() catch &[0]XattrTable.XattrOwned{};
     return XattrTable.statelessLookup(alloc, io, decomp, fil, xattr_table_start, idx);
 }
 
@@ -214,7 +208,21 @@ pub const Header = extern struct {
 
 const FileRet = struct {
     file: Io.File,
-    inode: Inode,
+    permissions: u16,
+    uid_idx: u16,
+    gid_idx: u16,
+    xattr_idx: ?u32,
+};
+const PathRet = struct {
+    path: []const u8,
+    permissions: u16,
+    uid_idx: u16,
+    gid_idx: u16,
+    xattr_idx: ?u32,
+};
+const ReturnUnion = union(enum) {
+    file_ret: anyerror!FileRet,
+    path_ret: anyerror!PathRet,
 };
 const Tables = struct {
     id: LookupTable.CachedTable(u16),
@@ -247,12 +255,12 @@ pub fn extract(self: Inode, alloc: std.mem.Allocator, io: Io, fil: OffsetFile, s
     var cache: Io.Queue([1024 * 1024]u8) = .init(cache_buf);
     defer cache.close(io);
 
-    const sel_buf: []anyerror!FileRet = try alloc.alloc(anyerror!FileRet, 10);
-    var group: Io.Select(anyerror!FileRet) = .init(io, sel_buf);
+    const sel_buf: []ReturnUnion = try alloc.alloc(ReturnUnion, 10);
+    var group: Io.Select(ReturnUnion) = .init(io, sel_buf);
     defer group.cancelDiscard();
 
     switch (self.hdr.inode_type) {
-        .dir, .ext_dir => group.async(FileRet, extractDir, .{
+        .dir, .ext_dir => group.async(.file_ret, extractDir, .{
             self,
             alloc,
             io,
@@ -267,7 +275,7 @@ pub fn extract(self: Inode, alloc: std.mem.Allocator, io: Io, fil: OffsetFile, s
             &que,
             &cache,
         }),
-        .file, .ext_file => group.async(io, extractRegFile, .{
+        .file, .ext_file => group.async(.file_ret, extractRegFile, .{
             self,
             alloc,
             io,
@@ -279,8 +287,8 @@ pub fn extract(self: Inode, alloc: std.mem.Allocator, io: Io, fil: OffsetFile, s
             &que,
             &cache,
         }),
-        .symlink, .ext_symlink => group.async(io, extractSymlink, .{ self, alloc, io, path, options, &que }),
-        else => group.async(io, extractDevice, .{ self, alloc, io, path, options, &que }),
+        .symlink, .ext_symlink => group.async(.file_ret, extractSymlink, .{ self, alloc, io, path, options, &que }),
+        else => group.async(.file_ret, extractDevice, .{ self, alloc, io, path, options, &que }),
     }
 
     var id_table: LookupTable.CachedTable(u16) = .init(alloc, fil, decomp.decompressor(), super.id_start, super.id_count);
@@ -340,7 +348,7 @@ fn extractDir(
         alloc.free(dirs);
     }
 
-    var group: Io.Group = .init;
+    var group: Io.Select() = .init;
     defer group.cancel(io);
 
     for (dirs) |d| {
