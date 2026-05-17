@@ -13,6 +13,7 @@ const dir = @import("inode_data/dir.zig");
 const file = @import("inode_data/file.zig");
 const misc = @import("inode_data/misc.zig");
 const LookupTable = @import("lookup_table.zig");
+const CachedTable = LookupTable.CachedTable;
 const DataExtractor = @import("util/data_extractor.zig");
 const DataReader = @import("util/data_reader.zig");
 const Decompressor = @import("util/decompressor.zig");
@@ -206,23 +207,16 @@ pub const Header = extern struct {
 
 // Extract
 
-const FileRet = struct {
-    file: Io.File,
-    permissions: u16,
-    uid_idx: u16,
-    gid_idx: u16,
-    xattr_idx: ?u32,
-};
 const PathRet = struct {
     path: []const u8,
     permissions: u16,
     uid_idx: u16,
     gid_idx: u16,
-    xattr_idx: ?u32,
+    xattr_idx: ?u32 = null,
 };
-const ReturnUnion = union(enum) {
-    file_ret: anyerror!FileRet,
-    path_ret: anyerror!PathRet,
+const ExtractReturnUnion = union(enum) {
+    path_ret: anyerror!PathRet, // TODO: convert to concrete error type instead of anyerror.
+    void_ret: anyerror!void,
 };
 const Tables = struct {
     id: LookupTable.CachedTable(u16),
@@ -231,315 +225,113 @@ const Tables = struct {
 };
 
 pub fn extract(self: Inode, alloc: std.mem.Allocator, io: Io, fil: OffsetFile, super: Archive.Superblock, path: []const u8, options: ExtractionOptions) !void {
-    var decomp: Decomp = switch (super.compression) {
-        .gzip => .{ .gzip = try @import("decomp/zlib.zig").init(alloc, super.block_size) },
-        .lzma => .{ .lzma = try @import("decomp/lzma.zig").init(alloc, super.block_size) },
-        .xz => .{ .xz = try @import("decomp/xz.zig").init(alloc, super.block_size) },
-        .zstd => .{ .zstd = try @import("decomp/zstd.zig").init(alloc, super.block_size) },
+    var decomp_base: Decomp = switch (super.compression) {
+        .gzip => .{ .gzip = try .init(alloc, super.block_size) },
+        .lzma => .{ .lzma = try .init(alloc, super.block_size) },
+        .xz => .{ .xz = try .init(alloc, super.block_size) },
+        .zstd => .{ .zstd = try .init(alloc, super.block_size) },
         else => unreachable,
     };
-    defer decomp.deinit();
+    defer decomp_base.deinit();
+    const decomp = decomp_base.decompressor();
 
-    var frag_table: LookupTable.CachedTable(FragEntry) = .init(alloc, fil, decomp.decompressor(), super.frag_start, super.frag_count);
-    defer frag_table.deinit(io);
+    var frag_table: CachedTable(FragEntry) = .init(alloc, fil, decomp, super.frag_start, super.frag_count);
+    defer if (!options.ignore_permissions) frag_table.deinit(io);
 
-    // var group: Io.Group = .init;
-    // defer group.cancel(io);
-
-    var que_arr = [1]FileRet{undefined} ** 12;
-    var que: Io.Queue(FileRet) = .init(&que_arr);
-    defer que.close(io);
-
-    const cache_buf = try alloc.alloc([1024 * 1024]u8, 12);
-    defer alloc.free(cache_buf);
-    var cache: Io.Queue([1024 * 1024]u8) = .init(cache_buf);
-    defer cache.close(io);
-
-    const sel_buf: []ReturnUnion = try alloc.alloc(ReturnUnion, 10);
-    var group: Io.Select(ReturnUnion) = .init(io, sel_buf);
-    defer group.cancelDiscard();
+    var sel_buf = [1]ExtractReturnUnion{undefined} ** 10;
+    var sel: Io.Select(ExtractReturnUnion) = .init(io, &sel_buf);
+    defer sel.cancelDiscard();
 
     switch (self.hdr.inode_type) {
-        .dir, .ext_dir => group.async(.file_ret, extractDir, .{
-            self,
-            alloc,
-            io,
-            fil,
-            decomp.decompressor(),
-            &frag_table,
-            super.block_size,
-            super.dir_start,
-            super.inode_start,
-            path,
-            options,
-            &que,
-            &cache,
-        }),
-        .file, .ext_file => group.async(.file_ret, extractRegFile, .{
-            self,
-            alloc,
-            io,
-            fil,
-            decomp.decompressor(),
-            &frag_table,
-            super.block_size,
-            path,
-            &que,
-            &cache,
-        }),
-        .symlink, .ext_symlink => group.async(.file_ret, extractSymlink, .{ self, alloc, io, path, options, &que }),
-        else => group.async(.file_ret, extractDevice, .{ self, alloc, io, path, options, &que }),
+        .file, .ext_file => sel.async(.path_ret, extractFile, .{ self, alloc, io, fil, decomp, &frag_table, super.block_size, path }),
+        else => return error.TODO,
     }
 
-    var id_table: LookupTable.CachedTable(u16) = .init(alloc, fil, decomp.decompressor(), super.id_start, super.id_count);
-    defer id_table.deinit(io);
-    var xattr_table: XattrTable = try .init(alloc, io, fil, decomp.decompressor(), super.xattr_start);
-    defer xattr_table.deinit(io);
+    var xattr_table: ?XattrTable = if (!options.ignore_xattr)
+        try .init(alloc, io, fil, decomp, super.xattr_start)
+    else
+        null;
+    defer if (!options.ignore_xattr) xattr_table.?.deinit(io);
+
+    var id_table: ?CachedTable(u16) = if (!options.ignore_xattr)
+        .init(alloc, fil, decomp, super.id_start, super.id_count)
+    else
+        null;
+    defer if (!options.ignore_xattr) id_table.?.deinit(io);
 
     while (true) {
-        const ret = que.getOne(io) catch break;
+        if (sel.group.token.load(.unordered) == null) break;
 
-        const inode: Inode = ret.inode;
-        defer inode.deinit(alloc);
-        const ret_file: Io.File = ret.file;
+        const ret = try sel.queue.getOne(io);
+        switch (ret) {
+            .void_ret => {
+                try ret.void_ret;
+                continue;
+            },
+            else => {},
+        }
+        const path_ret = try ret.path_ret;
+        defer if (path_ret.path.len != path.len) alloc.free(path_ret.path);
+
+        if (options.ignore_permissions and options.ignore_xattr) continue;
+        if (options.ignore_permissions and path_ret.xattr_idx == null) continue;
+
+        var ret_file = try Io.Dir.cwd().openFile(io, path_ret.path, .{});
         defer ret_file.close(io);
 
-        if (!options.ignore_xattr) {
-            if (inode.xattrIndex()) |idx| {
-                const xattrs = try xattr_table.get(alloc, io, idx);
-                for (xattrs) |x| {
-                    // TODO: Check error.
-                    const xattr_res = std.os.linux.fsetxattr(ret_file.handle, x.key, x.value.ptr, x.value.len, 0);
-                    if (xattr_res != 0 and options.verbose)
-                        options.verbose_writer.?.print("setxattr failed with code: {}\n", .{xattr_res}) catch {};
-                    alloc.free(x.key);
-                }
-                alloc.free(xattrs);
-            } else |_| {}
-        }
         if (!options.ignore_permissions) {
-            try ret_file.setPermissions(io, @enumFromInt(inode.hdr.permissions));
-            try ret_file.setOwner(io, try id_table.get(io, inode.hdr.uid_idx), try id_table.get(io, inode.hdr.gid_idx));
+            try ret_file.setPermissions(io, @enumFromInt(path_ret.permissions));
+            try ret_file.setOwner(io, try id_table.?.get(io, path_ret.uid_idx), try id_table.?.get(io, path_ret.gid_idx));
         }
-        if (!que.type_erased.closed and group.token.raw == null) que.close(io);
-    }
-}
-fn extractDir(
-    self: Inode,
-    alloc: std.mem.Allocator,
-    io: Io,
-    fil: OffsetFile,
-    decomp: *const Decompressor,
-    frag: *LookupTable.CachedTable(FragEntry),
-    block_size: u32,
-    dir_start: u64,
-    inode_start: u64,
-    path: []const u8,
-    options: ExtractionOptions,
-    que: *Io.Queue(FileRet),
-    cache: *Io.Queue([1024 * 1024]u8),
-) !void {
-    defer alloc.free(path);
+        if (!options.ignore_xattr and path_ret.xattr_idx != null) {
+            const xattrs = try xattr_table.?.get(alloc, io, path_ret.xattr_idx.?);
+            defer {
+                for (xattrs) |x|
+                    alloc.free(x.key);
+                alloc.free(xattrs);
+            }
 
-    const dirs = try self.readDirectory(alloc, io, fil, decomp, dir_start);
-    defer {
-        for (dirs) |d|
-            d.deinit(alloc);
-        alloc.free(dirs);
-    }
-
-    var group: Io.Select() = .init;
-    defer group.cancel(io);
-
-    for (dirs) |d| {
-        var rdr = try fil.readerAt(io, d.block_start + inode_start, &[0]u8{});
-        var meta: MetadataReader = .init(alloc, &rdr.interface, decomp);
-        try meta.interface.discardAll(d.block_offset);
-
-        const inode = try read(alloc, &meta.interface, block_size);
-
-        const new_path = try std.mem.concat(alloc, u8, &[_][]const u8{ path, "/", d.name });
-
-        switch (inode.hdr.inode_type) {
-            .dir, .ext_dir => group.async(io, extractDir, .{
-                self,
-                alloc,
-                io,
-                fil,
-                decomp,
-                frag,
-                block_size,
-                dir_start,
-                inode_start,
-                new_path,
-                options,
-                que,
-                cache,
-            }),
-            .file, .ext_file => group.async(io, extractRegFile, .{
-                self,
-                alloc,
-                io,
-                fil,
-                decomp,
-                frag,
-                block_size,
-                new_path,
-                que,
-                cache,
-            }),
-            .symlink, .ext_symlink => group.async(io, extractSymlink, .{ self, alloc, io, new_path, options, que }),
-            else => group.async(io, extractDevice, .{ self, alloc, io, new_path, options, que }),
-        }
-    }
-
-    try group.await(io);
-
-    try que.putOne(io, .{ .file = try Io.Dir.cwd().openFile(io, path, .{}), .inode = self });
-}
-fn extractRegFile(
-    self: Inode,
-    alloc: std.mem.Allocator,
-    io: Io,
-    fil: OffsetFile,
-    decomp: *const Decompressor,
-    frag: *LookupTable.CachedTable(FragEntry),
-    block_size: u32,
-    path: []const u8,
-    que: *Io.Queue(FileRet),
-    cache: *Io.Queue([1024 * 1024]u8),
-) !void {
-    defer alloc.free(path);
-
-    var atom = try Io.Dir.cwd().createFileAtomic(io, path, .{});
-    defer atom.deinit(io);
-
-    var size: u64 = undefined;
-    var start: u64 = undefined;
-    var blocks: []file.BlockSize = undefined;
-    var frag_idx: u32 = undefined;
-    var frag_offset: u32 = undefined;
-    switch (self.data) {
-        .file => |f| {
-            size = f.size;
-            start = f.block_start;
-            blocks = f.block_sizes;
-            frag_idx = f.frag_idx;
-            frag_offset = f.frag_block_offset;
-        },
-        .ext_file => |f| {
-            size = f.size;
-            start = f.block_start;
-            blocks = f.block_sizes;
-            frag_idx = f.frag_idx;
-            frag_offset = f.frag_block_offset;
-        },
-        else => unreachable,
-    }
-
-    var ext: DataExtractor = .init(fil, decomp, cache, block_size, size, start, blocks);
-    ext.addFrag(frag_offset, try frag.get(io, frag_idx));
-
-    var group: Io.Group = .init;
-    defer group.cancel(io);
-
-    ext.extractAsync(alloc, io, &group, atom.file);
-
-    try group.await(io);
-
-    try atom.link(io);
-
-    try que.putOne(io, .{ .file = atom.file, .inode = self });
-}
-fn extractSymlink(
-    self: Inode,
-    alloc: std.mem.Allocator,
-    io: Io,
-    path: []const u8,
-    options: ExtractionOptions,
-    que: *Io.Queue(FileRet),
-) !void {
-    defer alloc.free(path);
-
-    _ = options;
-    _ = que;
-    // TODO: handle symlink options
-    const target = try self.symlinkTarget();
-
-    try Io.Dir.cwd().symLink(io, target, path, .{});
-
-    // TODO: On Linux you can't set permission & xattrs on symlinks (they inherit from their target), but on Mac you can.
-}
-fn extractDevice(
-    self: Inode,
-    alloc: std.mem.Allocator,
-    io: Io,
-    path: []const u8,
-    options: ExtractionOptions,
-    que: *Io.Queue(FileRet),
-) !void {
-    defer alloc.free(path);
-
-    var dev: u32 = 0;
-    var mode: u32 = undefined;
-
-    switch (self.data) {
-        .char_dev => |d| {
-            dev = d.dev;
-            mode = std.posix.DT.CHR;
-        },
-        .block_dev => |d| {
-            dev = d.dev;
-            mode = std.posix.DT.BLK;
-        },
-        .ext_char_dev => |d| {
-            dev = d.dev;
-            mode = std.posix.DT.BLK;
-        },
-        .ext_block_dev => |d| {
-            dev = d.dev;
-            mode = std.posix.DT.BLK;
-        },
-        .fifo, .ext_fifo => mode = std.posix.DT.FIFO,
-        .socket, .ext_socket => mode = std.posix.DT.SOCK,
-        else => unreachable,
-    }
-
-    const sentinel_path = try std.mem.concatMaybeSentinel(alloc, u8, &[1][]const u8{path}, 0);
-    defer alloc.free(sentinel_path);
-    const res = std.os.linux.mknod(@ptrCast(sentinel_path), mode, dev);
-    if (res != 0 and options.verbose)
-        options.verbose_writer.?.print("mknod failed with code: {}\n", .{res}) catch {};
-
-    try que.putOne(io, .{
-        .file = try Io.Dir.cwd().openFile(io, path, .{}),
-        .inode = self,
-    });
-}
-
-fn applyMetadataLoop(alloc: std.mem.Allocator, io: Io, fil: OffsetFile, decomp: *const Decompressor, super: Archive.Superblock, que: *Io.Queue(FileRet), options: ExtractionOptions) !void {
-    var id_table: LookupTable.CachedTable(u16) = .init(alloc, fil, decomp, super.id_start, super.id_count);
-    defer id_table.deinit(io);
-    var xattr_table: XattrTable = try .init(alloc, io, fil, decomp, super.xattr_start);
-    defer xattr_table.deinit(io);
-    for (try que.getOne(io)) |ret| {
-        const inode: Inode = ret.inode;
-        defer inode.deinit(alloc);
-        const ret_file: Io.File = ret.file;
-        defer ret_file.close(io);
-
-        if (!options.ignore_xattr) {
-            if (inode.xattrIndex()) |idx| {
-                const xattrs = try xattr_table.get(io, idx);
-                for (xattrs) |x| {
-                    // TODO: Check error.
-                    _ = std.os.linux.fsetxattr(ret_file.handle, x.key, x.value.ptr, x.value.len, 0);
-                }
+            for (xattrs) |x| {
+                const res = std.os.linux.fsetxattr(ret_file.handle, x.key, x.value.ptr, x.value.len, 0);
+                if (res != 0)
+                    return error.CannotSetXattr;
             }
         }
-        if (!options.ignore_permissions) {
-            try ret_file.setPermissions(io, inode.hdr.permissions);
-            try ret_file.setOwner(io, try id_table.get(io, inode.hdr.uid_idx), try id_table.get(io, inode.hdr.gid_idx));
-        }
     }
+}
+pub fn extractFile(self: Inode, alloc: std.mem.Allocator, io: Io, fil: OffsetFile, decomp: *const Decompressor, frag: *CachedTable(FragEntry), block_size: u32, path: []const u8) anyerror!PathRet {
+    var atomic = try Io.Dir.cwd().createFileAtomic(io, path, .{});
+    defer atomic.deinit(io);
+
+    var ret: PathRet = .{
+        .gid_idx = self.hdr.gid_idx,
+        .uid_idx = self.hdr.uid_idx,
+        .permissions = self.hdr.permissions,
+        .path = path,
+    };
+    const data: DataExtractor = blk: {
+        switch (self.data) {
+            .file => |f| {
+                var data: DataExtractor = .init(fil, decomp, block_size, f.size, f.block_start, f.block_sizes);
+                if (f.frag_idx != 0xFFFFFFFF)
+                    data.addFrag(f.frag_block_offset, try frag.get(io, f.frag_idx));
+
+                break :blk data;
+            },
+            .ext_file => |f| {
+                if (f.xattr_idx != 0xFFFFFFFF) ret.xattr_idx = f.xattr_idx;
+                var data: DataExtractor = .init(fil, decomp, block_size, f.size, f.block_start, f.block_sizes);
+                if (f.frag_idx != 0xFFFFFFFF)
+                    data.addFrag(f.frag_block_offset, try frag.get(io, f.frag_idx));
+
+                break :blk data;
+            },
+            else => unreachable,
+        }
+    };
+
+    try data.extractAsync(alloc, io, atomic.file);
+    try atomic.link(io);
+
+    return ret;
 }
