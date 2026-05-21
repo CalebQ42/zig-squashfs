@@ -5,7 +5,7 @@ const Decompressor = @import("util/decompressor.zig");
 const MetadataReader = @import("util/metadata.zig");
 const OffsetFile = @import("util/offset_file.zig");
 
-pub fn lookupValue(comptime T: anytype, alloc: std.mem.Allocator, io: Io, decomp: *Decompressor, file: OffsetFile, table_start: u64, idx: u16) !T {
+pub fn lookupValue(comptime T: anytype, alloc: std.mem.Allocator, io: Io, decomp: *const Decompressor, file: OffsetFile, table_start: u64, idx: u32) !T {
     const T_PER_BLOCK: u16 = 8192 / @sizeOf(T);
 
     const block = idx / T_PER_BLOCK;
@@ -16,7 +16,7 @@ pub fn lookupValue(comptime T: anytype, alloc: std.mem.Allocator, io: Io, decomp
     try rdr.interface.readSliceEndian(u64, @ptrCast(&offset), .little);
 
     rdr = try file.readerAt(io, offset, &[0]u8{});
-    var meta: MetadataReader = .init(alloc, &rdr, decomp);
+    var meta: MetadataReader = .init(alloc, &rdr.interface, decomp);
 
     try meta.interface.discardAll(@sizeOf(T) * block_offset);
     var out: T = undefined;
