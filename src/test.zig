@@ -10,6 +10,8 @@ const Superblock = Archive.Superblock;
 const TestArchive = "testing/LinuxPATest.sfs";
 
 test "Basics" {
+    std.debug.print("Starting test: Basics...\n", .{});
+
     var fil = try Io.Dir.cwd().openFile(io, TestArchive, .{});
     defer fil.close(io);
     var sfs: Archive = try .init(io, fil, 0);
@@ -22,6 +24,8 @@ const TestFile = "Start.exe";
 const TestFileExtractLocation = "testing/Start.exe";
 
 test "ExtractSingleFile" {
+    std.debug.print("Starting test: ExtractSingleFile...\n", .{});
+
     Io.Dir.cwd().deleteFile(io, TestFileExtractLocation) catch {};
     var fil = try Io.Dir.cwd().openFile(io, TestArchive, .{});
     defer fil.close(io);
@@ -35,6 +39,8 @@ test "ExtractSingleFile" {
 const TestFullExtractLocation = "testing/TestExtract";
 
 test "ExtractCompleteArchive" {
+    std.debug.print("Starting test: ExtractCompleteArchive...\n", .{});
+
     Io.Dir.cwd().deleteTree(io, TestFullExtractLocation) catch {};
     var fil = try Io.Dir.cwd().openFile(io, TestArchive, .{});
     defer fil.close(io);

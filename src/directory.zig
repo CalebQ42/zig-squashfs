@@ -3,6 +3,8 @@ const Reader = std.Io.Reader;
 
 const Inode = @import("inode.zig");
 
+pub const Error = error{OutOfMemory} || Reader.Error;
+
 const DirEntry = @This();
 
 block_start: u32,
@@ -14,7 +16,7 @@ pub fn deinit(self: DirEntry, alloc: std.mem.Allocator) void {
     alloc.free(self.name);
 }
 
-pub fn readDirectory(alloc: std.mem.Allocator, rdr: *Reader, size: u32) ![]DirEntry {
+pub fn readDirectory(alloc: std.mem.Allocator, rdr: *Reader, size: u32) Error![]DirEntry {
     var hdr: Header = undefined;
     var raw: RawEntry = undefined;
     var out: std.ArrayList(DirEntry) = try .initCapacity(alloc, 30);

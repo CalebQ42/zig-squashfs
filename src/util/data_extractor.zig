@@ -10,6 +10,8 @@ const OffsetFile = @import("offset_file.zig");
 
 // const SharedCache = @import("shared_cache.zig");
 
+pub const Error = error{OutOfMemory} || Io.File.Reader.SeekError || Io.Writer.Error;
+
 const DataExtractor = @This();
 
 fil: OffsetFile,
@@ -23,7 +25,7 @@ blocks: []BlockSize,
 frag_offset: u32 = 0,
 frag_entry: ?FragEntry = null,
 
-err: ?anyerror = null,
+err: ?Error = null,
 
 pub fn init(fil: OffsetFile, decomp: *const Decompressor, block_size: u32, file_size: u64, data_start: u64, blocks: []BlockSize) DataExtractor {
     return .{
@@ -48,10 +50,10 @@ fn numBlocks(self: DataExtractor) usize {
 }
 
 /// Starts extracting the data using the given group to spawn async tasks.
-pub fn extractAsync(self: DataExtractor, alloc: std.mem.Allocator, io: Io, fil: Io.File) !void {
+pub fn extractAsync(self: DataExtractor, alloc: std.mem.Allocator, io: Io, fil: Io.File) Error!void {
     var group: Io.Group = .init;
     defer group.cancel(io);
-    var err: ?anyerror = null;
+    var err: ?Error = null;
 
     var read_offset: u64 = self.start;
     for (0..self.blocks.len) |idx| {
@@ -64,7 +66,7 @@ pub fn extractAsync(self: DataExtractor, alloc: std.mem.Allocator, io: Io, fil: 
     group.await(io) catch |cancel| return err orelse cancel;
 }
 
-fn blockThread(self: DataExtractor, alloc: std.mem.Allocator, io: Io, fil: Io.File, read_offset: u64, idx: usize, ret_err: *?anyerror) Io.Cancelable!void {
+fn blockThread(self: DataExtractor, alloc: std.mem.Allocator, io: Io, fil: Io.File, read_offset: u64, idx: usize, ret_err: *?Error) Io.Cancelable!void {
     const block = self.blocks[idx];
 
     const cur_block_size = if (idx == self.numBlocks() - 1)
@@ -124,7 +126,7 @@ fn blockThread(self: DataExtractor, alloc: std.mem.Allocator, io: Io, fil: Io.Fi
         };
     }
 }
-fn fragThread(self: DataExtractor, alloc: std.mem.Allocator, io: Io, fil: Io.File, ret_err: *?anyerror) Io.Cancelable!void {
+fn fragThread(self: DataExtractor, alloc: std.mem.Allocator, io: Io, fil: Io.File, ret_err: *?Error) Io.Cancelable!void {
     const frag = self.frag_entry.?;
     const cur_block_size = self.file_size % self.block_size;
 
@@ -169,7 +171,7 @@ fn fragThread(self: DataExtractor, alloc: std.mem.Allocator, io: Io, fil: Io.Fil
             if (err == error.Canceled) io.recancel();
             return Io.Cancelable.Canceled;
         };
-        wrt.interface.writeAll(tmp[0..cur_block_size]) catch |err| {
+        wrt.interface.writeAll(tmp[self.frag_offset .. self.frag_offset + cur_block_size]) catch |err| {
             ret_err.* = err;
             if (err == error.Canceled) io.recancel();
             return Io.Cancelable.Canceled;

@@ -24,6 +24,8 @@ pub fn lookupValue(comptime T: anytype, alloc: std.mem.Allocator, io: Io, decomp
     return out;
 }
 
+pub const Error = Io.Cancelable || Io.File.Reader.SeekError || Io.Reader.ReadAllocError;
+
 pub fn CachedTable(comptime T: anytype) type {
     return struct {
         const T_PER_BLOCK: u16 = 8192 / @sizeOf(T);
@@ -55,10 +57,39 @@ pub fn CachedTable(comptime T: anytype) type {
         }
         pub fn deinit(self: *Table, io: Io) void {
             self.mut.lockUncancelable(io);
+            var iter = self.table.valueIterator();
+            while (iter.next()) |val|
+                self.alloc.free(val.*);
             self.table.deinit();
         }
 
-        pub fn get(self: *Table, io: Io, idx: u32) !T {
+        pub fn fill(self: *Table, io: Io) Error!void {
+            try self.mut.lock(io);
+            defer self.mut.unlock(io);
+
+            var num_blocks = self.total_num / T_PER_BLOCK;
+            if (self.total_num % T_PER_BLOCK > 0)
+                num_blocks += 1;
+
+            for (0..num_blocks) |block| {
+                var rdr = try self.fil.readerAt(io, self.table_start + (8 * block), &[0]u8{});
+                var offset: u64 = undefined;
+                try rdr.interface.readSliceEndian(u64, @ptrCast(&offset), .little);
+
+                const len: u16 = if (self.total_num % T_PER_BLOCK != 0 and block == (self.total_num - 1) / T_PER_BLOCK)
+                    @truncate(self.total_num % T_PER_BLOCK)
+                else
+                    T_PER_BLOCK;
+
+                rdr = try self.fil.readerAt(io, offset, &[0]u8{});
+                var meta: MetadataReader = .init(self.alloc, &rdr.interface, self.decomp);
+
+                const slice = try meta.interface.readSliceEndianAlloc(self.alloc, T, len, .little);
+                try self.table.put(@truncate(block), slice);
+            }
+        }
+
+        pub fn get(self: *Table, io: Io, idx: u32) Error!T {
             const block = idx / T_PER_BLOCK;
             const block_offset = idx % T_PER_BLOCK;
             if (self.table.contains(block))

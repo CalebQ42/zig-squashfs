@@ -1,4 +1,5 @@
 const std = @import("std");
+const Io = std.Io;
 const Reader = std.Io.Reader;
 const zstd = std.compress.zstd;
 const Node = std.SinglyLinkedList.Node;
@@ -6,33 +7,39 @@ const Node = std.SinglyLinkedList.Node;
 const Decompressor = @import("../util/decompressor.zig");
 const Error = Decompressor.Error;
 
-const Self = @This();
+const Queue = std.Io.Queue([]u8);
 
-const Buffer = struct {
-    node: Node,
-    buf: []u8,
-};
+const Self = @This();
 
 interface: Decompressor = .{ .decomp_fn = decomp },
 
 alloc: std.mem.Allocator,
+io: Io,
 
 block_size: u32,
-buffers: std.ArrayList(Buffer),
-buffer_queue: std.SinglyLinkedList = .{},
+buf: [][]u8,
+buf_queue: Queue,
 
-pub fn init(alloc: std.mem.Allocator, block_size: u32) !Self {
+pub fn init(alloc: std.mem.Allocator, io: Io, block_size: u32) !Self {
+    const buf = try alloc.alloc([]u8, 20); // TODO: Choose a better number instead of a random one.
+    var queue: Queue = .init(buf);
+    for (0..20) |_|
+        try queue.putOne(io, try alloc.alloc(u8, block_size + zstd.block_size_max));
+
     return .{
         .alloc = alloc,
+        .io = io,
 
         .block_size = block_size,
-        .buffers = try .initCapacity(alloc, 5),
+        .buf = buf,
+        .buf_queue = queue,
     };
 }
 pub fn deinit(self: *Self) void {
-    for (self.buffers.items) |buf|
-        self.alloc.free(buf.buf);
-    self.buffers.deinit(self.alloc);
+    self.buf_queue.close(self.io);
+    for (self.buf) |buf|
+        self.alloc.free(buf);
+    self.alloc.free(self.buf);
 }
 
 fn decomp(d: ?*const Decompressor, alloc: std.mem.Allocator, in: []u8, out: []u8) Error!usize {
@@ -42,17 +49,11 @@ fn decomp(d: ?*const Decompressor, alloc: std.mem.Allocator, in: []u8, out: []u8
         return zstdDecomp(buf, in, out);
     }
     var self: *Self = @fieldParentPtr("interface", @constCast(d.?));
-    const buf_node = self.buffer_queue.popFirst();
-    var buf: *Buffer = undefined;
-    if (buf_node == null) {
-        const new_buf = try self.buffers.addOne(self.alloc);
-        new_buf.* = .{ .node = .{}, .buf = try self.alloc.alloc(u8, self.block_size + zstd.block_size_max) };
-        buf = new_buf;
-    } else {
-        buf = @fieldParentPtr("node", buf_node.?);
-    }
-    defer self.buffer_queue.prepend(&buf.node);
-    return zstdDecomp(buf.buf, in, out);
+
+    const buf = self.buf_queue.getOne(self.io) catch return Error.ReadFailed;
+    defer self.buf_queue.putOne(self.io, buf) catch {};
+
+    return zstdDecomp(buf, in, out);
 }
 
 inline fn zstdDecomp(buffer: []u8, in: []u8, out: []u8) !usize {
