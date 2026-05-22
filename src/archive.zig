@@ -1,6 +1,7 @@
 const std = @import("std");
 const Io = std.Io;
 
+const Decomp = @import("decomp.zig");
 const ExtractionOptions = @import("options.zig");
 const File = @import("file.zig");
 const Inode = @import("inode.zig");
@@ -15,7 +16,7 @@ const Archive = @This();
 file: OffsetFile,
 super: Superblock,
 
-stateless_decomp: Decompressor,
+stateless_decomp: *const Decompressor,
 
 pub fn init(io: Io, file: std.Io.File, offset: u64) !Archive {
     var rdr = file.reader(io, &[0]u8{});
@@ -26,14 +27,7 @@ pub fn init(io: Io, file: std.Io.File, offset: u64) !Archive {
         .file = .init(file, offset),
         .super = super,
 
-        .stateless_decomp = switch (super.compression) {
-            .gzip => @import("decomp/zlib.zig").stateless_decompressor,
-            .lzma => @import("decomp/lzma.zig").stateless_decompressor,
-            .lzo => return error.LzoUnsupported,
-            .xz => @import("decomp/xz.zig").stateless_decompressor,
-            .lz4 => return error.Lz4Unsupported,
-            .zstd => @import("decomp/zstd.zig").stateless_decompressor,
-        },
+        .stateless_decomp = try Decomp.StatelessDecomp(super.compression),
     };
 }
 
@@ -43,7 +37,7 @@ pub fn root(self: Archive, alloc: std.mem.Allocator, io: Io) !File {
         alloc,
         io,
         self.file,
-        &self.stateless_decomp,
+        self.stateless_decomp,
         self.super.inode_start,
         self.super.block_size,
         self.super.root_ref,
@@ -65,7 +59,7 @@ pub fn extract(self: Archive, alloc: std.mem.Allocator, io: Io, extract_dir: []c
         alloc,
         io,
         self.file,
-        &self.stateless_decomp,
+        self.stateless_decomp,
         self.super.inode_start,
         self.super.block_size,
         self.super.root_ref,
@@ -128,14 +122,7 @@ pub const Superblock = extern struct {
     mod_time: u32,
     block_size: u32,
     frag_count: u32,
-    compression: enum(u16) {
-        gzip = 1,
-        lzma,
-        lzo,
-        xz,
-        lz4,
-        zstd,
-    },
+    compression: Decomp.Enum,
     block_log: u16,
     flags: packed struct(u16) {
         inode_uncompressed: bool,

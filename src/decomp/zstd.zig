@@ -4,6 +4,8 @@ const Reader = std.Io.Reader;
 const zstd = std.compress.zstd;
 const Node = std.SinglyLinkedList.Node;
 
+const c = @import("c");
+
 const Decompressor = @import("../util/decompressor.zig");
 const Error = Decompressor.Error;
 
@@ -67,8 +69,14 @@ inline fn zstdDecomp(buffer: []u8, in: []u8, out: []u8) !usize {
 
 pub const stateless_decompressor: Decompressor = .{ .decomp_fn = statelessDecomp };
 
-fn statelessDecomp(_: ?*const Decompressor, alloc: std.mem.Allocator, in: []u8, out: []u8) Error!usize {
-    const buf = try alloc.alloc(u8, out.len + zstd.block_size_max);
-    defer alloc.free(buf);
-    return zstdDecomp(buf, in, out);
+fn statelessDecomp(d: ?*const Decompressor, alloc: std.mem.Allocator, in: []u8, out: []u8) Error!usize {
+    _ = d;
+    _ = alloc;
+    const res = c.ZSTD_decompress(out.ptr, out.len, in.ptr, in.len);
+    if (c.ZSTD_isError(res) == 1)
+        return Error.ReadFailed;
+    return res;
+    // const buf = try alloc.alloc(u8, out.len + zstd.block_size_max);
+    // defer alloc.free(buf);
+    // return zstdDecomp(buf, in, out);
 }

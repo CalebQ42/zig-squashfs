@@ -6,7 +6,6 @@ const Reader = Io.Reader;
 const Writer = Io.Writer;
 const Limit = Io.Limit;
 
-const FragEntry = @import("../frag.zig").FragEntry;
 const BlockSize = @import("../inode_data/file.zig").BlockSize;
 const Decompressor = @import("decompressor.zig");
 const OffsetFile = @import("offset_file.zig");
@@ -28,7 +27,7 @@ cur_offset: u64,
 blocks: []BlockSize,
 
 frag_offset: u32 = 0,
-frag_entry: ?FragEntry = null,
+frag_block: ?[]u8 = null,
 
 block_idx: usize = 0,
 sparse_block: bool = false,
@@ -64,14 +63,14 @@ pub fn init(alloc: std.mem.Allocator, io: Io, fil: OffsetFile, decomp: *const De
 pub fn deinit(self: *DataReader) void {
     self.alloc.free(self.interface.buffer);
 }
-pub fn addFrag(self: *DataReader, frag_offset: u32, entry: FragEntry) void {
+pub fn addFrag(self: *DataReader, frag_offset: u32, block: []u8) void {
     self.frag_offset = frag_offset;
-    self.frag_entry = entry;
+    self.frag_block = block;
 }
 
 fn numBlocks(self: DataReader) usize {
     var num = self.blocks.len;
-    if (self.frag_entry != null) num += 1;
+    if (self.frag_block != null) num += 1;
     return num;
 }
 fn advanceBuffer(self: *DataReader) !void {
@@ -81,26 +80,13 @@ fn advanceBuffer(self: *DataReader) !void {
     defer self.block_idx += 1;
 
     self.interface.end = if (self.block_idx == self.numBlocks() - 1)
-        self.size % self.block_size
+        self.file_size % self.block_size
     else
         self.block_size;
 
     // Fragment
     if (self.block_idx == self.blocks.len) {
-        const entry = self.frag_entry.?;
-        if (entry.size.uncompressed) {
-            var rdr = try self.fil.readerAt(self.io, entry.start + self.frag_offset, &[0]u8{});
-            try rdr.interface.readSliceAll(self.interface.buffer[0..self.interface.end]);
-        } else {
-            @branchHint(.likely);
-            const tmp = try self.cache.getOne(self.io);
-            defer self.cache.putOne(tmp) catch {};
-
-            var rdr = try self.fil.readerAt(self.io, entry.start, &[0]u8{});
-            try rdr.interface.readSliceAll(tmp.cache[0..entry.size.size]);
-            _ = try self.decomp.Decompress(self.alloc, tmp.cache[0..entry.size.size], self.interface.buffer[0..self.block_size]);
-            @memmove(self.interface.buffer[0..self.interface.end], self.interface.buffer[self.frag_offset .. self.frag_offset + self.interface.end]);
-        }
+        @memcpy(self.interface.buffer[0..self.interface.end], self.frag_block.?[self.frag_offset .. self.frag_offset + self.interface.end]);
         self.interface.seek = 0;
         return;
     }
@@ -120,12 +106,13 @@ fn advanceBuffer(self: *DataReader) !void {
     } else {
         @branchHint(.likely);
         const tmp = try self.cache.getOne(self.io);
-        defer self.cache.putOne(tmp) catch {};
+        defer self.cache.putOne(self.io, tmp) catch {};
 
-        var rdr = try self.fil.readerAt(self.io, self.cur_offset, &[0]u8{});
-        try rdr.interface.readSliceAll(tmp.cache[0..block.size]);
+        var rdr_buf: [50 * 1024]u8 = undefined;
+        var rdr = try self.fil.readerAt(self.io, self.cur_offset, &rdr_buf);
+        try rdr.interface.readSliceAll(tmp[0..block.size]);
         self.cur_offset += block.size;
-        _ = try self.decomp.Decompress(self.alloc, tmp.cache[0..block.size], self.interface.buffer[0..self.interface.end]);
+        _ = try self.decomp.Decompress(self.alloc, tmp[0..block.size], self.interface.buffer[0..self.interface.end]);
     }
     self.interface.seek = 0;
 }

@@ -2,6 +2,26 @@ const std = @import("std");
 
 const Decompressor = @import("util/decompressor.zig");
 
+pub const Enum = enum(u16) {
+    gzip = 1,
+    lzma,
+    lzo,
+    xz,
+    lz4,
+    zstd,
+};
+
+pub fn StatelessDecomp(val: Enum) !*const Decompressor {
+    return switch (val) {
+        .gzip => &@import("decomp/zlib.zig").stateless_decompressor,
+        .lzma => &@import("decomp/lzma.zig").stateless_decompressor,
+        .lzo => error.LzoUnsupported,
+        .xz => &@import("decomp/xz.zig").stateless_decompressor,
+        .lz4 => error.Lz4Unsupported,
+        .zstd => &@import("decomp/zstd.zig").stateless_decompressor,
+    };
+}
+
 pub const Decomp = union(enum) {
     gzip: @import("decomp/zlib.zig"),
     lzma: @import("decomp/lzma.zig"),

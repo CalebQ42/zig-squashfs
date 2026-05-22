@@ -24,6 +24,16 @@ pub fn build(b: *std.Build) !void {
         .use_llvm = debug,
     });
 
+    const zstd = b.dependency("zstd", .{ .optimize = optimize, .target = target });
+    lib.root_module.linkLibrary(zstd.artifact("zstd"));
+
+    const c = b.addTranslateC(.{
+        .optimize = optimize,
+        .target = target,
+        .root_source_file = b.path("src/c.h"),
+    });
+    lib.root_module.addImport("c", c.createModule());
+
     var version = version_string_option orelse "0.0.0-testing";
     if (version[0] == 'v') version = version[1..];
     const unsquashfs_options = b.addOptions();

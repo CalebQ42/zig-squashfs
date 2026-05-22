@@ -37,7 +37,7 @@ pub fn init(alloc: std.mem.Allocator, archive: Archive, in: Inode, name: []const
 }
 pub fn fromDirEntry(alloc: std.mem.Allocator, io: Io, archive: Archive, ent: DirEntry) !File {
     var rdr = try archive.file.readerAt(io, archive.super.inode_start + ent.block_start, &[0]u8{});
-    var meta: MetadataReader = .init(alloc, &rdr.interface, &archive.stateless_decomp);
+    var meta: MetadataReader = .init(alloc, &rdr.interface, archive.stateless_decomp);
     try meta.interface.discardAll(ent.block_offset);
 
     var in: Inode = try .read(alloc, &meta.interface, archive.super.block_size);
@@ -54,7 +54,7 @@ pub fn open(self: File, alloc: std.mem.Allocator, io: Io, filepath: []const u8) 
         alloc,
         io,
         self.archive.file,
-        &self.archive.stateless_decomp,
+        self.archive.stateless_decomp,
         self.archive.super.dir_start,
     );
     defer {
