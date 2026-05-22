@@ -18,15 +18,11 @@ kv_start: u64,
 
 table: LookupTable.CachedTable(TableValue),
 value_cache: std.AutoHashMap(InodeRef, []const u8),
-value_mut: Io.Mutex = .init,
+value_mut: Io.RWLock = .init,
 
-pub fn init(alloc: std.mem.Allocator, io: Io, fil: OffsetFile, decomp: *const Decompressor, xattr_start: u64) !XattrCachedTable {
-    var rdr = try fil.readerAt(io, xattr_start, &[0]u8{});
-
-    var start: u64 = undefined;
-    try rdr.interface.readSliceEndian(u64, @ptrCast(&start), .little);
-    var num: u32 = undefined;
-    try rdr.interface.readSliceEndian(u32, @ptrCast(&num), .little);
+pub fn init(alloc: std.mem.Allocator, fil: OffsetFile, decomp: *const Decompressor, xattr_start: u64) !XattrCachedTable {
+    const start: u64 = std.mem.readInt(u64, fil.map.memory[xattr_start .. xattr_start + 8], .little);
+    const num: u64 = std.mem.readInt(u64, fil.map.memory[xattr_start + 8 .. xattr_start + 16], .little);
 
     return .{
         .alloc = alloc,
@@ -48,7 +44,7 @@ pub fn deinit(self: *XattrCachedTable, io: Io) void {
 pub fn get(self: *XattrCachedTable, alloc: std.mem.Allocator, io: Io, idx: u32) ![]XattrSemiOwned {
     const lookup = try self.table.get(io, idx);
 
-    var rdr = try self.fil.readerAt(io, self.kv_start + lookup.ref.block_start, &[0]u8{});
+    var rdr = self.fil.readerAt(self.kv_start + lookup.ref.block_start);
     var meta: MetadataReader = .init(alloc, &rdr.interface, self.decomp);
     try meta.interface.discardAll(lookup.ref.block_offset);
 
@@ -131,7 +127,7 @@ fn valueAt(self: *XattrCachedTable, io: Io, ref: InodeRef) ![]const u8 {
 
     if (self.value_cache.contains(ref)) return self.value_cache.get(ref).?;
 
-    var rdr = try self.fil.readerAt(io, self.kv_start + ref.block_start, &[0]u8{});
+    var rdr = self.fil.readerAt(self.kv_start + ref.block_start);
     var meta: MetadataReader = .init(self.alloc, &rdr.interface, self.decomp);
     try meta.interface.discardAll(ref.block_offset);
 
@@ -204,14 +200,11 @@ const XattrPrefix = packed struct(u16) {
 // Stateless
 
 pub fn statelessLookup(alloc: std.mem.Allocator, io: Io, decomp: *const Decompressor, fil: OffsetFile, table_start: u64, idx: u16) ![]XattrOwned {
-    var rdr = try fil.readerAt(io, table_start, &[0]u8{});
-
-    var kv_start: u64 = undefined;
-    try rdr.interface.readSliceEndian(u64, @ptrCast(&kv_start), .little);
+    const kv_start: u64 = std.mem.readInt(u64, fil.map.memory[table_start .. table_start + 8], .little);
 
     const lookup = try LookupTable.lookupValue(TableValue, alloc, io, decomp, fil, table_start + 16, idx);
 
-    rdr = try fil.readerAt(io, kv_start + lookup.ref.block_start, &[0]u8{});
+    var rdr = fil.readerAt(kv_start + lookup.ref.block_start);
     var meta: MetadataReader = .init(alloc, &rdr.interface, decomp);
     try meta.interface.discardAll(lookup.ref.block_offset);
 
@@ -252,7 +245,7 @@ pub fn statelessLookup(alloc: std.mem.Allocator, io: Io, decomp: *const Decompre
             const value: ValueOutOfLineEntry = undefined;
             try meta.interface.readSliceEndian(ValueOutOfLineEntry, @ptrCast(&value), .little);
 
-            var ool_rdr = try fil.readerAt(io, kv_start + value.ref.block_start, &[0]u8{});
+            var ool_rdr = fil.readerAt(kv_start + value.ref.block_start);
             var ool_meta: MetadataReader = .init(alloc, &ool_rdr.interface, decomp);
             try ool_meta.interface.discardAll(value.ref.block_offset);
 

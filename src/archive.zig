@@ -24,7 +24,7 @@ pub fn init(io: Io, file: std.Io.File, offset: u64) !Archive {
     var super: Superblock = undefined;
     try rdr.interface.readSliceEndian(Superblock, @ptrCast(&super), .little);
     return .{
-        .file = .init(file, offset),
+        .file = try .init(io, file, super.size, offset),
         .super = super,
 
         .stateless_decomp = try Decomp.StatelessDecomp(super.compression),
@@ -52,19 +52,6 @@ pub fn open(self: Archive, alloc: std.mem.Allocator, io: Io, filepath: []const u
         return root_file;
     defer root_file.deinit();
     return root_file.open(alloc, io, filepath);
-}
-/// Extract the entire archive contents to the given directory.
-pub fn extract(self: Archive, alloc: std.mem.Allocator, io: Io, extract_dir: []const u8, options: ExtractionOptions) !void {
-    const root_inode = try Utils.inodeFromRef(
-        alloc,
-        io,
-        self.file,
-        self.stateless_decomp,
-        self.super.inode_start,
-        self.super.block_size,
-        self.super.root_ref,
-    );
-    return root_inode.extract(alloc, io, self.file, self.super, extract_dir, options);
 }
 
 /// Returns the inode with the given inode number.
@@ -163,3 +150,18 @@ pub const Superblock = extern struct {
             return SuperblockError.InvalidBlockLog;
     }
 };
+
+// Extraction
+
+/// Extract the entire archive contents to the given directory.
+pub fn extract(self: Archive, alloc: std.mem.Allocator, io: Io, extract_dir: []const u8, options: ExtractionOptions) !void {
+    const root_inode = try Utils.inodeFromRef(
+        alloc,
+        self.file,
+        self.stateless_decomp,
+        self.super.inode_start,
+        self.super.block_size,
+        self.super.root_ref,
+    );
+    return root_inode.extract(alloc, io, self.file, self.super, extract_dir, options);
+}

@@ -48,21 +48,18 @@ pub fn main(init: std.process.Init) !void {
     var out = stdout.writer(io, &[0]u8{});
     defer out.interface.flush() catch {};
 
-    // try handleArgs(init.minimal.args, &out.interface);
-    // if (archive.len == 0) {
-    //     try out.interface.print("You must provide a squashfs archive\n", .{});
-    //     try out.interface.print(help_mgs, .{});
-    //     return;
-    // }
-    archive = "testing/LinuxPATest.sfs";
-    extLoc = "testing/LinuxPABinTest";
+    try handleArgs(init.minimal.args, &out.interface);
+    if (archive.len == 0) {
+        try out.interface.print("You must provide a squashfs archive\n", .{});
+        try out.interface.print(help_mgs, .{});
+        return;
+    }
 
     var fil = try Io.Dir.cwd().openFile(io, archive, .{}); //TODO: Handle error gracefully.
     defer fil.close(io);
 
     var arc: squashfs.Archive = try .init(io, fil, offset); //TODO: Handle error gracefully.
     const options: squashfs.ExtractionOptions = .{
-        .threads = if (threads == 0) try std.Thread.getCpuCount() else threads,
         .verbose = verbose,
         .verbose_writer = if (verbose) &out.interface else null,
         .ignore_xattr = ignore_xattrs,

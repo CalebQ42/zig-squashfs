@@ -23,15 +23,14 @@ block_size: u32,
 entries: []FragEntry,
 
 frag_cache: std.array_hash_map.Auto(u32, []u8),
-cache_mut: std.Io.Mutex = .init,
+cache_mut: std.Io.RwLock = .init,
 
-pub fn init(alloc: std.mem.Allocator, io: Io, fil: OffsetFile, decomp: *const Decompressor, frag_start: u64, frag_num: u32, block_size: u32) !FragManager {
-    var buf: [8 * 1024]u8 = undefined;
-    var rdr = try fil.readerAt(io, frag_start, &buf);
+pub fn init(alloc: std.mem.Allocator, fil: OffsetFile, decomp: *const Decompressor, frag_start: u64, frag_num: u32, block_size: u32) !FragManager {
+    var rdr = fil.readerAt(frag_start);
     var first_offset: u64 = undefined;
     try rdr.interface.readSliceEndian(u64, @ptrCast(&first_offset), .little);
 
-    rdr = try fil.readerAt(io, first_offset, &buf);
+    rdr = fil.readerAt(first_offset);
     var meta: MetadataReader = .init(alloc, &rdr.interface, decomp);
 
     const entries = try alloc.alloc(FragEntry, frag_num);
@@ -59,24 +58,28 @@ pub fn deinit(self: *FragManager, io: Io) void {
 }
 
 pub fn get(self: *FragManager, io: Io, idx: u32) ![]u8 {
-    if (self.frag_cache.contains(idx))
-        return self.frag_cache.get(idx).?;
+    {
+        try self.cache_mut.lockShared(io);
+        defer self.cache_mut.unlockShared(io);
+        if (self.frag_cache.contains(idx))
+            return self.frag_cache.get(idx).?;
+    }
 
     try self.cache_mut.lock(io);
     defer self.cache_mut.unlock(io);
+
+    if (self.frag_cache.contains(idx))
+        return self.frag_cache.get(idx).?;
 
     const entry = self.entries[idx];
 
     const out = try self.alloc.alloc(u8, if (entry.size.uncompressed) entry.size.size else self.block_size);
 
-    var buf: [1024 * 1024]u8 = undefined;
-    var rdr = try self.fil.readerAt(io, entry.start, &buf);
     if (entry.size.uncompressed) {
-        try rdr.interface.readSliceAll(out);
+        @memcpy(out, self.fil.map.memory[entry.start .. entry.start + entry.size.size]);
     } else {
         @branchHint(.likely);
-        try rdr.interface.fill(entry.size.size);
-        _ = try self.decomp.Decompress(self.alloc, buf[0..entry.size.size], out);
+        _ = try self.decomp.Decompress(self.alloc, self.fil.map.memory[entry.start .. entry.start + entry.size.size], out);
     }
 
     try self.frag_cache.put(self.alloc, idx, out);

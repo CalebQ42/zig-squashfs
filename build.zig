@@ -3,7 +3,7 @@ const std = @import("std");
 pub fn build(b: *std.Build) !void {
     // const use_zig_decomp = b.option(bool, "use_zig_decomp", "Use zig standard library for decompression.") orelse false;
     // const allow_lzo = b.option(bool, "allow_lzo", "Compile with lzo support") orelse false;
-    const debug = b.option(bool, "debug", "Enable options to make debugging easier.");
+    var debug = b.option(bool, "debug", "Enable options to make debugging easier.");
     const version_string_option = b.option([]const u8, "version", "Version of the library/binary");
 
     // const zig_squashfs_options = b.addOptions();
@@ -12,6 +12,8 @@ pub fn build(b: *std.Build) !void {
 
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+
+    if (optimize == .Debug) debug = true;
 
     const lib = b.addLibrary(.{
         .name = "squashfs",

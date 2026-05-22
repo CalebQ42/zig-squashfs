@@ -16,9 +16,9 @@ pub fn pathIsSelf(path: []const u8) bool {
     return path[0] == '.';
 }
 /// Creates an Inode from an Inode.Ref.
-pub fn inodeFromRef(alloc: std.mem.Allocator, io: Io, file: OffsetFile, decomp: *const Decompressor, inode_start: u64, block_size: u32, ref: Inode.Ref) !Inode {
-    var rdr = try file.readerAt(io, inode_start + ref.block_start, &[0]u8{});
-    var meta: MetadataReader = .init(alloc, &rdr.interface, decomp);
+pub fn inodeFromRef(alloc: std.mem.Allocator, file: OffsetFile, decomp: *const Decompressor, inode_start: u64, block_size: u32, ref: Inode.Ref) !Inode {
+    var rdr = file.readerAt(inode_start + ref.block_start);
+    var meta: MetadataReader = .init(alloc, &rdr, decomp);
     try meta.interface.discardAll(ref.block_offset);
 
     return .read(alloc, &meta.interface, block_size);

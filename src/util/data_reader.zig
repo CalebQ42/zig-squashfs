@@ -19,7 +19,6 @@ alloc: std.mem.Allocator,
 fil: OffsetFile,
 io: Io,
 decomp: *const Decompressor,
-cache: *Io.Queue([]u8),
 block_size: u32,
 
 file_size: u64,
@@ -34,14 +33,13 @@ sparse_block: bool = false,
 
 interface: Io.Reader,
 
-pub fn init(alloc: std.mem.Allocator, io: Io, fil: OffsetFile, decomp: *const Decompressor, cache: *Io.Queue([]u8), block_size: u32, file_size: u64, data_start: u64, blocks: []BlockSize) !DataReader {
+pub fn init(alloc: std.mem.Allocator, io: Io, fil: OffsetFile, decomp: *const Decompressor, block_size: u32, file_size: u64, data_start: u64, blocks: []BlockSize) !DataReader {
     return .{
         .alloc = alloc,
 
         .fil = fil,
         .io = io,
         .decomp = decomp,
-        .cache = cache,
         .block_size = block_size,
 
         .file_size = file_size,
@@ -74,9 +72,10 @@ fn numBlocks(self: DataReader) usize {
     return num;
 }
 fn advanceBuffer(self: *DataReader) !void {
-    if (self.block_idx >= self.numBlocks()) {
+    if (self.block_idx >= self.numBlocks())
         return Reader.Error.EndOfStream;
-    }
+
+    errdefer self.interface.end = 0;
     defer self.block_idx += 1;
 
     self.interface.end = if (self.block_idx == self.numBlocks() - 1)
@@ -101,18 +100,13 @@ fn advanceBuffer(self: *DataReader) !void {
         self.sparse_block = false;
     }
     if (block.uncompressed) {
-        try self.fil.readAt(self.io, self.cur_offset, self.interface.buffer[0..self.interface.end]);
+        @memcpy(self.interface.buffer[0..self.interface.end], self.fil.map.memory[self.cur_offset .. self.cur_offset + self.interface.end]);
         self.cur_offset += self.interface.end;
     } else {
         @branchHint(.likely);
-        const tmp = try self.cache.getOne(self.io);
-        defer self.cache.putOne(self.io, tmp) catch {};
 
-        var rdr_buf: [50 * 1024]u8 = undefined;
-        var rdr = try self.fil.readerAt(self.io, self.cur_offset, &rdr_buf);
-        try rdr.interface.readSliceAll(tmp[0..block.size]);
+        _ = try self.decomp.Decompress(self.alloc, self.fil.map.memory[self.cur_offset .. self.cur_offset + block.size], self.interface.buffer[0..self.interface.end]);
         self.cur_offset += block.size;
-        _ = try self.decomp.Decompress(self.alloc, tmp[0..block.size], self.interface.buffer[0..self.interface.end]);
     }
     self.interface.seek = 0;
 }
