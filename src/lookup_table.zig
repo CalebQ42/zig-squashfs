@@ -12,7 +12,7 @@ pub fn lookupValue(comptime T: anytype, alloc: std.mem.Allocator, decomp: *const
     const block_offset = idx % T_PER_BLOCK;
 
     const offset_pos = table_start + (8 * block);
-    const offset: u64 = std.mem.readInt(u64, file.map.memory[offset_pos .. offset_pos + 8], .little);
+    const offset: u64 = std.mem.readInt(u64, @ptrCast(file.map.memory[offset_pos .. offset_pos + 8]), .little);
 
     var rdr = file.readerAt(offset);
     var meta: MetadataReader = .init(alloc, &rdr, decomp);
@@ -72,7 +72,7 @@ pub fn CachedTable(comptime T: anytype) type {
 
             for (0..num_blocks) |block| {
                 const offset_pos = self.table_start + (8 * block);
-                const offset: u64 = std.mem.readInt(u64, self.fil.map.memory[offset_pos .. offset_pos + 8], .little);
+                const offset: u64 = std.mem.readInt(u64, @ptrCast(self.fil.map.memory[offset_pos .. offset_pos + 8]), .little);
 
                 const len: u16 = if (self.total_num % T_PER_BLOCK != 0 and block == (self.total_num - 1) / T_PER_BLOCK)
                     @truncate(self.total_num % T_PER_BLOCK)
@@ -106,7 +106,7 @@ pub fn CachedTable(comptime T: anytype) type {
                 return self.table.get(block).?[block_offset];
 
             const offset_pos = self.table_start + (8 * block);
-            const offset: u64 = std.mem.readInt(u64, self.fil.map.memory[offset_pos .. offset_pos + 8], .little);
+            const offset: u64 = std.mem.readInt(u64, @ptrCast(self.fil.map.memory[offset_pos .. offset_pos + 8]), .little);
 
             const len: u16 = if (self.total_num % T_PER_BLOCK != 0 and block == (self.total_num - 1) / T_PER_BLOCK)
                 @truncate(self.total_num % T_PER_BLOCK)
@@ -114,7 +114,7 @@ pub fn CachedTable(comptime T: anytype) type {
                 T_PER_BLOCK;
 
             var rdr = self.fil.readerAt(offset);
-            var meta: MetadataReader = .init(self.alloc, &rdr.interface, self.decomp);
+            var meta: MetadataReader = .init(self.alloc, &rdr, self.decomp);
 
             const slice = try meta.interface.readSliceEndianAlloc(self.alloc, T, len, .little);
             try self.table.put(@truncate(block), slice);

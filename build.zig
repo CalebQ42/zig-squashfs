@@ -22,6 +22,7 @@ pub fn build(b: *std.Build) !void {
             .target = target,
             .valgrind = debug,
             .root_source_file = b.path("src/root.zig"),
+            .link_libc = true,
         }),
         .use_llvm = debug,
     });

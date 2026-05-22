@@ -69,8 +69,7 @@ inline fn zstdDecomp(buffer: []u8, in: []u8, out: []u8) !usize {
 
 pub const stateless_decompressor: Decompressor = .{ .decomp_fn = statelessDecomp };
 
-fn statelessDecomp(d: ?*const Decompressor, alloc: std.mem.Allocator, in: []u8, out: []u8) Error!usize {
-    _ = d;
+fn statelessDecomp(_: ?*const Decompressor, alloc: std.mem.Allocator, in: []u8, out: []u8) Error!usize {
     _ = alloc;
     const res = c.ZSTD_decompress(out.ptr, out.len, in.ptr, in.len);
     if (c.ZSTD_isError(res) == 1)

@@ -51,27 +51,22 @@ fn numBlocks(self: DataExtractor) usize {
 
 /// Starts extracting the data using the given group to spawn async tasks.
 pub fn extractAsync(self: DataExtractor, alloc: std.mem.Allocator, io: Io, fil: Io.File) Error!void {
-    var map = try fil.createMemoryMap(io, .{ .len = self.file_size, .protection = .{ .write = true } });
-    defer map.destroy(io);
-
     var group: Io.Group = .init;
     defer group.cancel(io);
     var err: ?Error = null;
 
     var read_offset: u64 = self.start;
     for (0..self.blocks.len) |idx| {
-        group.async(io, blockThread, .{ self, alloc, fil, read_offset, idx, &err });
+        group.async(io, blockThread, .{ self, alloc, io, fil, read_offset, idx, &err });
         read_offset += self.blocks[idx].size;
     }
     if (self.frag_block != null)
-        group.async(io, fragThread, .{ self, map });
+        group.async(io, fragThread, .{ self, io, fil, &err });
 
     group.await(io) catch |cancel| return err orelse cancel;
-
-    try map.write(io);
 }
 
-fn blockThread(self: DataExtractor, alloc: std.mem.Allocator, map: Io.File.MemoryMap, read_offset: u64, idx: usize, ret_err: *?Error) Io.Cancelable!void {
+fn blockThread(self: DataExtractor, alloc: std.mem.Allocator, io: Io, fil: Io.File, read_offset: u64, idx: usize, ret_err: *?Error) Io.Cancelable!void {
     const block = self.blocks[idx];
 
     const cur_block_size = if (idx == self.numBlocks() - 1)
@@ -81,26 +76,70 @@ fn blockThread(self: DataExtractor, alloc: std.mem.Allocator, map: Io.File.Memor
 
     const write_offset = self.block_size * idx;
 
+    var wrt = fil.writer(io, &[0]u8{});
+    wrt.seekTo(write_offset) catch |err| {
+        ret_err.* = err;
+        if (err == error.Canceled) io.recancel();
+        return Io.Cancelable.Canceled;
+    };
+
     if (block.size == 0) {
-        @memset(map.memory[write_offset .. write_offset + cur_block_size], 0);
-        return;
-    }
-
-    if (block.uncompressed) {
-        @memcpy(map.memory[write_offset .. write_offset + cur_block_size], self.fil.map.memory[read_offset .. read_offset + cur_block_size]);
-    } else {
-        @branchHint(.likely);
-
-        _ = self.decomp.Decompress(alloc, self.fil.map.memory[read_offset .. read_offset + block.size], map.memory[write_offset .. write_offset + cur_block_size]) catch |err| {
+        wrt.interface.splatByteAll(0, cur_block_size) catch |err| {
             ret_err.* = err;
+            if (err == error.Canceled) io.recancel();
             return Io.Cancelable.Canceled;
         };
+    } else {
+        if (block.uncompressed) {
+            wrt.interface.writeAll(self.fil.map.memory[read_offset..][0..cur_block_size]) catch |err| {
+                ret_err.* = err;
+                if (err == error.Canceled) io.recancel();
+                return Io.Cancelable.Canceled;
+            };
+        } else {
+            @branchHint(.likely);
+
+            var tmp: [1024 * 1024]u8 = undefined;
+
+            _ = self.decomp.Decompress(alloc, self.fil.map.memory[read_offset..][0..block.size], tmp[0..cur_block_size]) catch |err| {
+                ret_err.* = err;
+                return Io.Cancelable.Canceled;
+            };
+
+            wrt.interface.writeAll(tmp[0..cur_block_size]) catch |err| {
+                ret_err.* = err;
+                if (err == error.Canceled) io.recancel();
+                return Io.Cancelable.Canceled;
+            };
+        }
     }
+    wrt.flush() catch |err| {
+        ret_err.* = err;
+        if (err == error.Canceled) io.recancel();
+        return Io.Cancelable.Canceled;
+    };
 }
-fn fragThread(self: DataExtractor, map: Io.File.MemoryMap) Io.Cancelable!void {
+fn fragThread(self: DataExtractor, io: Io, fil: Io.File, ret_err: *?Error) Io.Cancelable!void {
     const cur_block_size = self.file_size % self.block_size;
 
     const write_offset = self.blocks.len * self.block_size;
 
-    @memcpy(map.memory[write_offset .. write_offset + cur_block_size], self.frag_block.?[self.frag_offset .. self.frag_offset + cur_block_size]);
+    var wrt = fil.writer(io, &[0]u8{});
+    wrt.seekTo(write_offset) catch |err| {
+        ret_err.* = err;
+        if (err == error.Canceled) io.recancel();
+        return Io.Cancelable.Canceled;
+    };
+
+    wrt.interface.writeAll(self.frag_block.?[self.frag_offset..][0..cur_block_size]) catch |err| {
+        ret_err.* = err;
+        if (err == error.Canceled) io.recancel();
+        return Io.Cancelable.Canceled;
+    };
+
+    wrt.flush() catch |err| {
+        ret_err.* = err;
+        if (err == error.Canceled) io.recancel();
+        return Io.Cancelable.Canceled;
+    };
 }

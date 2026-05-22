@@ -26,12 +26,10 @@ frag_cache: std.array_hash_map.Auto(u32, []u8),
 cache_mut: std.Io.RwLock = .init,
 
 pub fn init(alloc: std.mem.Allocator, fil: OffsetFile, decomp: *const Decompressor, frag_start: u64, frag_num: u32, block_size: u32) !FragManager {
-    var rdr = fil.readerAt(frag_start);
-    var first_offset: u64 = undefined;
-    try rdr.interface.readSliceEndian(u64, @ptrCast(&first_offset), .little);
+    const first_offset: u64 = std.mem.readInt(u64, @ptrCast(fil.map.memory[frag_start .. frag_start + 8]), .little);
 
-    rdr = fil.readerAt(first_offset);
-    var meta: MetadataReader = .init(alloc, &rdr.interface, decomp);
+    var rdr = fil.readerAt(first_offset);
+    var meta: MetadataReader = .init(alloc, &rdr, decomp);
 
     const entries = try alloc.alloc(FragEntry, frag_num);
     errdefer alloc.free(entries);

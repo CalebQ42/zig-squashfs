@@ -18,11 +18,11 @@ kv_start: u64,
 
 table: LookupTable.CachedTable(TableValue),
 value_cache: std.AutoHashMap(InodeRef, []const u8),
-value_mut: Io.RWLock = .init,
+value_mut: Io.RwLock = .init,
 
 pub fn init(alloc: std.mem.Allocator, fil: OffsetFile, decomp: *const Decompressor, xattr_start: u64) !XattrCachedTable {
-    const start: u64 = std.mem.readInt(u64, fil.map.memory[xattr_start .. xattr_start + 8], .little);
-    const num: u64 = std.mem.readInt(u64, fil.map.memory[xattr_start + 8 .. xattr_start + 16], .little);
+    const start: u64 = std.mem.readInt(u64, @ptrCast(fil.map.memory[xattr_start .. xattr_start + 8]), .little);
+    const num: u64 = std.mem.readInt(u64, @ptrCast(fil.map.memory[xattr_start + 8 .. xattr_start + 16]), .little);
 
     return .{
         .alloc = alloc,
@@ -37,6 +37,7 @@ pub fn init(alloc: std.mem.Allocator, fil: OffsetFile, decomp: *const Decompress
     };
 }
 pub fn deinit(self: *XattrCachedTable, io: Io) void {
+    self.value_mut.lockUncancelable(io);
     self.table.deinit(io);
     self.value_cache.deinit();
 }
@@ -45,7 +46,7 @@ pub fn get(self: *XattrCachedTable, alloc: std.mem.Allocator, io: Io, idx: u32) 
     const lookup = try self.table.get(io, idx);
 
     var rdr = self.fil.readerAt(self.kv_start + lookup.ref.block_start);
-    var meta: MetadataReader = .init(alloc, &rdr.interface, self.decomp);
+    var meta: MetadataReader = .init(alloc, &rdr, self.decomp);
     try meta.interface.discardAll(lookup.ref.block_offset);
 
     const out = try alloc.alloc(XattrSemiOwned, lookup.count);
@@ -95,8 +96,20 @@ pub fn get(self: *XattrCachedTable, alloc: std.mem.Allocator, io: Io, idx: u32) 
         }
         const val_ref: InodeRef = .{ .block_start = meta.cur_block_start, .block_offset = @truncate(meta.interface.seek) };
 
+        {
+            try self.value_mut.lockShared(io);
+            defer self.value_mut.unlockShared(io);
+            if (self.value_cache.contains(val_ref)) {
+                out[i] = .{
+                    .key = key,
+                    .value = try self.valueAt(io, val_ref),
+                };
+                continue;
+            }
+        }
         try self.value_mut.lock(io);
         defer self.value_mut.unlock(io);
+
         if (self.value_cache.contains(val_ref)) {
             out[i] = .{
                 .key = key,
@@ -128,7 +141,7 @@ fn valueAt(self: *XattrCachedTable, io: Io, ref: InodeRef) ![]const u8 {
     if (self.value_cache.contains(ref)) return self.value_cache.get(ref).?;
 
     var rdr = self.fil.readerAt(self.kv_start + ref.block_start);
-    var meta: MetadataReader = .init(self.alloc, &rdr.interface, self.decomp);
+    var meta: MetadataReader = .init(self.alloc, &rdr, self.decomp);
     try meta.interface.discardAll(ref.block_offset);
 
     var val_size: u32 = undefined;
@@ -200,7 +213,7 @@ const XattrPrefix = packed struct(u16) {
 // Stateless
 
 pub fn statelessLookup(alloc: std.mem.Allocator, io: Io, decomp: *const Decompressor, fil: OffsetFile, table_start: u64, idx: u16) ![]XattrOwned {
-    const kv_start: u64 = std.mem.readInt(u64, fil.map.memory[table_start .. table_start + 8], .little);
+    const kv_start: u64 = std.mem.readInt(u64, @ptrCast(fil.map.memory[table_start .. table_start + 8]), .little);
 
     const lookup = try LookupTable.lookupValue(TableValue, alloc, io, decomp, fil, table_start + 16, idx);
 

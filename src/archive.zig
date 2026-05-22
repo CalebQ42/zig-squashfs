@@ -23,6 +23,7 @@ pub fn init(io: Io, file: std.Io.File, offset: u64) !Archive {
     try rdr.seekTo(offset);
     var super: Superblock = undefined;
     try rdr.interface.readSliceEndian(Superblock, @ptrCast(&super), .little);
+
     return .{
         .file = try .init(io, file, super.size, offset),
         .super = super,
