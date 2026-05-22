@@ -62,11 +62,18 @@ pub fn build(b: *std.Build) !void {
 
     const mod_tests = b.addTest(.{
         .root_module = b.createModule(.{
-            .optimize = optimize,
+            .optimize = .Debug,
             .target = target,
             .root_source_file = b.path("src/test.zig"),
+            .imports = &.{
+                .{ .name = "c", .module = c.createModule() },
+            },
+            .valgrind = true,
         }),
+        .use_llvm = true,
     });
+    mod_tests.root_module.linkLibrary(zstd.artifact("zstd"));
+
     const run_mod_tests = b.addRunArtifact(mod_tests);
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_mod_tests.step);

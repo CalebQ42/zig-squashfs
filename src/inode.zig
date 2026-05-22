@@ -9,6 +9,7 @@ const Decomp = @import("decomp.zig").Decomp;
 const DirEntry = @import("directory.zig");
 const ExtractionOptions = @import("options.zig");
 const FragEntry = @import("frag.zig").FragEntry;
+const FragManager = @import("frag.zig");
 const dir = @import("inode_data/dir.zig");
 const file = @import("inode_data/file.zig");
 const misc = @import("inode_data/misc.zig");
@@ -215,6 +216,9 @@ const PathRet = struct {
     inode: Inode,
     xattr_idx: ?u32 = null,
 };
+fn DirCompare(_: void, a: PathRet, b: PathRet) std.math.Order{
+
+}
 const ExtractReturnUnion = union(enum) {
     path_ret: ExtractError!PathRet,
 };
@@ -247,32 +251,16 @@ pub fn extract(
     defer decomp_base.deinit();
     const decomp = decomp_base.decompressor();
 
-    var frag_table: CachedTable(FragEntry) = .init(alloc, fil, decomp, super.frag_start, super.frag_count);
-    defer if (!options.ignore_permissions) frag_table.deinit(io);
-    try frag_table.fill(io);
-
-    var arena: std.heap.ArenaAllocator = .init(alloc);
-    defer arena.deinit();
+    var frags: FragManager = try .init(alloc, io, fil, decomp, super.frag_start, super.frag_count, super.block_size);
+    defer frags.deinit(io);
 
     var sel_buf = [1]ExtractReturnUnion{undefined} ** 10;
     var sel: Io.Select(ExtractReturnUnion) = .init(io, &sel_buf);
     defer sel.cancelDiscard();
 
-    switch (self.hdr.inode_type) {
-        .dir, .ext_dir => try sel.concurrent(
-            .path_ret,
-            extractDir,
-            .{ self, alloc, io, fil, decomp, &sel, &arena, super.dir_start, super.inode_start, &frag_table, super.block_size, path },
-        ),
-        .file, .ext_file => try sel.concurrent(
-            .path_ret,
-            extractFile,
-            .{ self, alloc, io, fil, decomp, &frag_table, super.block_size, path },
-        ),
-        .symlink, .ext_symlink => try sel.concurrent(.path_ret, extractSymlink, .{ self, io, path }),
-        else => if (@hasField(std.os, "linux"))
-            try sel.concurrent(.path_ret, extractDevOrIPC, .{ self, alloc, path }),
-    }
+    var fold_queu: std.PriorityDequeue(PathRet, void, comptime compareFn: fn (Context, T, T) Order)
+
+    try sel.concurrent(.path_ret, extractReal, .{ self, alloc, io, fil, decomp, super, &frags, &sel, path });
 
     var xattr_table: ?XattrTable = if (!options.ignore_xattr)
         try .init(alloc, io, fil, decomp, super.xattr_start)
@@ -295,6 +283,7 @@ pub fn extract(
 
         // std.debug.print("Waiting for return...", .{});
         const ret = try sel.await();
+        defer sel.queue.putOneUncancelable(io, ret) catch {};
         // std.debug.print("Got One...\n", .{});
         const path_ret = try ret.path_ret;
 
@@ -328,18 +317,33 @@ pub fn extract(
         }
     }
 }
+pub fn extractReal(
+    self: Inode,
+    alloc: std.mem.Allocator,
+    io: Io,
+    fil: OffsetFile,
+    decomp: *const Decompressor,
+    super: Archive.Superblock,
+    frags: *FragManager,
+    sel: *Io.Select(ExtractReturnUnion),
+    path: []const u8,
+) ExtractError!PathRet {
+    return switch (self.hdr.inode_type) {
+        .dir, .ext_dir => extractDir(self, alloc, io, fil, decomp, super, sel, frags, path),
+        .file, .ext_file => extractFile(self, alloc, io, fil, decomp, frags, super.block_size, path),
+        .symlink, .ext_symlink => extractSymlink(self, io, path),
+        else => extractDevOrIPC(self, alloc, path),
+    };
+}
 fn extractDir(
     self: Inode,
     alloc: std.mem.Allocator,
     io: Io,
     fil: OffsetFile,
     decomp: *const Decompressor,
+    super: Archive.Superblock,
     parent_select: *Io.Select(ExtractReturnUnion),
-    arena: *std.heap.ArenaAllocator,
-    dir_start: u64,
-    inode_start: u64,
-    frag: *CachedTable(FragEntry),
-    block_size: u32,
+    frags: *FragManager,
     path: []const u8,
 ) ExtractError!PathRet {
     try Io.Dir.cwd().createDirPath(io, path);
@@ -350,7 +354,7 @@ fn extractDir(
 
     var num: usize = 0;
     {
-        const dir_entries = self.readDirectory(alloc, io, fil, decomp, dir_start) catch |err| switch (err) {
+        const dir_entries = self.readDirectory(alloc, io, fil, decomp, super.dir_start) catch |err| switch (err) {
             Error.NotDirectory => unreachable,
             else => return @errorCast(err),
         };
@@ -362,29 +366,16 @@ fn extractDir(
         }
 
         for (dir_entries) |d| {
-            var rdr = try fil.readerAt(io, d.block_start + inode_start, &[0]u8{});
+            var rdr = try fil.readerAt(io, d.block_start + super.inode_start, &[0]u8{});
             var meta_rdr: MetadataReader = .init(alloc, &rdr.interface, decomp);
             try meta_rdr.interface.discardAll(d.block_offset);
-            const inode = try read(arena.allocator(), &meta_rdr.interface, block_size);
-            errdefer inode.deinit(arena.allocator());
+            const inode = try read(alloc, &meta_rdr.interface, super.block_size);
+            errdefer inode.deinit(alloc);
 
-            const new_path = try std.mem.concat(arena.allocator(), u8, &[_][]const u8{ path, "/", d.name });
-            errdefer arena.allocator().free(new_path);
+            const new_path = try std.mem.concat(alloc, u8, &[_][]const u8{ path, "/", d.name });
+            errdefer alloc.free(new_path);
 
-            switch (d.type) {
-                .dir => try sel.concurrent(
-                    .path_ret,
-                    extractDir,
-                    .{ inode, alloc, io, fil, decomp, parent_select, arena, dir_start, inode_start, frag, block_size, new_path },
-                ),
-                .file => try sel.concurrent(
-                    .path_ret,
-                    extractFile,
-                    .{ inode, alloc, io, fil, decomp, frag, block_size, new_path },
-                ),
-                .symlink => try sel.concurrent(.path_ret, extractSymlink, .{ inode, io, new_path }),
-                else => try sel.concurrent(.path_ret, extractDevOrIPC, .{ inode, alloc, new_path }),
-            }
+            try sel.concurrent(.path_ret, extractReal, .{ self, alloc, io, fil, decomp, super, frags, &sel, new_path });
         }
     }
 
@@ -408,7 +399,7 @@ fn extractFile(
     io: Io,
     fil: OffsetFile,
     decomp: *const Decompressor,
-    frag: *CachedTable(FragEntry),
+    frag: *FragManager,
     block_size: u32,
     path: []const u8,
 ) ExtractError!PathRet {
