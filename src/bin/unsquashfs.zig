@@ -4,7 +4,7 @@ const Writer = Io.Writer;
 const builtin = @import("builtin");
 
 const config = @import("config");
-const squashfs = @import("zig_squashfs");
+const squashfs = @import("squashfs");
 
 //TODO: Add more options
 const help_mgs =

@@ -15,6 +15,7 @@ test "Basics" {
     var fil = try Io.Dir.cwd().openFile(io, TestArchive, .{});
     defer fil.close(io);
     var sfs: Archive = try .init(io, fil, 0);
+    defer sfs.deinit(io);
     try std.testing.expectEqualDeep(sfs.super, LinuxPATestCorrectSuperblock);
     const root_file = try sfs.root(alloc, io);
     defer root_file.deinit();
@@ -30,6 +31,7 @@ test "ExtractSingleFile" {
     var fil = try Io.Dir.cwd().openFile(io, TestArchive, .{});
     defer fil.close(io);
     var sfs: Archive = try .init(io, fil, 0);
+    defer sfs.deinit(io);
     var test_fil = try sfs.open(alloc, io, TestFile);
     defer test_fil.deinit();
     try test_fil.extract(alloc, io, TestFileExtractLocation, try .Default());
@@ -45,6 +47,7 @@ test "ExtractCompleteArchive" {
     var fil = try Io.Dir.cwd().openFile(io, TestArchive, .{});
     defer fil.close(io);
     var sfs: Archive = try .init(io, fil, 0);
+    defer sfs.deinit(io);
     try sfs.extract(alloc, io, TestFullExtractLocation, try .Default());
 }
 

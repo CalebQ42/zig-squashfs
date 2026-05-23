@@ -31,6 +31,9 @@ pub fn init(io: Io, file: std.Io.File, offset: u64) !Archive {
         .stateless_decomp = try Decomp.StatelessDecomp(super.compression),
     };
 }
+pub fn deinit(self: Archive, io: Io) void {
+    self.file.deinit(io);
+}
 
 /// The root folder of the Archive. Used to open other Files.
 pub fn root(self: Archive, alloc: std.mem.Allocator, io: Io) !File {

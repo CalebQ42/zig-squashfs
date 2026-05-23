@@ -1,10 +1,13 @@
 const std = @import("std");
+const Io = std.Io;
 const Reader = std.Io.Reader;
 const lzma = std.compress.lzma;
 const Node = std.SinglyLinkedList.Node;
 
 const Decompressor = @import("../util/decompressor.zig");
 const Error = Decompressor.Error;
+
+const Queue = Io.Queue([]u8);
 
 const Self = @This();
 
@@ -16,57 +19,49 @@ const Buffer = struct {
 interface: Decompressor = .{ .decomp_fn = decomp },
 
 alloc: std.mem.Allocator,
+io: Io,
 
 block_size: u32,
-buffers: std.ArrayList(Buffer),
-buffer_queue: std.SinglyLinkedList = .{},
+buf: [][]u8,
+buf_queue: Queue,
 
-pub fn init(alloc: std.mem.Allocator, block_size: u32) !Self {
+pub fn init(alloc: std.mem.Allocator, io: Io, block_size: u32) !Self {
+    const buf = try alloc.alloc([]u8, 20); // TODO: Choose a better number instead of a random one.
+    var queue: Queue = .init(buf);
+    for (0..20) |_|
+        try queue.putOne(io, try alloc.alloc(u8, block_size));
+
     return .{
         .alloc = alloc,
+        .io = io,
 
         .block_size = block_size,
-        .buffers = try .initCapacity(alloc, 5),
+        .buf = buf,
+        .buf_queue = queue,
     };
 }
 pub fn deinit(self: *Self) void {
-    for (self.buffers.items) |buf|
-        self.alloc.free(buf.buf);
-    self.buffers.deinit(self.alloc);
+    self.buf_queue.close(self.io);
+    for (self.buf) |buf|
+        self.alloc.free(buf);
+    self.alloc.free(self.buf);
 }
 
 fn decomp(d: ?*const Decompressor, alloc: std.mem.Allocator, in: []u8, out: []u8) Error!usize {
     if (d == null) {
-        var buf = try alloc.alloc(u8, in.len * 2);
-        defer alloc.free(buf);
-        return lzmaDecomp(alloc, &buf, in, out) catch |err| return switch (err) {
-            error.OutOfMemory => Error.OutOfMemory,
-            else => Error.ReadFailed,
-        };
+        return statelessDecomp(d, alloc, in, out);
     }
     var self: *Self = @fieldParentPtr("interface", @constCast(d.?));
-    const buf_node = self.buffer_queue.popFirst();
-    var buf: *Buffer = undefined;
-    if (buf_node == null) {
-        const new_buf = try self.buffers.addOne(self.alloc);
-        new_buf.* = .{ .node = .{}, .buf = try self.alloc.alloc(u8, self.block_size) };
-        buf = new_buf;
-    } else {
-        buf = @fieldParentPtr("node", buf_node.?);
-    }
-    defer self.buffer_queue.prepend(&buf.node);
-    return lzmaDecomp(self.alloc, &buf.buf, in, out) catch |err| {
-        // self.err = err;
-        return switch (err) {
-            error.OutOfMemory => Error.OutOfMemory,
-            else => Error.ReadFailed,
-        };
-    };
+
+    const buf = self.buf_queue.getOne(self.io) catch return Error.ReadFailed;
+    defer self.buf_queue.putOne(self.io, buf) catch {};
+
+    return lzmaDecomp(self.alloc, &buf.buf, in, out) catch return Error.ReadFailed;
 }
 
 inline fn lzmaDecomp(alloc: std.mem.Allocator, buffer: *[]u8, in: []u8, out: []u8) !usize {
     var rdr: Reader = .fixed(in);
-    var d = try lzma.Decompress.initOptions(&rdr, alloc, buffer.*, .{ .allow_incomplete = true }, 3 * 1024 * 1024);
+    var d = try lzma.Decompress.initOptions(&rdr, alloc, buffer.*, .{});
     defer {
         buffer.* = d.takeBuffer();
         d.deinit();

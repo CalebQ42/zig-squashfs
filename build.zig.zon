@@ -20,6 +20,10 @@
             .url = "git+https://github.com/CalebQ42/zig-minilzo.git#7cbae997b91a44d74b7cd6c073584dc9562a6c90",
             .hash = "minilzo-2.10.0-Ij7BO8wLAADeWI4Pe4jp8XTDsDaquZR14oZ7_9yKKDWP",
         },
+        .xz = .{
+            .url = "git+https://github.com/akunaakwei/zig-xz.git#e2d389262c8291907e3e4c6fb119819141c16c0f",
+            .hash = "xz-5.8.2-6v47_JYeAABSL-jonprpL5-E_YaaGc4B5xrbe93WsJ3G",
+        },
     },
     .paths = .{
         "build.zig",

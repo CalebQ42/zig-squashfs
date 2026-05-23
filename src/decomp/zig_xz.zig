@@ -1,17 +1,20 @@
 const std = @import("std");
 const Io = std.Io;
 const Reader = std.Io.Reader;
-const zstd = std.compress.zstd;
+const xz = std.compress.xz;
 const Node = std.SinglyLinkedList.Node;
-
-const c = @import("c");
 
 const Decompressor = @import("../util/decompressor.zig");
 const Error = Decompressor.Error;
 
-const Queue = std.Io.Queue([]u8);
+const Queue = Io.Queue([]u8);
 
 const Self = @This();
+
+const Buffer = struct {
+    node: Node,
+    buf: []u8,
+};
 
 interface: Decompressor = .{ .decomp_fn = decomp },
 
@@ -26,7 +29,7 @@ pub fn init(alloc: std.mem.Allocator, io: Io, block_size: u32) !Self {
     const buf = try alloc.alloc([]u8, 20); // TODO: Choose a better number instead of a random one.
     var queue: Queue = .init(buf);
     for (0..20) |_|
-        try queue.putOne(io, try alloc.alloc(u8, block_size + zstd.block_size_max));
+        try queue.putOne(io, try alloc.alloc(u8, block_size));
 
     return .{
         .alloc = alloc,
@@ -46,21 +49,23 @@ pub fn deinit(self: *Self) void {
 
 fn decomp(d: ?*const Decompressor, alloc: std.mem.Allocator, in: []u8, out: []u8) Error!usize {
     if (d == null) {
-        const buf = try alloc.alloc(u8, in.len * 2);
-        defer alloc.free(buf);
-        return zstdDecomp(buf, in, out);
+        return statelessDecomp(d, alloc, in, out);
     }
     var self: *Self = @fieldParentPtr("interface", @constCast(d.?));
 
     const buf = self.buf_queue.getOne(self.io) catch return Error.ReadFailed;
     defer self.buf_queue.putOne(self.io, buf) catch {};
 
-    return zstdDecomp(buf, in, out);
+    return xzDecomp(self.alloc, &buf.buf, in, out) catch return Error.ReadFailed;
 }
 
-inline fn zstdDecomp(buffer: []u8, in: []u8, out: []u8) !usize {
+inline fn xzDecomp(alloc: std.mem.Allocator, buffer: *[]u8, in: []u8, out: []u8) !usize {
     var rdr: Reader = .fixed(in);
-    var d = zstd.Decompress.init(&rdr, buffer, .{ .window_len = @truncate(out.len) });
+    var d = try xz.Decompress.init(&rdr, alloc, buffer.*);
+    defer {
+        buffer.* = d.takeBuffer();
+        d.deinit();
+    }
 
     return d.reader.readSliceShort(out);
 }
@@ -70,12 +75,7 @@ inline fn zstdDecomp(buffer: []u8, in: []u8, out: []u8) !usize {
 pub const stateless_decompressor: Decompressor = .{ .decomp_fn = statelessDecomp };
 
 fn statelessDecomp(_: ?*const Decompressor, alloc: std.mem.Allocator, in: []u8, out: []u8) Error!usize {
-    _ = alloc;
-    const res = c.ZSTD_decompress(out.ptr, out.len, in.ptr, in.len);
-    if (c.ZSTD_isError(res) == 1)
-        return Error.ReadFailed;
-    return res;
-    // const buf = try alloc.alloc(u8, out.len + zstd.block_size_max);
-    // defer alloc.free(buf);
-    // return zstdDecomp(buf, in, out);
+    var buf = try alloc.alloc(u8, in.len);
+    defer alloc.free(buf);
+    return xzDecomp(alloc, &buf, in, out) catch return Error.ReadFailed;
 }
