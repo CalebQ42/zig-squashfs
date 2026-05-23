@@ -2,12 +2,12 @@ const std = @import("std");
 
 const options = @import("options");
 
+const lzma = @import("decomp/zig_lzma.zig");
+const xz = @import("decomp/zig_xz.zig");
 const Decompressor = @import("util/decompressor.zig");
 
 const zlib = if (options.use_zig_decomp) @import("decomp/zig_zlib.zig") else @import("decomp/c_zlib.zig");
-const lzma = if (options.use_zig_decomp) @import("decomp/zig_lzma.zig") else @import("decomp/c_lzma.zig");
 const lzo = if (options.use_zig_decomp or !options.allow_lzo) void else @import("decomp/c_lzo.zig");
-const xz = if (options.use_zig_decomp) @import("decomp/zig_xz.zig") else @import("decomp/c_xz.zig");
 const lz4 = if (options.use_zig_decomp) void else @import("decomp/c_lz4.zig");
 const zstd = if (options.use_zig_decomp) @import("decomp/zig_zstd.zig") else @import("decomp/c_zstd.zig");
 
@@ -45,14 +45,14 @@ pub const Decomp = union(enum) {
     lz4: lz4,
     zstd: zstd,
 
-    pub fn init(val: Enum, alloc: std.mem.Allocator) !Decomp {
+    pub fn init(val: Enum, alloc: std.mem.Allocator, io: std.Io, block_size: u32) !Decomp {
         return switch (val) {
-            .gzip => .{ .gzip = zlib.init(alloc) },
+            .gzip => .{ .gzip = zlib.init(alloc, io, block_size) },
             .lzma => .{ .lzma = .{} },
             .lzo => .{ .lzo = .{} },
             .xz => .{ .xz = .{} },
             .lz4 => .{ .lz4 = .{} },
-            .zstd => .{ .zstd = zstd.init(alloc) },
+            .zstd => .{ .zstd = zstd.init(alloc, io, block_size) },
         };
     }
     pub fn deinit(self: *Decomp) void {

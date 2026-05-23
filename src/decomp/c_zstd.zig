@@ -9,7 +9,7 @@ const c = @import("c");
 const Decompressor = @import("../util/decompressor.zig");
 const Error = Decompressor.Error;
 
-const Queue = std.Io.Queue([]u8);
+const Queue = std.Io.Queue(?*c.ZSTD_DCtx);
 
 const Self = @This();
 

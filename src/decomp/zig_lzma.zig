@@ -53,15 +53,15 @@ fn decomp(d: ?*const Decompressor, alloc: std.mem.Allocator, in: []u8, out: []u8
     }
     var self: *Self = @fieldParentPtr("interface", @constCast(d.?));
 
-    const buf = self.buf_queue.getOne(self.io) catch return Error.ReadFailed;
+    var buf = self.buf_queue.getOne(self.io) catch return Error.ReadFailed;
     defer self.buf_queue.putOne(self.io, buf) catch {};
 
-    return lzmaDecomp(self.alloc, &buf.buf, in, out) catch return Error.ReadFailed;
+    return lzmaDecomp(self.alloc, &buf, in, out) catch return Error.ReadFailed;
 }
 
 inline fn lzmaDecomp(alloc: std.mem.Allocator, buffer: *[]u8, in: []u8, out: []u8) !usize {
     var rdr: Reader = .fixed(in);
-    var d = try lzma.Decompress.initOptions(&rdr, alloc, buffer.*, .{});
+    var d = try lzma.Decompress.initOptions(&rdr, alloc, buffer.*, .{}, in.len * 2);
     defer {
         buffer.* = d.takeBuffer();
         d.deinit();

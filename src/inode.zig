@@ -275,7 +275,7 @@ pub fn extract(
 ) !void {
     const path = std.mem.trimEnd(u8, filepath, "/");
 
-    var decomp_base: Decomp = .init(super.compression, alloc);
+    var decomp_base: Decomp = try .init(super.compression, alloc, io, super.block_size);
     const decomp = decomp_base.decompressor();
 
     var frag_mgr: FragManager = try .init(alloc, fil, decomp, super.frag_start, super.frag_count, super.block_size);

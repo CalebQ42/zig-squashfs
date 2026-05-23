@@ -1,19 +1,25 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) !void {
-    // const use_zig_decomp = b.option(bool, "use_zig_decomp", "Use zig standard library for decompression.") orelse false;
-    // const allow_lzo = b.option(bool, "allow_lzo", "Compile with lzo support") orelse false;
+    const use_zig_decomp = b.option(bool, "use_zig_decomp", "Use zig standard library for decompression.") orelse false;
+    const allow_lzo = b.option(bool, "allow_lzo", "Compile with lzo support") orelse false;
     var debug = b.option(bool, "debug", "Enable options to make debugging easier.");
     const version_string_option = b.option([]const u8, "version", "Version of the library/binary");
 
-    // const zig_squashfs_options = b.addOptions();
-    // zig_squashfs_options.addOption(bool, "use_zig_decomp", use_zig_decomp);
-    // zig_squashfs_options.addOption(bool, "allow_lzo", allow_lzo);
+    const zig_squashfs_options = b.addOptions();
+    zig_squashfs_options.addOption(bool, "use_zig_decomp", use_zig_decomp);
+    zig_squashfs_options.addOption(bool, "allow_lzo", allow_lzo);
 
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
     if (optimize == .Debug) debug = true;
+
+    const c = b.addTranslateC(.{
+        .optimize = optimize,
+        .target = target,
+        .root_source_file = b.path("src/c.h"),
+    });
 
     const lib = b.addLibrary(.{
         .name = "squashfs",
@@ -22,7 +28,11 @@ pub fn build(b: *std.Build) !void {
             .target = target,
             .valgrind = debug,
             .root_source_file = b.path("src/root.zig"),
-            .link_libc = true,
+            // .link_libc = true,
+            .imports = &.{
+                .{ .name = "options", .module = zig_squashfs_options.createModule() },
+                .{ .name = "c", .module = c.createModule() },
+            },
         }),
         .use_llvm = debug,
     });
@@ -30,12 +40,17 @@ pub fn build(b: *std.Build) !void {
     const zstd = b.dependency("zstd", .{ .optimize = optimize, .target = target });
     lib.root_module.linkLibrary(zstd.artifact("zstd"));
 
-    const c = b.addTranslateC(.{
-        .optimize = optimize,
-        .target = target,
-        .root_source_file = b.path("src/c.h"),
-    });
-    lib.root_module.addImport("c", c.createModule());
+    const zng = b.dependency("zlib_ng", .{ .optimize = optimize, .target = target });
+    lib.root_module.linkLibrary(zng.artifact("zng"));
+
+    const xz = b.dependency("xz", .{ .optimize = optimize, .target = target });
+    lib.root_module.linkLibrary(xz.artifact("lzma"));
+
+    const minilzo = b.dependency("minilzo", .{ .optimize = optimize, .target = target });
+    lib.root_module.linkLibrary(minilzo.artifact("minilzo"));
+
+    const lz4 = b.dependency("lz4", .{ .optimize = optimize, .target = target });
+    lib.root_module.linkLibrary(lz4.artifact("lz4"));
 
     var version = version_string_option orelse "0.0.0-testing";
     if (version[0] == 'v') version = version[1..];

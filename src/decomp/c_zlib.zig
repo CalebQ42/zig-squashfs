@@ -49,7 +49,7 @@ fn decomp(d: ?*const Decompressor, alloc: std.mem.Allocator, in: []u8, out: []u8
     }
     var self: *Self = @fieldParentPtr("interface", @constCast(d.?));
 
-    const stream = self.ctx_queue.getOne(self.io) catch return Error.ReadFailed;
+    var stream = self.ctx_queue.getOne(self.io) catch return Error.ReadFailed;
     defer self.ctx_queue.putOne(self.io, stream) catch {};
 
     stream.@"opaque" = @constCast(&alloc);
@@ -89,10 +89,10 @@ fn statelessDecomp(_: ?*const Decompressor, alloc: std.mem.Allocator, in: []u8, 
 // zalloc
 
 fn zalloc(ptr: ?*anyopaque, size: c_uint, len: c_uint) callconv(.c) ?*anyopaque {
-    var alloc: *std.mem.Allocator = @ptrCast(ptr);
+    var alloc: *std.mem.Allocator = @ptrCast(@alignCast(ptr));
     return alloc.rawAlloc(size * len, .@"1", 0);
 }
 fn zfree(ptr: ?*anyopaque, mem_ptr: ?*anyopaque) callconv(.c) void {
-    var alloc: *std.mem.Allocator = @ptrCast(ptr);
+    var alloc: *std.mem.Allocator = @ptrCast(@alignCast(ptr));
     alloc.rawFree(@ptrCast(mem_ptr), .@"1", 0);
 }

@@ -1,7 +1,5 @@
 #include <zstd.h>
 #include <zlib-ng.h>
-#include <lzma.h>
-#ifdef ALLOW_LZO
+// #include <lzma.h>
 #include <lzo/minilzo.h>
-#endif
 #include <lz4.h>

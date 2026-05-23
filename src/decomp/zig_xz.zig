@@ -53,10 +53,10 @@ fn decomp(d: ?*const Decompressor, alloc: std.mem.Allocator, in: []u8, out: []u8
     }
     var self: *Self = @fieldParentPtr("interface", @constCast(d.?));
 
-    const buf = self.buf_queue.getOne(self.io) catch return Error.ReadFailed;
+    var buf = self.buf_queue.getOne(self.io) catch return Error.ReadFailed;
     defer self.buf_queue.putOne(self.io, buf) catch {};
 
-    return xzDecomp(self.alloc, &buf.buf, in, out) catch return Error.ReadFailed;
+    return xzDecomp(self.alloc, &buf, in, out) catch return Error.ReadFailed;
 }
 
 inline fn xzDecomp(alloc: std.mem.Allocator, buffer: *[]u8, in: []u8, out: []u8) !usize {
