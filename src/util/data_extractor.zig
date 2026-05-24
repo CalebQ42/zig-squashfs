@@ -50,6 +50,23 @@ fn numBlocks(self: DataExtractor) usize {
 }
 
 /// Starts extracting the data using the given group to spawn async tasks.
+pub fn extractConcurrent(self: DataExtractor, alloc: std.mem.Allocator, io: Io, fil: Io.File) (Error || Io.ConcurrentError)!void {
+    var group: Io.Group = .init;
+    defer group.cancel(io);
+    var err: ?Error = null;
+
+    var read_offset: u64 = self.start;
+    for (0..self.blocks.len) |idx| {
+        try group.concurrent(io, blockThread, .{ self, alloc, io, fil, read_offset, idx, &err });
+        read_offset += self.blocks[idx].size;
+    }
+    if (self.frag_block != null)
+        try group.concurrent(io, fragThread, .{ self, io, fil, &err });
+
+    group.await(io) catch |cancel| return err orelse cancel;
+}
+
+/// Starts extracting the data using the given group to spawn async tasks.
 pub fn extractAsync(self: DataExtractor, alloc: std.mem.Allocator, io: Io, fil: Io.File) Error!void {
     var group: Io.Group = .init;
     defer group.cancel(io);

@@ -276,7 +276,7 @@ pub fn extract(
     const path = std.mem.trimEnd(u8, filepath, "/");
 
     var decomp_base: Decomp = try .init(super.compression, alloc, io, super.block_size);
-    defer decomp_base.deinit(alloc);
+    decomp_base.deinit(alloc);
     const decomp = decomp_base.decompressor();
 
     var frag_mgr: FragManager = try .init(alloc, fil, decomp, super.frag_start, super.frag_count, super.block_size);
@@ -286,64 +286,13 @@ pub fn extract(
     var sel: Io.Select(ExtractReturnUnion) = .init(io, &sel_buf);
     defer sel.cancelDiscard();
 
+    var loop = io.async(finishLoop, .{ alloc, io, fil, decomp, super, options, &sel });
+
     sel.async(.path_ret, extractReal, .{ self, alloc, io, fil, super, decomp, &sel, &frag_mgr, path, true });
 
-    var id_table: CachedTable(u16) = .init(alloc, fil, decomp, super.id_start, super.id_count);
-    defer id_table.deinit(io);
-
-    var xattr_table: ?XattrTable = if (super.flags.xattr_never or options.ignore_xattr or !@hasField(std.os, "linux"))
-        null
-    else
-        try .init(alloc, fil, decomp, super.xattr_start);
-    defer if (xattr_table != null) xattr_table.?.deinit(io);
-
-    var dir_queue: std.PriorityDequeue(PathRet, void, DirCompare) = .empty;
-    defer dir_queue.deinit(alloc);
-
-    while (true) {
-        if (sel.group.token.load(.unordered) == null) break;
-
-        const ret = try sel.await();
-        const path_ret = try ret.path_ret;
-
-        if (options.ignore_permissions and xattr_table == null) {
-            path_ret.deinit(alloc);
-            continue;
-        }
-
-        if (path_ret.inode.hdr.inode_type == .dir or path_ret.inode.hdr.inode_type == .ext_dir) {
-            try dir_queue.push(alloc, path_ret);
-            continue;
-        }
-
-        defer path_ret.deinit(alloc);
-        try path_ret.setMetadata(alloc, io, &id_table, if (xattr_table == null) null else &xattr_table.?, options);
-    }
-
-    while (sel.cancel()) |ret| {
-        const path_ret = try ret.path_ret;
-
-        if (options.ignore_permissions and xattr_table == null) {
-            path_ret.deinit(alloc);
-            continue;
-        }
-
-        if (path_ret.inode.hdr.inode_type == .dir or path_ret.inode.hdr.inode_type == .ext_dir) {
-            try dir_queue.push(alloc, path_ret);
-            continue;
-        }
-
-        defer path_ret.deinit(alloc);
-        try path_ret.setMetadata(alloc, io, &id_table, if (xattr_table == null) null else &xattr_table.?, options);
-    }
-
-    var iter = dir_queue.iterator();
-    while (iter.next()) |path_ret| {
-        defer path_ret.deinit(alloc);
-        try path_ret.setMetadata(alloc, io, &id_table, if (xattr_table == null) null else &xattr_table.?, options);
-    }
+    try loop.await(io);
 }
-pub fn extractReal(
+fn extractReal(
     self: Inode,
     alloc: std.mem.Allocator,
     io: Io,
@@ -454,4 +403,61 @@ pub fn extractReal(
         .inode = self,
         .origin = origin,
     };
+}
+
+fn finishLoop(alloc: std.mem.Allocator, io: Io, fil: OffsetFile, decomp: *const Decompressor, super: Archive.Superblock, options: ExtractionOptions, sel: *Io.Select(ExtractReturnUnion)) !void {
+    var id_table: CachedTable(u16) = .init(alloc, fil, decomp, super.id_start, super.id_count);
+    defer id_table.deinit(io);
+
+    var xattr_table: ?XattrTable = if (super.flags.xattr_never or options.ignore_xattr or !@hasField(std.os, "linux"))
+        null
+    else
+        try .init(alloc, fil, decomp, super.xattr_start);
+    defer if (xattr_table != null) xattr_table.?.deinit(io);
+
+    var dir_queue: std.PriorityDequeue(PathRet, void, DirCompare) = .empty;
+    defer dir_queue.deinit(alloc);
+
+    while (true) {
+        if (sel.group.token.load(.unordered) == null) break;
+
+        const ret = try sel.await();
+        const path_ret = try ret.path_ret;
+
+        if (options.ignore_permissions and xattr_table == null) {
+            path_ret.deinit(alloc);
+            continue;
+        }
+
+        if (path_ret.inode.hdr.inode_type == .dir or path_ret.inode.hdr.inode_type == .ext_dir) {
+            try dir_queue.push(alloc, path_ret);
+            continue;
+        }
+
+        defer path_ret.deinit(alloc);
+        try path_ret.setMetadata(alloc, io, &id_table, if (xattr_table == null) null else &xattr_table.?, options);
+    }
+
+    while (sel.cancel()) |ret| {
+        const path_ret = try ret.path_ret;
+
+        if (options.ignore_permissions and xattr_table == null) {
+            path_ret.deinit(alloc);
+            continue;
+        }
+
+        if (path_ret.inode.hdr.inode_type == .dir or path_ret.inode.hdr.inode_type == .ext_dir) {
+            try dir_queue.push(alloc, path_ret);
+            continue;
+        }
+
+        defer path_ret.deinit(alloc);
+        try path_ret.setMetadata(alloc, io, &id_table, if (xattr_table == null) null else &xattr_table.?, options);
+    }
+
+    var iter = dir_queue.iterator();
+    while (iter.next()) |path_ret| {
+        defer path_ret.deinit(alloc);
+        try path_ret.setMetadata(alloc, io, &id_table, if (xattr_table == null) null else &xattr_table.?, options);
+    }
 }

@@ -15,9 +15,12 @@ pub fn build(b: *std.Build) !void {
     zig_squashfs_options.addOption(bool, "allow_lzo", allow_lzo);
 
     const target = b.standardTargetOptions(.{});
-    const optimize = b.standardOptimizeOption(.{});
+    var optimize = b.standardOptimizeOption(.{});
 
-    if (optimize == .Debug) debug = true;
+    if (debug == true)
+        optimize = .Debug;
+    if (optimize == .Debug)
+        debug = true;
 
     const c = b.addTranslateC(.{
         .optimize = optimize,

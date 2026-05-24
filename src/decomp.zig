@@ -67,7 +67,7 @@ pub const Decomp = union(enum) {
             .gzip => .{ .gzip = if (options.use_zig_decomp) try zlib.init(alloc, io, block_size) else try zlib.init(alloc, io) },
             .lzma => .{ .lzma = if (options.use_zig_decomp) try lzma.init(alloc, io, block_size) else .{} },
             .lzo => if (options.use_zig_decomp or !options.allow_lzo) error.LzoUnsupported else .{ .lzo = .{} },
-            .xz => .{ .xz = if (options.use_zig_decomp) try zlib.init(alloc, io, block_size) else .{} },
+            .xz => .{ .xz = if (options.use_zig_decomp) try xz.init(alloc, io, block_size) else .{} },
             .lz4 => if (options.use_zig_decomp) error.Lz4Unsupported else .{ .lz4 = .{} },
             .zstd => .{ .zstd = if (options.use_zig_decomp) try zstd.init(alloc, io, block_size) else try zstd.init(alloc, io) },
 >>>>>>> dfbfbda (Build is working again (on Zig master branch))

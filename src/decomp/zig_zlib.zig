@@ -56,7 +56,7 @@ fn decomp(d: ?*const Decompressor, alloc: std.mem.Allocator, in: []u8, out: []u8
     const buf = self.buf_queue.getOne(self.io) catch return Error.ReadFailed;
     defer self.buf_queue.putOne(self.io, buf) catch {};
 
-    return zlibDecomp(buf.buf, in, out);
+    return zlibDecomp(buf, in, out);
 }
 
 inline fn zlibDecomp(buffer: []u8, in: []u8, out: []u8) !usize {

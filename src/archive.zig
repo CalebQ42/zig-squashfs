@@ -227,14 +227,34 @@ test "ExtractCompleteArchiveSingleThreaded" {
     std.debug.print("Starting test: ExtractCompleteArchive...\n", .{});
 
     const alloc = std.testing.allocator;
-    const io = Io.Threaded.global_single_threaded.io();
+    var threaded: Io.Evented = undefined;
+    try threaded.init(alloc, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    var signal: u32 = 0;
 
     Io.Dir.cwd().deleteTree(io, TestFullExtractLocation) catch {};
-    var fil = try Io.Dir.cwd().openFile(io, TestArchive, .{});
-    defer fil.close(io);
-    var sfs: Archive = try .init(io, fil, 0);
-    defer sfs.deinit(io);
-    try sfs.extract(alloc, io, TestFullExtractLocation, .default);
+
+    const tmp = struct {
+        fn singleThreadedExtract(sig: *u32) !void {
+            var fil = try Io.Dir.cwd().openFile(Io.Threaded.global_single_threaded.io(), TestArchive, .{});
+            defer fil.close(Io.Threaded.global_single_threaded.io());
+            var sfs: Archive = try .init(Io.Threaded.global_single_threaded.io(), fil, 0);
+            defer sfs.deinit(Io.Threaded.global_single_threaded.io());
+            try sfs.extract(std.testing.allocator, Io.Threaded.global_single_threaded.io(), TestFullExtractLocation, .default);
+            sig.* = 1;
+        }
+    };
+    var ret = try io.concurrent(tmp.singleThreadedExtract, .{&signal});
+    try io.futexWaitTimeout(
+        u32,
+        &signal,
+        0,
+        .{ .deadline = .fromNow(io, .{ .raw = .fromSeconds(10), .clock = .awake }) },
+    );
+    if (ret.any_future == null) return ret.result;
+    try ret.cancel(io);
+    return error.TestTimeout;
 }
 
 const LinuxPATestCorrectSuperblock: Superblock = .{
