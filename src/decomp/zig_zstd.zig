@@ -20,9 +20,9 @@ buf: [][]u8,
 buf_queue: Queue,
 
 pub fn init(alloc: std.mem.Allocator, io: Io, block_size: u32) !Self {
-    const buf = try alloc.alloc([]u8, 20); // TODO: Choose a better number instead of a random one.
+    const buf = try alloc.alloc([]u8, 5); // TODO: Choose a better number instead of a random one.
     var queue: Queue = .init(buf);
-    for (0..20) |_|
+    for (buf) |_|
         try queue.putOne(io, try alloc.alloc(u8, block_size + zstd.block_size_max));
 
     return .{

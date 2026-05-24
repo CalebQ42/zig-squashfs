@@ -8,13 +8,15 @@ A library and application to decompress or view squashfs archives.
 
 Overall works, but currently is missing some features ([see below](#capabilities)) and has significantly slow performance compared to `unsquashfs` ([see below](#performance)).
 
-Currently things are still in flux after Zig 0.16's Io changes and the documentation below *might* not be up to date.
-
 ## Build options
 
-> `-Duse_c_libs=true`
+> `-Duse_zig_decomp=true`
 
-Instead of using Zig's standard library for decompression, use the system's C libraries. Has the benefit of being much faster and enabling LZO and LZ4 decompression.
+Instead of using C libraries for decompression, use Zig's standard library for decompression. If using this option LZO and LZ4 decomrpession types are unsupported and decompression times will be significantly longer.
+
+> `-Ddynamic=true`
+
+Dynamicly link C libraries (if they're used) instead of statically linking them.
 
 > `-Dallow_lzo=true`
 
@@ -37,20 +39,20 @@ Most features are present except for the following:
 
 ## Performance
 
-This is some basic observation's I've made about this library's performance when compared to `unsquashfs`. Unless otherwise stated, most observations were made when extracting my test archive (which is fairly small and uses zstd compression) and with `-Doptimize=ReleaseFast`.
+This is some basic observation's I've made about this library's performance when compared to `unsquashfs`. Unless otherwise stated, most observations were made when extracting my test archive which is fairly small and uses zstd compression with `-Doptimize=ReleaseFast`.
 
 Currently, my only performance checks are checking execution time, nothing deeper.
 
-* Currently, using my test archive, performance matches `unsquashfs`.
+* Currently, using my test archive, performance aproximately matches `unsquashfs` when multi-threaded, but significantly slower when single-threaded.
 * Using Zig decompression libraries *significantly* increases decompression time by 5x. Under ideal circumstances.
 * Performance improvements/regressions will be common. I'm still learning Zig.
 
 Example Times:
 
-* *unsquashfs, multi-threaded*: .12s
-* *unsquashfs, single-threaded*: .13s
-* *C-libs, single-threaded*: CURRENTLY UNTESTED
-* *C-libs, multi-threaded*: .16s
+* *unsquashfs, multi-threaded*: .15s
+* *unsquashfs, single-threaded*: .16s
+* *C-libs, single-threaded*: .36s
+* *C-libs, multi-threaded*: .14s
 * *Zig-libs, single-threaded*: CURRENTLY UNTESTED
 * *Zig-libs, multi-threaded*: .76s
 

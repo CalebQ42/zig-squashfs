@@ -282,17 +282,20 @@ pub fn extract(
     var frag_mgr: FragManager = try .init(alloc, fil, decomp, super.frag_start, super.frag_count, super.block_size);
     defer frag_mgr.deinit(io);
 
+    if (options.single_threaded)
+        return self.extractSinglethreaded(alloc, io, fil, super, path, options, decomp, &frag_mgr);
+
     var sel_buf: [10]ExtractReturnUnion = undefined;
     var sel: Io.Select(ExtractReturnUnion) = .init(io, &sel_buf);
     defer sel.cancelDiscard();
 
     var loop = io.async(finishLoop, .{ alloc, io, fil, decomp, super, options, &sel });
 
-    sel.async(.path_ret, extractReal, .{ self, alloc, io, fil, super, decomp, &sel, &frag_mgr, path, true });
+    sel.async(.path_ret, extractRealAsync, .{ self, alloc, io, fil, super, decomp, &sel, &frag_mgr, path, true });
 
     try loop.await(io);
 }
-fn extractReal(
+fn extractRealAsync(
     self: Inode,
     alloc: std.mem.Allocator,
     io: Io,
@@ -335,7 +338,7 @@ fn extractReal(
                 const new_inode = try read(alloc, &meta.interface, super.block_size);
                 errdefer new_inode.deinit(alloc);
 
-                sel.async(.path_ret, extractReal, .{ new_inode, alloc, io, fil, super, decomp, sel, frag_mgr, new_path, false });
+                sel.async(.path_ret, extractRealAsync, .{ new_inode, alloc, io, fil, super, decomp, sel, frag_mgr, new_path, false });
             }
         },
         .file, .ext_file => {
@@ -404,7 +407,6 @@ fn extractReal(
         .origin = origin,
     };
 }
-
 fn finishLoop(alloc: std.mem.Allocator, io: Io, fil: OffsetFile, decomp: *const Decompressor, super: Archive.Superblock, options: ExtractionOptions, sel: *Io.Select(ExtractReturnUnion)) !void {
     var id_table: CachedTable(u16) = .init(alloc, fil, decomp, super.id_start, super.id_count);
     defer id_table.deinit(io);
@@ -433,8 +435,8 @@ fn finishLoop(alloc: std.mem.Allocator, io: Io, fil: OffsetFile, decomp: *const 
             try dir_queue.push(alloc, path_ret);
             continue;
         }
-
         defer path_ret.deinit(alloc);
+
         try path_ret.setMetadata(alloc, io, &id_table, if (xattr_table == null) null else &xattr_table.?, options);
     }
 
@@ -459,5 +461,175 @@ fn finishLoop(alloc: std.mem.Allocator, io: Io, fil: OffsetFile, decomp: *const 
     while (iter.next()) |path_ret| {
         defer path_ret.deinit(alloc);
         try path_ret.setMetadata(alloc, io, &id_table, if (xattr_table == null) null else &xattr_table.?, options);
+    }
+}
+/// Extracts the given inode to the given path. If the inode not a directory, the given path must not exist.
+/// If the inode is a directory the path must not exist or be a directory.
+fn extractSinglethreaded(
+    self: Inode,
+    alloc: std.mem.Allocator,
+    io: Io,
+    fil: OffsetFile,
+    super: Archive.Superblock,
+    path: []const u8,
+    options: ExtractionOptions,
+    decomp: *const Decompressor,
+    frag: *FragManager,
+) !void {
+    var id_table: CachedTable(u16) = .init(alloc, fil, decomp, super.id_start, super.id_count);
+    defer id_table.deinit(io);
+
+    var xattr_table: ?XattrTable = if (super.flags.xattr_never or options.ignore_xattr or !@hasField(std.os, "linux"))
+        null
+    else
+        try .init(alloc, fil, decomp, super.xattr_start);
+    defer if (xattr_table != null) xattr_table.?.deinit(io);
+
+    return self.extractReal(
+        alloc,
+        io,
+        fil,
+        super,
+        decomp,
+        frag,
+        &id_table,
+        if (xattr_table == null) null else &xattr_table.?,
+        path,
+        options,
+    );
+}
+fn extractReal(
+    self: Inode,
+    alloc: std.mem.Allocator,
+    io: Io,
+    fil: OffsetFile,
+    super: Archive.Superblock,
+    decomp: *const Decompressor,
+    frag_mgr: *FragManager,
+    id_table: *CachedTable(u16),
+    xattr_table: ?*XattrTable,
+    path: []const u8,
+    options: ExtractionOptions,
+) !void {
+    switch (self.hdr.inode_type) {
+        .dir, .ext_dir => {
+            try Io.Dir.cwd().createDir(io, path, @enumFromInt(0o777));
+
+            const entries = self.readDirectory(alloc, fil, decomp, super.dir_start) catch |err| switch (err) {
+                Error.NotDirectory, Error.NotExtended, Error.NotRegularFile, Error.NotSymlink => unreachable,
+                else => |e| return e,
+            };
+            defer {
+                for (entries) |e|
+                    e.deinit(alloc);
+                alloc.free(entries);
+            }
+
+            for (entries) |e| {
+                const new_path = try std.mem.concat(alloc, u8, &[_][]const u8{ path, "/", e.name });
+                defer alloc.free(new_path);
+
+                var rdr = fil.readerAt(super.inode_start + e.block_start);
+                var meta: MetadataReader = .init(alloc, &rdr, decomp);
+                try meta.interface.discardAll(e.block_offset);
+
+                const new_inode = try read(alloc, &meta.interface, super.block_size);
+                defer new_inode.deinit(alloc);
+
+                try new_inode.extractReal(alloc, io, fil, super, decomp, frag_mgr, id_table, xattr_table, new_path, options);
+            }
+        },
+        .file, .ext_file => {
+            var atomic = try Io.Dir.cwd().createFileAtomic(io, path, .{ .make_path = true });
+            defer atomic.deinit(io);
+
+            var rdr: DataReader = switch (self.data) {
+                .file => |f| blk: {
+                    var ext: DataReader = try .init(alloc, io, fil, decomp, super.block_size, f.size, f.block_start, f.block_sizes);
+                    if (f.frag_idx != 0xFFFFFFFF)
+                        ext.addFrag(f.frag_block_offset, try frag_mgr.get(io, f.frag_idx));
+                    break :blk ext;
+                },
+                .ext_file => |f| blk: {
+                    var ext: DataReader = try .init(alloc, io, fil, decomp, super.block_size, f.size, f.block_start, f.block_sizes);
+                    if (f.frag_idx != 0xFFFFFFFF)
+                        ext.addFrag(f.frag_block_offset, try frag_mgr.get(io, f.frag_idx));
+                    break :blk ext;
+                },
+                else => unreachable,
+            };
+            defer rdr.deinit();
+
+            var buf: [512 * 1024]u8 = undefined;
+            var wrt = atomic.file.writer(io, &buf);
+
+            _ = try rdr.interface.streamRemaining(&wrt.interface);
+
+            try wrt.flush();
+
+            try atomic.link(io);
+        },
+        .symlink, .ext_symlink => try Io.Dir.cwd().symLink(io, self.symlinkTarget() catch unreachable, path, .{}),
+        else => {
+            var mode: u32 = undefined;
+            var dev: u32 = 0;
+
+            const DT = std.posix.DT;
+
+            switch (self.data) {
+                .char_dev => |d| {
+                    dev = d.dev;
+                    mode = DT.CHR;
+                },
+                .ext_char_dev => |d| {
+                    dev = d.dev;
+                    mode = DT.CHR;
+                },
+                .block_dev => |d| {
+                    dev = d.dev;
+                    mode = DT.BLK;
+                },
+                .ext_block_dev => |d| {
+                    dev = d.dev;
+                    mode = DT.BLK;
+                },
+                .fifo, .ext_fifo => mode = DT.FIFO,
+                .socket, .ext_socket => mode = DT.SOCK,
+                else => unreachable,
+            }
+
+            const sentinel_path = try std.mem.concatWithSentinel(alloc, u8, &[_][]const u8{path}, 0);
+            const res = std.os.linux.mknod(sentinel_path, mode, dev);
+            alloc.free(sentinel_path);
+            if (res != 0)
+                return ExtractError.MknodFailed;
+        },
+    }
+    if (options.ignore_permissions and options.ignore_xattr) return;
+
+    var f = try Io.Dir.cwd().openFile(io, path, .{});
+    defer f.close(io);
+
+    if (!options.ignore_permissions) {
+        try f.setPermissions(io, @enumFromInt(self.hdr.permissions));
+        try f.setOwner(io, try id_table.get(io, self.hdr.uid_idx), try id_table.get(io, self.hdr.gid_idx));
+    }
+    if (xattr_table != null) {
+        const idx = self.xattrIndex() catch return;
+
+        const xattrs = try xattr_table.?.get(alloc, io, idx);
+        defer {
+            for (xattrs) |x|
+                x.deinit(alloc);
+            alloc.free(xattrs);
+        }
+
+        const sentinel_path = try std.mem.concatWithSentinel(alloc, u8, &[_][]const u8{path}, 0);
+        defer alloc.free(sentinel_path);
+        for (xattrs) |x| {
+            const xattr_ret = std.os.linux.fsetxattr(f.handle, x.key, x.value.ptr, x.value.len, 0);
+            if (xattr_ret != 0)
+                return ExtractError.CannotSetXattr;
+        }
     }
 }
