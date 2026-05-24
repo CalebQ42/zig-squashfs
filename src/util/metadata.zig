@@ -15,7 +15,7 @@ const This = @This();
 
 alloc: std.mem.Allocator,
 rdr: *Reader,
-decomp: *const Decompressor,
+decomp: *Decompressor,
 
 cur_block_start: u32 = 0,
 next_start_start: u32 = 0,
@@ -34,7 +34,7 @@ interface: Reader = .{
     },
 },
 
-pub fn init(alloc: std.mem.Allocator, rdr: *Reader, decomp: *const Decompressor) This {
+pub fn init(alloc: std.mem.Allocator, rdr: *Reader, decomp: *Decompressor) This {
     return .{
         .alloc = alloc,
         .rdr = rdr,

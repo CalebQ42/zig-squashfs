@@ -17,7 +17,7 @@ pub const FragEntry = extern struct {
 
 alloc: std.mem.Allocator,
 fil: OffsetFile,
-decomp: *const Decompressor,
+decomp: *Decompressor,
 block_size: u32,
 
 entries: []FragEntry,
@@ -25,7 +25,7 @@ entries: []FragEntry,
 frag_cache: std.array_hash_map.Auto(u32, []u8),
 cache_mut: std.Io.RwLock = .init,
 
-pub fn init(alloc: std.mem.Allocator, fil: OffsetFile, decomp: *const Decompressor, frag_start: u64, frag_num: u32, block_size: u32) !FragManager {
+pub fn init(alloc: std.mem.Allocator, fil: OffsetFile, decomp: *Decompressor, frag_start: u64, frag_num: u32, block_size: u32) !FragManager {
     const first_offset: u64 = std.mem.readInt(u64, @ptrCast(fil.map.memory[frag_start .. frag_start + 8]), .little);
 
     var rdr = fil.readerAt(first_offset);

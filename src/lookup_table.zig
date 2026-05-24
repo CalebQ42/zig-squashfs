@@ -5,7 +5,7 @@ const Decompressor = @import("util/decompressor.zig");
 const MetadataReader = @import("util/metadata.zig");
 const OffsetFile = @import("util/offset_file.zig");
 
-pub fn lookupValue(comptime T: anytype, alloc: std.mem.Allocator, decomp: *const Decompressor, file: OffsetFile, table_start: u64, idx: u32) !T {
+pub fn lookupValue(comptime T: anytype, alloc: std.mem.Allocator, decomp: *Decompressor, file: OffsetFile, table_start: u64, idx: u32) !T {
     const T_PER_BLOCK: u16 = 8192 / @sizeOf(T);
 
     const block = idx / T_PER_BLOCK;
@@ -33,7 +33,7 @@ pub fn CachedTable(comptime T: anytype) type {
 
         alloc: std.mem.Allocator,
         fil: OffsetFile,
-        decomp: *const Decompressor,
+        decomp: *Decompressor,
 
         table_start: u64,
         total_num: u32,
@@ -42,7 +42,7 @@ pub fn CachedTable(comptime T: anytype) type {
 
         mut: Io.RwLock = .init,
 
-        pub fn init(alloc: std.mem.Allocator, fil: OffsetFile, decomp: *const Decompressor, offset: u64, total_num: u32) Table {
+        pub fn init(alloc: std.mem.Allocator, fil: OffsetFile, decomp: *Decompressor, offset: u64, total_num: u32) Table {
             return .{
                 .alloc = alloc,
                 .fil = fil,

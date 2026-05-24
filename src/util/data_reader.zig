@@ -18,7 +18,7 @@ alloc: std.mem.Allocator,
 
 fil: OffsetFile,
 io: Io,
-decomp: *const Decompressor,
+decomp: *Decompressor,
 block_size: u32,
 
 file_size: u64,
@@ -33,7 +33,7 @@ sparse_block: bool = false,
 
 interface: Io.Reader,
 
-pub fn init(alloc: std.mem.Allocator, io: Io, fil: OffsetFile, decomp: *const Decompressor, block_size: u32, file_size: u64, data_start: u64, blocks: []BlockSize) !DataReader {
+pub fn init(alloc: std.mem.Allocator, io: Io, fil: OffsetFile, decomp: *Decompressor, block_size: u32, file_size: u64, data_start: u64, blocks: []BlockSize) !DataReader {
     return .{
         .alloc = alloc,
 

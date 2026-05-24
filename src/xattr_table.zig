@@ -12,7 +12,7 @@ const XattrCachedTable = @This();
 alloc: std.mem.Allocator,
 
 fil: OffsetFile,
-decomp: *const Decompressor,
+decomp: *Decompressor,
 
 kv_start: u64,
 
@@ -20,7 +20,7 @@ table: LookupTable.CachedTable(TableValue),
 value_cache: std.AutoHashMap(InodeRef, []const u8),
 value_mut: Io.RwLock = .init,
 
-pub fn init(alloc: std.mem.Allocator, fil: OffsetFile, decomp: *const Decompressor, xattr_start: u64) !XattrCachedTable {
+pub fn init(alloc: std.mem.Allocator, fil: OffsetFile, decomp: *Decompressor, xattr_start: u64) !XattrCachedTable {
     const start: u64 = std.mem.readInt(u64, @ptrCast(fil.map.memory[xattr_start .. xattr_start + 8]), .little);
     const num: u64 = std.mem.readInt(u64, @ptrCast(fil.map.memory[xattr_start + 8 .. xattr_start + 16]), .little);
 
@@ -212,7 +212,7 @@ const XattrPrefix = packed struct(u16) {
 
 // Stateless
 
-pub fn statelessLookup(alloc: std.mem.Allocator, io: Io, decomp: *const Decompressor, fil: OffsetFile, table_start: u64, idx: u16) ![]XattrOwned {
+pub fn statelessLookup(alloc: std.mem.Allocator, io: Io, decomp: *Decompressor, fil: OffsetFile, table_start: u64, idx: u16) ![]XattrOwned {
     const kv_start: u64 = std.mem.readInt(u64, @ptrCast(fil.map.memory[table_start .. table_start + 8]), .little);
 
     const lookup = try LookupTable.lookupValue(TableValue, alloc, io, decomp, fil, table_start + 16, idx);

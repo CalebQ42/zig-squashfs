@@ -38,7 +38,7 @@ pub fn deinit(self: *Self, alloc: std.mem.Allocator) void {
     alloc.free(self.ctx);
 }
 
-fn decomp(d: ?*const Decompressor, alloc: std.mem.Allocator, in: []u8, out: []u8) Error!usize {
+fn decomp(d: ?*Decompressor, alloc: std.mem.Allocator, in: []u8, out: []u8) Error!usize {
     if (d == null) {
         return statelessDecomp(d, alloc, in, out);
     }
@@ -68,7 +68,7 @@ inline fn zlibDecomp(stream: *c.zng_stream) !void {
 
 pub const stateless_decompressor: Decompressor = .{ .decomp_fn = statelessDecomp };
 
-fn statelessDecomp(_: ?*const Decompressor, _: std.mem.Allocator, in: []u8, out: []u8) Error!usize {
+fn statelessDecomp(_: ?*Decompressor, _: std.mem.Allocator, in: []u8, out: []u8) Error!usize {
     var stream: c.zng_stream = .{
         .next_in = in.ptr,
         .avail_in = @truncate(in.len),
@@ -77,21 +77,4 @@ fn statelessDecomp(_: ?*const Decompressor, _: std.mem.Allocator, in: []u8, out:
     };
     try zlibDecomp(&stream);
     return stream.total_out;
-}
-
-// zalloc
-
-fn zalloc(ptr: ?*anyopaque, size: c_uint, len: c_uint) callconv(.c) ?*anyopaque {
-    var alloc: *std.mem.Allocator = @ptrCast(@alignCast(ptr));
-    return alloc.rawAlloc(size * len, .@"1", 0);
-}
-fn zfree(ptr: ?*anyopaque, mem_ptr: ?*anyopaque) callconv(.c) void {
-<<<<<<< HEAD
-    var alloc: *std.mem.Allocator = @ptrCast(@alignCast(ptr));
-    alloc.rawFree(@ptrCast(mem_ptr), .@"1", 0);
-=======
-    if (mem_ptr == null) return;
-    var alloc: *std.mem.Allocator = @ptrCast(@alignCast(ptr));
-    alloc.free(@as([*]u8, @ptrCast(mem_ptr.?)));
->>>>>>> dfbfbda (Build is working again (on Zig master branch))
 }

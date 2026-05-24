@@ -3,10 +3,7 @@ const std = @import("std");
 pub fn build(b: *std.Build) !void {
     const use_zig_decomp = b.option(bool, "use_zig_decomp", "Use zig standard library for decompression.") orelse false;
     const allow_lzo = b.option(bool, "allow_lzo", "Compile with lzo support") orelse false;
-<<<<<<< HEAD
-=======
     const dynamic = b.option(bool, "dynamic", "Dynamicly link C decompression libraries") orelse false;
->>>>>>> dfbfbda (Build is working again (on Zig master branch))
     var debug = b.option(bool, "debug", "Enable options to make debugging easier.");
     const version_string_option = b.option([]const u8, "version", "Version of the library/binary");
 
@@ -22,12 +19,6 @@ pub fn build(b: *std.Build) !void {
     if (optimize == .Debug)
         debug = true;
 
-    const c = b.addTranslateC(.{
-        .optimize = optimize,
-        .target = target,
-        .root_source_file = b.path("src/c.h"),
-    });
-
     const lib = b.addLibrary(.{
         .name = "squashfs",
         .root_module = b.createModule(.{
@@ -35,15 +26,8 @@ pub fn build(b: *std.Build) !void {
             .target = target,
             .valgrind = debug,
             .root_source_file = b.path("src/root.zig"),
-<<<<<<< HEAD
-            // .link_libc = true,
             .imports = &.{
                 .{ .name = "options", .module = zig_squashfs_options.createModule() },
-                .{ .name = "c", .module = c.createModule() },
-=======
-            .imports = &.{
-                .{ .name = "options", .module = zig_squashfs_options.createModule() },
->>>>>>> dfbfbda (Build is working again (on Zig master branch))
             },
         }),
         .use_llvm = debug,
@@ -51,20 +35,6 @@ pub fn build(b: *std.Build) !void {
 
     const deps = try dependencies(b, optimize, target, use_zig_decomp, allow_lzo, dynamic);
     defer b.allocator.free(deps);
-
-<<<<<<< HEAD
-    const zng = b.dependency("zlib_ng", .{ .optimize = optimize, .target = target });
-    lib.root_module.linkLibrary(zng.artifact("zng"));
-
-    const xz = b.dependency("xz", .{ .optimize = optimize, .target = target });
-    lib.root_module.linkLibrary(xz.artifact("lzma"));
-
-    const minilzo = b.dependency("minilzo", .{ .optimize = optimize, .target = target });
-    lib.root_module.linkLibrary(minilzo.artifact("minilzo"));
-
-    const lz4 = b.dependency("lz4", .{ .optimize = optimize, .target = target });
-    lib.root_module.linkLibrary(lz4.artifact("lz4"));
-=======
     for (deps) |d|
         lib.root_module.linkLibrary(d);
 
@@ -80,7 +50,6 @@ pub fn build(b: *std.Build) !void {
         if (dynamic)
             dynamicLinkLibraries(c, allow_lzo);
     }
->>>>>>> dfbfbda (Build is working again (on Zig master branch))
 
     var version = version_string_option orelse "0.0.0-testing";
     if (version[0] == 'v') version = version[1..];

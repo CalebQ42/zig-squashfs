@@ -20,7 +20,6 @@ const DataReader = @import("util/data_reader.zig");
 const Decompressor = @import("util/decompressor.zig");
 const MetadataReader = @import("util/metadata.zig");
 const OffsetFile = @import("util/offset_file.zig");
-const SharedCache = @import("util/shared_cache.zig");
 const XattrTable = @import("xattr_table.zig");
 
 const Inode = @This();
@@ -64,14 +63,14 @@ pub fn deinit(self: Inode, alloc: std.mem.Allocator) void {
 // Utility Functions
 
 /// Read the directory entries
-pub fn readDirectory(self: Inode, alloc: std.mem.Allocator, fil: OffsetFile, decomp: *const Decompressor, dir_offset: u64) ![]DirEntry {
+pub fn readDirectory(self: Inode, alloc: std.mem.Allocator, fil: OffsetFile, decomp: *Decompressor, dir_offset: u64) ![]DirEntry {
     return switch (self.data) {
         .dir => |d| readDirFromData(alloc, fil, decomp, dir_offset, d),
         .ext_dir => |d| readDirFromData(alloc, fil, decomp, dir_offset, d),
         else => Error.NotDirectory,
     };
 }
-fn readDirFromData(alloc: std.mem.Allocator, fil: OffsetFile, decomp: *const Decompressor, dir_offset: u64, d: anytype) ![]DirEntry {
+fn readDirFromData(alloc: std.mem.Allocator, fil: OffsetFile, decomp: *Decompressor, dir_offset: u64, d: anytype) ![]DirEntry {
     var rdr = fil.readerAt(dir_offset + d.block_start);
     var meta: MetadataReader = .init(alloc, &rdr, decomp);
     try meta.interface.discardAll(d.block_offset);
@@ -79,34 +78,34 @@ fn readDirFromData(alloc: std.mem.Allocator, fil: OffsetFile, decomp: *const Dec
     return DirEntry.readDirectory(alloc, &meta.interface, d.size);
 }
 /// Get a reader for a regular file's data.
-pub fn dataReader(self: Inode, alloc: std.mem.Allocator, io: Io, fil: OffsetFile, cache: *SharedCache, decomp: *const Decompressor, block_size: u32) !DataReader {
+pub fn dataReader(self: Inode, alloc: std.mem.Allocator, io: Io, fil: OffsetFile, decomp: *Decompressor, block_size: u32, frag_block: ?[]u8) !DataReader {
     return switch (self.data) {
-        .file => |f| getReaderFromData(alloc, io, fil, cache, decomp, block_size, f),
-        .ext_file => |f| getReaderFromData(alloc, io, fil, cache, decomp, block_size, f),
+        .file => |f| getReaderFromData(alloc, io, fil, decomp, block_size, frag_block, f),
+        .ext_file => |f| getReaderFromData(alloc, io, fil, decomp, block_size, frag_block, f),
         else => Error.NotRegularFile,
     };
 }
-fn getReaderFromData(alloc: std.mem.Allocator, io: Io, fil: OffsetFile, cache: *SharedCache, decomp: *const Decompressor, block_size: u32, d: anytype) !DataReader {
-    const ext: DataReader = .init(alloc, io, fil, cache, decomp, block_size, d.size, d.block_start, d.blocks);
+fn getReaderFromData(alloc: std.mem.Allocator, io: Io, fil: OffsetFile, decomp: *Decompressor, block_size: u32, frag_block: ?[]u8, d: anytype) !DataReader {
+    const ext: DataReader = .init(alloc, io, fil, decomp, block_size, d.size, d.block_start, d.blocks);
     if (d.frag_block_offset == 0xFFFFFFFF) {
-        // TODO:
-        return error.TODO;
+        if (frag_block == null) return error.FragBlockNotProvided;
+        ext.addFrag(d.frag_block_offset, frag_block.?);
     }
     return ext;
 }
 /// Get an extractor for a regular file's data.
-pub fn dataExtractor(self: Inode, fil: OffsetFile, cache: *SharedCache, decomp: *const Decompressor, block_size: u32) !DataExtractor {
+pub fn dataExtractor(self: Inode, fil: OffsetFile, decomp: *Decompressor, block_size: u32, frag_block: ?[]u8) !DataExtractor {
     return switch (self.data) {
-        .file => |f| getExtractorFromData(fil, cache, decomp, block_size, f),
-        .ext_file => |f| getExtractorFromData(fil, cache, decomp, block_size, f),
+        .file => |f| getExtractorFromData(fil, decomp, block_size, frag_block, f),
+        .ext_file => |f| getExtractorFromData(fil, decomp, block_size, frag_block, f),
         else => Error.NotRegularFile,
     };
 }
-fn getExtractorFromData(fil: OffsetFile, cache: *SharedCache, decomp: *const Decompressor, block_size: u32, d: anytype) !DataExtractor {
-    const ext: DataExtractor = .init(fil, cache, decomp, block_size, d.size, d.block_start, d.blocks);
+fn getExtractorFromData(fil: OffsetFile, decomp: *Decompressor, block_size: u32, frag_block: ?[]u8, d: anytype) !DataExtractor {
+    const ext: DataExtractor = .init(fil, decomp, block_size, d.size, d.block_start, d.blocks);
     if (d.frag_block_offset == 0xFFFFFFFF) {
-        // TODO:
-        return error.TODO;
+        if (frag_block == null) return error.FragBlockNotProvided;
+        ext.addFrag(d.frag_block_offset, frag_block.?);
     }
     return ext;
 }
@@ -119,11 +118,11 @@ pub fn symlinkTarget(self: Inode) ![]const u8 {
     };
 }
 /// Get inode's gid
-pub fn gid(self: Inode, alloc: std.mem.Allocator, io: Io, fil: OffsetFile, decomp: *const Decompressor, id_table_start: u64) !u16 {
+pub fn gid(self: Inode, alloc: std.mem.Allocator, io: Io, fil: OffsetFile, decomp: *Decompressor, id_table_start: u64) !u16 {
     return LookupTable.lookupValue(u16, alloc, io, decomp, fil, id_table_start, self.hdr.gid_idx);
 }
 /// Get inode's uid
-pub fn uid(self: Inode, alloc: std.mem.Allocator, io: Io, fil: OffsetFile, decomp: *const Decompressor, id_table_start: u64) !u16 {
+pub fn uid(self: Inode, alloc: std.mem.Allocator, io: Io, fil: OffsetFile, decomp: *Decompressor, id_table_start: u64) !u16 {
     return LookupTable.lookupValue(u16, alloc, io, decomp, fil, id_table_start, self.hdr.uid_idx);
 }
 /// Get the inode's xattr values as an index into the Archive's xattr table.
@@ -143,7 +142,7 @@ pub fn xattrIndex(self: Inode) !u32 {
     return idx;
 }
 // Get an inode's xattr values. If the inode does not have xattr values (including if the inode is not an extended type), an empty slice is returned.
-pub fn xattrValues(self: Inode, alloc: std.mem.Allocator, io: Io, fil: OffsetFile, decomp: *const Decompressor, xattr_table_start: u64) ![]XattrTable.XattrOwned {
+pub fn xattrValues(self: Inode, alloc: std.mem.Allocator, io: Io, fil: OffsetFile, decomp: *Decompressor, xattr_table_start: u64) ![]XattrTable.XattrOwned {
     const idx = self.xattrIndex() catch &[0]XattrTable.XattrOwned{};
     return XattrTable.statelessLookup(alloc, io, decomp, fil, xattr_table_start, idx);
 }
@@ -275,9 +274,8 @@ pub fn extract(
 ) !void {
     const path = std.mem.trimEnd(u8, filepath, "/");
 
-    var decomp_base: Decomp = try .init(super.compression, alloc, io, super.block_size);
-    decomp_base.deinit(alloc);
-    const decomp = decomp_base.decompressor();
+    var decomp_base: Decompressor = try @import("decomp.zig").StatelessDecomp(super.compression); // TODO: Replace with actual Decomp value to share states & caches for efficiency.
+    const decomp = &decomp_base;
 
     var frag_mgr: FragManager = try .init(alloc, fil, decomp, super.frag_start, super.frag_count, super.block_size);
     defer frag_mgr.deinit(io);
@@ -301,7 +299,7 @@ fn extractRealAsync(
     io: Io,
     fil: OffsetFile,
     super: Archive.Superblock,
-    decomp: *const Decompressor,
+    decomp: *Decompressor,
     sel: *Io.Select(ExtractReturnUnion),
     frag_mgr: *FragManager,
     path: []const u8,
@@ -407,7 +405,7 @@ fn extractRealAsync(
         .origin = origin,
     };
 }
-fn finishLoop(alloc: std.mem.Allocator, io: Io, fil: OffsetFile, decomp: *const Decompressor, super: Archive.Superblock, options: ExtractionOptions, sel: *Io.Select(ExtractReturnUnion)) !void {
+fn finishLoop(alloc: std.mem.Allocator, io: Io, fil: OffsetFile, decomp: *Decompressor, super: Archive.Superblock, options: ExtractionOptions, sel: *Io.Select(ExtractReturnUnion)) !void {
     var id_table: CachedTable(u16) = .init(alloc, fil, decomp, super.id_start, super.id_count);
     defer id_table.deinit(io);
 
@@ -473,7 +471,7 @@ fn extractSinglethreaded(
     super: Archive.Superblock,
     path: []const u8,
     options: ExtractionOptions,
-    decomp: *const Decompressor,
+    decomp: *Decompressor,
     frag: *FragManager,
 ) !void {
     var id_table: CachedTable(u16) = .init(alloc, fil, decomp, super.id_start, super.id_count);
@@ -504,7 +502,7 @@ fn extractReal(
     io: Io,
     fil: OffsetFile,
     super: Archive.Superblock,
-    decomp: *const Decompressor,
+    decomp: *Decompressor,
     frag_mgr: *FragManager,
     id_table: *CachedTable(u16),
     xattr_table: ?*XattrTable,

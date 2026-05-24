@@ -15,7 +15,9 @@ const Self = @This();
 
 pub const stateless_decompressor: Decompressor = .{ .decomp_fn = statelessDecomp };
 
-fn statelessDecomp(_: ?*const Decompressor, _: std.mem.Allocator, in: []u8, out: []u8) Error!usize {
+interface: Decompressor = .{ .decomp_fn = statelessDecomp },
+
+fn statelessDecomp(_: ?*Decompressor, _: std.mem.Allocator, in: []u8, out: []u8) Error!usize {
     var stream: c.lzma_stream = .{
         .next_in = in.ptr,
         .avail_in = in.len,

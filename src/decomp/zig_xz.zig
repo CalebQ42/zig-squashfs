@@ -47,7 +47,7 @@ pub fn deinit(self: *Self) void {
     self.alloc.free(self.buf);
 }
 
-fn decomp(d: ?*const Decompressor, alloc: std.mem.Allocator, in: []u8, out: []u8) Error!usize {
+fn decomp(d: ?*Decompressor, alloc: std.mem.Allocator, in: []u8, out: []u8) Error!usize {
     if (d == null) {
         return statelessDecomp(d, alloc, in, out);
     }
@@ -74,7 +74,7 @@ inline fn xzDecomp(alloc: std.mem.Allocator, buffer: *[]u8, in: []u8, out: []u8)
 
 pub const stateless_decompressor: Decompressor = .{ .decomp_fn = statelessDecomp };
 
-fn statelessDecomp(_: ?*const Decompressor, alloc: std.mem.Allocator, in: []u8, out: []u8) Error!usize {
+fn statelessDecomp(_: ?*Decompressor, alloc: std.mem.Allocator, in: []u8, out: []u8) Error!usize {
     var buf = try alloc.alloc(u8, in.len);
     defer alloc.free(buf);
     return xzDecomp(alloc, &buf, in, out) catch return Error.ReadFailed;

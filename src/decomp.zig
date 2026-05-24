@@ -3,18 +3,12 @@ const Io = std.Io;
 
 const options = @import("options");
 
-const lzma = @import("decomp/zig_lzma.zig");
-const xz = @import("decomp/zig_xz.zig");
 const Decompressor = @import("util/decompressor.zig");
 
 const zlib = if (options.use_zig_decomp) @import("decomp/zig_zlib.zig") else @import("decomp/c_zlib.zig");
-<<<<<<< HEAD
-const lzo = if (options.use_zig_decomp or !options.allow_lzo) void else @import("decomp/c_lzo.zig");
-=======
 const lzma = if (options.use_zig_decomp) @import("decomp/zig_lzma.zig") else @import("decomp/c_lzma.zig");
-const lzo = if (options.use_zig_decomp or options.allow_lzo) void else @import("decomp/c_lzo.zig");
+const lzo = if (options.use_zig_decomp or !options.allow_lzo) void else @import("decomp/c_lzo.zig");
 const xz = if (options.use_zig_decomp) @import("decomp/zig_xz.zig") else @import("decomp/c_xz.zig");
->>>>>>> dfbfbda (Build is working again (on Zig master branch))
 const lz4 = if (options.use_zig_decomp) void else @import("decomp/c_lz4.zig");
 const zstd = if (options.use_zig_decomp) @import("decomp/zig_zstd.zig") else @import("decomp/c_zstd.zig");
 
@@ -27,20 +21,20 @@ pub const Enum = enum(u16) {
     zstd,
 };
 
-pub fn StatelessDecomp(val: Enum) !*const Decompressor {
+pub fn StatelessDecomp(val: Enum) !Decompressor {
     return switch (val) {
-        .gzip => &zlib.stateless_decompressor,
-        .lzma => &lzma.stateless_decompressor,
+        .gzip => zlib.stateless_decompressor,
+        .lzma => lzma.stateless_decompressor,
         .lzo => if (options.use_zig_decomp or !options.allow_lzo)
             error.LzoUnsupported
         else
-            &lzo.stateless_decompressor,
-        .xz => &xz.stateless_decompressor,
+            lzo.stateless_decompressor,
+        .xz => xz.stateless_decompressor,
         .lz4 => if (options.use_zig_decomp)
             error.Lz4Unsupported
         else
-            &lz4.stateless_decompressor,
-        .zstd => &zstd.stateless_decompressor,
+            lz4.stateless_decompressor,
+        .zstd => zstd.stateless_decompressor,
     };
 }
 
@@ -52,16 +46,6 @@ pub const Decomp = union(enum) {
     lz4: lz4,
     zstd: zstd,
 
-<<<<<<< HEAD
-    pub fn init(val: Enum, alloc: std.mem.Allocator, io: std.Io, block_size: u32) !Decomp {
-        return switch (val) {
-            .gzip => .{ .gzip = zlib.init(alloc, io, block_size) },
-            .lzma => .{ .lzma = .{} },
-            .lzo => .{ .lzo = .{} },
-            .xz => .{ .xz = .{} },
-            .lz4 => .{ .lz4 = .{} },
-            .zstd => .{ .zstd = zstd.init(alloc, io, block_size) },
-=======
     pub fn init(val: Enum, alloc: std.mem.Allocator, io: Io, block_size: u32) !Decomp {
         return switch (val) {
             .gzip => .{ .gzip = if (options.use_zig_decomp) try zlib.init(alloc, io, block_size) else try zlib.init(alloc, io) },
@@ -70,7 +54,6 @@ pub const Decomp = union(enum) {
             .xz => .{ .xz = if (options.use_zig_decomp) try xz.init(alloc, io, block_size) else .{} },
             .lz4 => if (options.use_zig_decomp) error.Lz4Unsupported else .{ .lz4 = .{} },
             .zstd => .{ .zstd = if (options.use_zig_decomp) try zstd.init(alloc, io, block_size) else try zstd.init(alloc, io) },
->>>>>>> dfbfbda (Build is working again (on Zig master branch))
         };
     }
     pub fn deinit(self: *Decomp, alloc: std.mem.Allocator) void {
@@ -91,13 +74,13 @@ pub const Decomp = union(enum) {
         }
     }
 
-    pub fn decompressor(self: *Decomp) *const Decompressor {
+    pub fn decompressor(self: *Decomp) *Decompressor {
         return switch (self.*) {
             .gzip => &self.gzip.interface,
-            .lzma => &lzma.stateless_decompressor,
-            .lzo => if (options.use_zig_decomp or !options.allow_lzo) unreachable else &lzo.stateless_decompressor,
-            .xz => &xz.stateless_decompressor,
-            .lz4 => if (options.use_zig_decomp) unreachable else &lz4.stateless_decompressor,
+            .lzma => &self.lzma.interface,
+            .lzo => if (options.use_zig_decomp or !options.allow_lzo) unreachable else &self.lzo.interface,
+            .xz => &self.xz.interface,
+            .lz4 => if (options.use_zig_decomp) unreachable else &self.lz4.interface,
             .zstd => &self.zstd.interface,
         };
     }

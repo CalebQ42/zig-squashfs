@@ -44,17 +44,17 @@ This is some basic observation's I've made about this library's performance when
 Currently, my only performance checks are checking execution time, nothing deeper.
 
 * Currently, using my test archive, performance aproximately matches `unsquashfs` when multi-threaded, but significantly slower when single-threaded.
-* Using Zig decompression libraries *significantly* increases decompression time by 5x. Under ideal circumstances.
+* Using Zig decompression libraries *significantly* increases decompression time.
 * Performance improvements/regressions will be common. I'm still learning Zig.
 
 Example Times:
 
-* *unsquashfs, multi-threaded*: .15s
-* *unsquashfs, single-threaded*: .16s
-* *C-libs, single-threaded*: .36s
-* *C-libs, multi-threaded*: .14s
-* *Zig-libs, single-threaded*: CURRENTLY UNTESTED
-* *Zig-libs, multi-threaded*: .76s
+* *unsquashfs, multi-threaded*: .11s
+* *unsquashfs, single-threaded*: .13s
+* *C-libs, multi-threaded*: .10s
+* *C-libs, single-threaded*: ..28s
+* *Zig-libs, single-threaded*: .74s
+* *Zig-libs, multi-threaded*: 2.70s
 
 ## Build considerations
 

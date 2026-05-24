@@ -10,7 +10,6 @@ const Inode = @import("inode.zig");
 const DataExtractor = @import("util/data_extractor.zig");
 const Decompressor = @import("util/decompressor.zig");
 const MetadataReader = @import("util/metadata.zig");
-const SharedCache = @import("util/shared_cache.zig");
 
 const File = @This();
 
@@ -35,25 +34,25 @@ pub fn init(alloc: std.mem.Allocator, archive: Archive, in: Inode, name: []const
         .name = new_name,
     };
 }
-pub fn fromDirEntry(alloc: std.mem.Allocator, archive: Archive, ent: DirEntry) !File {
+pub fn fromDirEntry(alloc: std.mem.Allocator, archive: *Archive, ent: DirEntry) !File {
     var rdr = archive.file.readerAt(archive.super.inode_start + ent.block_start);
-    var meta: MetadataReader = .init(alloc, &rdr, archive.stateless_decomp);
+    var meta: MetadataReader = .init(alloc, &rdr, &archive.stateless_decomp);
     try meta.interface.discardAll(ent.block_offset);
 
     var in: Inode = try .read(alloc, &meta.interface, archive.super.block_size);
     errdefer in.deinit(alloc);
-    return .init(alloc, archive, in, ent.name);
+    return .init(alloc, archive.*, in, ent.name);
 }
 pub fn deinit(self: File) void {
     self.alloc.free(self.name);
     self.inode.deinit(self.alloc);
 }
 
-pub fn open(self: File, alloc: std.mem.Allocator, io: Io, filepath: []const u8) !File {
+pub fn open(self: *File, alloc: std.mem.Allocator, io: Io, filepath: []const u8) !File {
     const entries = try self.inode.readDirectory(
         alloc,
         self.archive.file,
-        self.archive.stateless_decomp,
+        &self.archive.stateless_decomp,
         self.archive.super.dir_start,
     );
     defer {
@@ -76,7 +75,7 @@ pub fn open(self: File, alloc: std.mem.Allocator, io: Io, filepath: []const u8) 
         }
     } else return Error.FileNotFound;
 
-    const first_elem_file = try fromDirEntry(alloc, self.archive, search_slice[idx]);
+    var first_elem_file = try fromDirEntry(alloc, &self.archive, search_slice[idx]);
     if (first_element.len == path.len)
         return first_elem_file;
     defer first_elem_file.deinit();

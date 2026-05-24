@@ -8,8 +8,8 @@ pub const Error = std.Io.Reader.StreamError || std.mem.Allocator.Error;
 
 /// The actual decompression function.
 /// If the given decompressor is null, then the decompression should be done "stateless" without lasting allocations.
-decomp_fn: *const fn (?*const Decompressor, std.mem.Allocator, in: []u8, out: []u8) Error!usize,
+decomp_fn: *const fn (?*Decompressor, std.mem.Allocator, in: []u8, out: []u8) Error!usize,
 
-pub fn Decompress(self: *const Decompressor, alloc: std.mem.Allocator, in: []u8, out: []u8) Error!usize {
+pub fn Decompress(self: *Decompressor, alloc: std.mem.Allocator, in: []u8, out: []u8) Error!usize {
     return self.decomp_fn(self, alloc, in, out);
 }

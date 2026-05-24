@@ -40,30 +40,28 @@ pub fn deinit(self: *Self, alloc: std.mem.Allocator) void {
     alloc.free(self.ctx);
 }
 
-fn decomp(d: ?*const Decompressor, alloc: std.mem.Allocator, in: []u8, out: []u8) Error!usize {
-    // TODO: Fix
-    //
-    // if (d == null) {
-    return statelessDecomp(d, alloc, in, out);
-    // }
-    // var self: *Self = @fieldParentPtr("interface", @constCast(d.?));
+fn decomp(d: ?*Decompressor, alloc: std.mem.Allocator, in: []u8, out: []u8) Error!usize {
+    if (d == null) {
+        return statelessDecomp(d, alloc, in, out);
+    }
+    var self: *Self = @fieldParentPtr("interface", @constCast(d.?));
 
-    // const ctx = self.ctx_queue.getOne(self.io) catch return Error.ReadFailed;
-    // defer self.ctx_queue.putOne(self.io, ctx) catch {};
+    const ctx = self.ctx_queue.getOne(self.io) catch return Error.ReadFailed;
+    defer self.ctx_queue.putOne(self.io, ctx) catch {};
 
-    // _ = c.ZSTD_DCtx_reset(ctx, c.ZSTD_reset_session_only);
+    _ = c.ZSTD_DCtx_reset(ctx, c.ZSTD_reset_session_only);
 
-    // const res = c.ZSTD_decompressDCtx(ctx, out.ptr, out.len, in.ptr, in.len);
-    // if (c.ZSTD_isError(res) != 0)
-    //     return Error.ReadFailed;
-    // return res;
+    const res = c.ZSTD_decompressDCtx(ctx, out.ptr, out.len, in.ptr, in.len);
+    if (c.ZSTD_isError(res) != 0)
+        return Error.ReadFailed;
+    return res;
 }
 
 // Stateless
 
 pub const stateless_decompressor: Decompressor = .{ .decomp_fn = statelessDecomp };
 
-fn statelessDecomp(_: ?*const Decompressor, _: std.mem.Allocator, in: []u8, out: []u8) Error!usize {
+fn statelessDecomp(_: ?*Decompressor, _: std.mem.Allocator, in: []u8, out: []u8) Error!usize {
     const res = c.ZSTD_decompress(out.ptr, out.len, in.ptr, in.len);
     if (c.ZSTD_isError(res) != 0)
         return Error.ReadFailed;

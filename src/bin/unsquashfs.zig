@@ -41,7 +41,10 @@ var force: bool = false;
 
 pub fn main(init: std.process.Init) !void {
     const alloc = init.gpa;
-    const io = init.io;
+    // const io = init.io;
+    var evented: Io.Evented = undefined;
+    try evented.init(alloc, .{});
+    const io = evented.io();
 
     var stdout = std.Io.File.stdout();
     defer stdout.close(io);

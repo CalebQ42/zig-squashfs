@@ -15,7 +15,7 @@ pub const Error = Decompressor.Error || Io.File.MemoryMap.CreateError || Io.File
 const DataExtractor = @This();
 
 fil: OffsetFile,
-decomp: *const Decompressor,
+decomp: *Decompressor,
 block_size: u32,
 
 file_size: u64,
@@ -27,7 +27,7 @@ frag_block: ?[]u8 = null,
 
 err: ?Error = null,
 
-pub fn init(fil: OffsetFile, decomp: *const Decompressor, block_size: u32, file_size: u64, data_start: u64, blocks: []BlockSize) DataExtractor {
+pub fn init(fil: OffsetFile, decomp: *Decompressor, block_size: u32, file_size: u64, data_start: u64, blocks: []BlockSize) DataExtractor {
     return .{
         .fil = fil,
         .decomp = decomp,

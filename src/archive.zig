@@ -16,7 +16,7 @@ const Archive = @This();
 file: OffsetFile,
 super: Superblock,
 
-stateless_decomp: *const Decompressor,
+stateless_decomp: Decompressor,
 
 pub fn init(io: Io, file: std.Io.File, offset: u64) !Archive {
     var rdr = file.reader(io, &[0]u8{});
@@ -37,20 +37,20 @@ pub fn deinit(self: *Archive, io: Io) void {
 }
 
 /// The root folder of the Archive. Used to open other Files.
-pub fn root(self: Archive, alloc: std.mem.Allocator) !File {
+pub fn root(self: *Archive, alloc: std.mem.Allocator) !File {
     const root_inode = try Utils.inodeFromRef(
         alloc,
         self.file,
-        self.stateless_decomp,
+        &self.stateless_decomp,
         self.super.inode_start,
         self.super.block_size,
         self.super.root_ref,
     );
-    return .init(alloc, self, root_inode, "");
+    return .init(alloc, self.*, root_inode, "");
 }
 /// Opens a File within the archive.
-pub fn open(self: Archive, alloc: std.mem.Allocator, io: Io, filepath: []const u8) !File {
-    const root_file = try self.root(alloc);
+pub fn open(self: *Archive, alloc: std.mem.Allocator, io: Io, filepath: []const u8) !File {
+    var root_file = try self.root(alloc);
     const path = std.mem.trim(u8, filepath, "/");
     if (Utils.pathIsSelf(path))
         return root_file;
@@ -60,7 +60,7 @@ pub fn open(self: Archive, alloc: std.mem.Allocator, io: Io, filepath: []const u
 
 /// Returns the inode with the given inode number.
 /// Requires that the archive is exportable (has an export lookup table).
-pub fn inode(self: Archive, alloc: std.mem.Allocator, io: Io, num: u32) !Inode {
+pub fn inode(self: *Archive, alloc: std.mem.Allocator, io: Io, num: u32) !Inode {
     if (!self.super.flags.exportable)
         return error.NotExportable;
     const ref = try LookupTable.lookupValue(
@@ -83,7 +83,7 @@ pub fn inode(self: Archive, alloc: std.mem.Allocator, io: Io, num: u32) !Inode {
     );
 }
 /// Returns a value at the given index from the Archive's id (uid/gid) table.
-pub fn idTable(self: Archive, alloc: std.mem.Allocator, io: Io, idx: u32) !u16 {
+pub fn idTable(self: *Archive, alloc: std.mem.Allocator, io: Io, idx: u32) !u16 {
     return LookupTable.lookupValue(
         u16,
         alloc,
@@ -96,11 +96,11 @@ pub fn idTable(self: Archive, alloc: std.mem.Allocator, io: Io, idx: u32) !u16 {
 }
 
 /// Extract the entire archive contents to the given directory.
-pub fn extract(self: Archive, alloc: std.mem.Allocator, io: Io, extract_dir: []const u8, options: ExtractionOptions) !void {
+pub fn extract(self: *Archive, alloc: std.mem.Allocator, io: Io, extract_dir: []const u8, options: ExtractionOptions) !void {
     const root_inode = try Utils.inodeFromRef(
         alloc,
         self.file,
-        self.stateless_decomp,
+        &self.stateless_decomp,
         self.super.inode_start,
         self.super.block_size,
         self.super.root_ref,
