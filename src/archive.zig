@@ -23,6 +23,7 @@ pub fn init(io: Io, file: std.Io.File, offset: u64) !Archive {
     try rdr.seekTo(offset);
     var super: Superblock = undefined;
     try rdr.interface.readSliceEndian(Superblock, @ptrCast(&super), .little);
+    try super.validate();
 
     return .{
         .file = try .init(io, file, super.size, offset),
@@ -31,15 +32,14 @@ pub fn init(io: Io, file: std.Io.File, offset: u64) !Archive {
         .stateless_decomp = try Decomp.StatelessDecomp(super.compression),
     };
 }
-pub fn deinit(self: Archive, io: Io) void {
+pub fn deinit(self: *Archive, io: Io) void {
     self.file.deinit(io);
 }
 
 /// The root folder of the Archive. Used to open other Files.
-pub fn root(self: Archive, alloc: std.mem.Allocator, io: Io) !File {
+pub fn root(self: Archive, alloc: std.mem.Allocator) !File {
     const root_inode = try Utils.inodeFromRef(
         alloc,
-        io,
         self.file,
         self.stateless_decomp,
         self.super.inode_start,
@@ -50,7 +50,7 @@ pub fn root(self: Archive, alloc: std.mem.Allocator, io: Io) !File {
 }
 /// Opens a File within the archive.
 pub fn open(self: Archive, alloc: std.mem.Allocator, io: Io, filepath: []const u8) !File {
-    const root_file = try self.root(alloc, io);
+    const root_file = try self.root(alloc);
     const path = std.mem.trim(u8, filepath, "/");
     if (Utils.pathIsSelf(path))
         return root_file;
@@ -93,6 +93,19 @@ pub fn idTable(self: Archive, alloc: std.mem.Allocator, io: Io, idx: u32) !u16 {
         self.super.id_start,
         idx,
     );
+}
+
+/// Extract the entire archive contents to the given directory.
+pub fn extract(self: Archive, alloc: std.mem.Allocator, io: Io, extract_dir: []const u8, options: ExtractionOptions) !void {
+    const root_inode = try Utils.inodeFromRef(
+        alloc,
+        self.file,
+        self.stateless_decomp,
+        self.super.inode_start,
+        self.super.block_size,
+        self.super.root_ref,
+    );
+    return root_inode.extract(alloc, io, self.file, self.super, extract_dir, options);
 }
 
 // Superblock
@@ -155,17 +168,111 @@ pub const Superblock = extern struct {
     }
 };
 
-// Extraction
+// Tests
 
-/// Extract the entire archive contents to the given directory.
-pub fn extract(self: Archive, alloc: std.mem.Allocator, io: Io, extract_dir: []const u8, options: ExtractionOptions) !void {
-    const root_inode = try Utils.inodeFromRef(
-        alloc,
-        self.file,
-        self.stateless_decomp,
-        self.super.inode_start,
-        self.super.block_size,
-        self.super.root_ref,
-    );
-    return root_inode.extract(alloc, io, self.file, self.super, extract_dir, options);
+const TestArchive = "testing/LinuxPATest.sfs";
+
+test "Basics" {
+    std.debug.print("Starting test: Basics...\n", .{});
+
+    const alloc = std.testing.allocator;
+    const io = std.testing.io;
+
+    var fil = try Io.Dir.cwd().openFile(io, TestArchive, .{});
+    defer fil.close(io);
+    var sfs: Archive = try .init(io, fil, 0);
+    defer sfs.deinit(io);
+    try std.testing.expectEqualDeep(sfs.super, LinuxPATestCorrectSuperblock);
+    const root_file = try sfs.root(alloc);
+    defer root_file.deinit();
 }
+
+const TestFile = "Start.exe";
+const TestFileExtractLocation = "testing/Start.exe";
+
+test "ExtractSingleFile" {
+    std.debug.print("Starting test: ExtractSingleFile...\n", .{});
+
+    const alloc = std.testing.allocator;
+    const io = std.testing.io;
+
+    Io.Dir.cwd().deleteFile(io, TestFileExtractLocation) catch {};
+    var fil = try Io.Dir.cwd().openFile(io, TestArchive, .{});
+    defer fil.close(io);
+    var sfs: Archive = try .init(io, fil, 0);
+    defer sfs.deinit(io);
+    var test_fil = try sfs.open(alloc, io, TestFile);
+    defer test_fil.deinit();
+    try test_fil.extract(alloc, io, TestFileExtractLocation, .default);
+    //TODO: validate extracted file.
+}
+
+const TestFullExtractLocation = "testing/TestExtract";
+
+test "ExtractCompleteArchive" {
+    std.debug.print("Starting test: ExtractCompleteArchive...\n", .{});
+
+    const alloc = std.testing.allocator;
+    const io = std.testing.io;
+
+    Io.Dir.cwd().deleteTree(io, TestFullExtractLocation) catch {};
+    var fil = try Io.Dir.cwd().openFile(io, TestArchive, .{});
+    defer fil.close(io);
+    var sfs: Archive = try .init(io, fil, 0);
+    defer sfs.deinit(io);
+    try sfs.extract(alloc, io, TestFullExtractLocation, .default);
+}
+
+test "ExtractCompleteArchiveSingleThreaded" {
+    std.debug.print("Starting test: ExtractCompleteArchive...\n", .{});
+
+    const alloc = std.testing.allocator;
+    const io = Io.Threaded.global_single_threaded.io();
+
+    Io.Dir.cwd().deleteTree(io, TestFullExtractLocation) catch {};
+    var fil = try Io.Dir.cwd().openFile(io, TestArchive, .{});
+    defer fil.close(io);
+    var sfs: Archive = try .init(io, fil, 0);
+    defer sfs.deinit(io);
+    try sfs.extract(alloc, io, TestFullExtractLocation, .default);
+}
+
+const LinuxPATestCorrectSuperblock: Superblock = .{
+    .magic = std.mem.readInt(u32, "hsqs", .little),
+    .inode_count = 2974,
+    .mod_time = 1632696724,
+    .block_size = 131072,
+    .frag_count = 264,
+    .compression = .zstd,
+    .block_log = 17,
+    .flags = .{
+        .inode_uncompressed = false,
+        .data_uncompressed = false,
+        .check = false,
+        .frag_uncompressed = false,
+        .fragment_never = false,
+        .fragment_always = false,
+        .duplicates = true,
+        .exportable = true,
+        .xattr_uncompressed = false,
+        .xattr_never = false,
+        .compression_options = false,
+        .ids_uncompressed = false,
+        ._ = 0,
+    },
+    .id_count = 1,
+    .ver_maj = 4,
+    .ver_min = 0,
+    .root_ref = .{
+        .block_offset = 1363,
+        .block_start = 29237,
+        ._ = 0,
+    },
+    .size = 106841744,
+    .id_start = 106841632,
+    .xattr_start = 106841720,
+    .inode_start = 106778274,
+    .dir_start = 106807998,
+    .frag_start = 106837747,
+    .export_start = 106841602,
+};

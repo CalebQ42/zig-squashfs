@@ -18,7 +18,7 @@ pub fn init(io: Io, fil: File, archive_size: u64, init_offset: u64) !OffsetFile 
         }),
     };
 }
-pub fn deinit(self: @This(), io: Io) void {
+pub fn deinit(self: *OffsetFile, io: Io) void {
     self.map.destroy(io);
 }
 

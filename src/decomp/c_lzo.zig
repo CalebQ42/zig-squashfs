@@ -22,14 +22,3 @@ fn statelessDecomp(_: ?*const Decompressor, _: std.mem.Allocator, in: []u8, out:
     if (res != c.LZO_E_OK) return Error.ReadFailed;
     return out_len;
 }
-
-// lzma_allocator
-
-fn lzmaAlloc(ptr: ?*anyopaque, size: usize, _: usize) callconv(.c) ?*anyopaque {
-    var alloc: *std.mem.Allocator = @ptrCast(@alignCast(@constCast(ptr)));
-    return alloc.rawAlloc(size, .@"1", 0);
-}
-fn lzmaFree(ptr: ?*anyopaque, mem_ptr: ?*anyopaque) callconv(.c) void {
-    var alloc: *std.mem.Allocator = @ptrCast(@alignCast(@constCast(ptr)));
-    alloc.rawFree(@ptrCast(mem_ptr), .@"1", 0);
-}

@@ -5,8 +5,6 @@ const Writer = std.Io.Writer;
 
 const ExtractionOptions = @This();
 
-// /// The number of threads used for extraction. 0 implies single threaded.
-// threads: usize = 1, // As of Zig 0.16 this should no longer be necessary, instead this should be set by the io instance used.
 /// Don't set the file's owner & permissions after extraction
 ignore_permissions: bool = false,
 /// Don't set xattr values. Currently xattrs are never set anyway.
@@ -18,16 +16,11 @@ verbose: bool = false,
 /// Where to print verbose log.
 verbose_writer: ?*Writer = null,
 
-pub const SingleThreadedDefault: ExtractionOptions = .{};
-pub fn Default() !ExtractionOptions {
-    return .{
-        .threads = try std.Thread.getCpuCount(),
-    };
-}
+pub const default: ExtractionOptions = .{};
+
 pub fn VerboseDefault(wrt: *Writer) !ExtractionOptions {
     return .{
         .verbose = true,
         .verbose_writer = wrt,
-        .threads = try std.Thread.getCpuCount(),
     };
 }

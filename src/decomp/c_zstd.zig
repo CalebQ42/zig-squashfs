@@ -20,17 +20,15 @@ io: Io,
 ctx: []?*c.ZSTD_DCtx,
 ctx_queue: Queue,
 
-pub fn init(alloc: std.mem.Allocator, io: Io, block_size: u32) !Self {
+pub fn init(alloc: std.mem.Allocator, io: Io) !Self {
     const buf = try alloc.alloc(?*c.ZSTD_DCtx, 20); // TODO: Choose a better number instead of a random one.
     var queue: Queue = .init(buf);
     for (0..20) |_|
         try queue.putOne(io, c.ZSTD_createDCtx());
 
     return .{
-        .alloc = alloc,
         .io = io,
 
-        .block_size = block_size,
         .ctx = buf,
         .ctx_queue = queue,
     };
@@ -38,7 +36,7 @@ pub fn init(alloc: std.mem.Allocator, io: Io, block_size: u32) !Self {
 pub fn deinit(self: *Self, alloc: std.mem.Allocator) void {
     self.ctx_queue.close(self.io);
     for (self.ctx) |ctx|
-        c.ZSTD_freeDCtx(ctx);
+        _ = c.ZSTD_freeDCtx(ctx);
     alloc.free(self.ctx);
 }
 

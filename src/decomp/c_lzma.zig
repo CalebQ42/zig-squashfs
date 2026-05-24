@@ -15,13 +15,8 @@ const Self = @This();
 
 pub const stateless_decompressor: Decompressor = .{ .decomp_fn = statelessDecomp };
 
-fn statelessDecomp(_: ?*const Decompressor, alloc: std.mem.Allocator, in: []u8, out: []u8) Error!usize {
+fn statelessDecomp(_: ?*const Decompressor, _: std.mem.Allocator, in: []u8, out: []u8) Error!usize {
     var stream: c.lzma_stream = .{
-        .allocator = &.{
-            .alloc = lzmaAlloc,
-            .free = lzmaFree,
-            .@"opaque" = @constCast(&alloc),
-        },
         .next_in = in.ptr,
         .avail_in = in.len,
         .next_out = out.ptr,
@@ -38,11 +33,12 @@ fn statelessDecomp(_: ?*const Decompressor, alloc: std.mem.Allocator, in: []u8, 
 
 // lzma_allocator
 
-fn lzmaAlloc(ptr: ?*anyopaque, size: usize, _: usize) callconv(.c) ?*anyopaque {
-    var alloc: *std.mem.Allocator = @ptrCast(@alignCast(@constCast(ptr)));
-    return alloc.rawAlloc(size, .@"1", 0);
-}
-fn lzmaFree(ptr: ?*anyopaque, mem_ptr: ?*anyopaque) callconv(.c) void {
-    var alloc: *std.mem.Allocator = @ptrCast(@alignCast(@constCast(ptr)));
-    alloc.rawFree(@ptrCast(mem_ptr), .@"1", 0);
-}
+// fn lzmaAlloc(ptr: ?*anyopaque, size: usize, _: usize) callconv(.c) ?*anyopaque {
+//     var alloc: *std.mem.Allocator = @ptrCast(@alignCast(ptr));
+//     return alloc.rawAlloc(size, .@"1", 0);
+// }
+// fn lzmaFree(ptr: ?*anyopaque, mem_ptr: ?*anyopaque) callconv(.c) void {
+//     if (mem_ptr == null) return;
+//     var alloc: *std.mem.Allocator = @ptrCast(@alignCast(ptr));
+//     alloc.free(@as([*]u8, @ptrCast(mem_ptr.?)));
+// }

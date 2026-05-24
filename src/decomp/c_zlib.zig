@@ -20,20 +20,15 @@ io: Io,
 ctx: []c.zng_stream,
 ctx_queue: Queue,
 
-pub fn init(alloc: std.mem.Allocator, io: Io, block_size: u32) !Self {
+pub fn init(alloc: std.mem.Allocator, io: Io) !Self {
     const buf = try alloc.alloc(c.zng_stream, 20); // TODO: Choose a better number instead of a random one.
     var queue: Queue = .init(buf);
     for (0..20) |_|
-        try queue.putOne(io, .{
-            .zalloc = zalloc,
-            .zfree = zfree,
-        });
+        try queue.putOne(io, .{});
 
     return .{
-        .alloc = alloc,
         .io = io,
 
-        .block_size = block_size,
         .ctx = buf,
         .ctx_queue = queue,
     };
@@ -52,13 +47,12 @@ fn decomp(d: ?*const Decompressor, alloc: std.mem.Allocator, in: []u8, out: []u8
     var stream = self.ctx_queue.getOne(self.io) catch return Error.ReadFailed;
     defer self.ctx_queue.putOne(self.io, stream) catch {};
 
-    stream.@"opaque" = @constCast(&alloc);
     stream.next_in = in.ptr;
     stream.avail_in = @truncate(in.len);
     stream.next_out = out.ptr;
     stream.avail_out = @truncate(out.len);
 
-    try zlibDecomp(&stream, in, out);
+    try zlibDecomp(&stream);
 
     return stream.total_out;
 }
@@ -74,9 +68,8 @@ inline fn zlibDecomp(stream: *c.zng_stream) !void {
 
 pub const stateless_decompressor: Decompressor = .{ .decomp_fn = statelessDecomp };
 
-fn statelessDecomp(_: ?*const Decompressor, alloc: std.mem.Allocator, in: []u8, out: []u8) Error!usize {
+fn statelessDecomp(_: ?*const Decompressor, _: std.mem.Allocator, in: []u8, out: []u8) Error!usize {
     var stream: c.zng_stream = .{
-        .@"opaque" = @constCast(&alloc),
         .next_in = in.ptr,
         .avail_in = @truncate(in.len),
         .next_out = out.ptr,
@@ -93,6 +86,12 @@ fn zalloc(ptr: ?*anyopaque, size: c_uint, len: c_uint) callconv(.c) ?*anyopaque 
     return alloc.rawAlloc(size * len, .@"1", 0);
 }
 fn zfree(ptr: ?*anyopaque, mem_ptr: ?*anyopaque) callconv(.c) void {
+<<<<<<< HEAD
     var alloc: *std.mem.Allocator = @ptrCast(@alignCast(ptr));
     alloc.rawFree(@ptrCast(mem_ptr), .@"1", 0);
+=======
+    if (mem_ptr == null) return;
+    var alloc: *std.mem.Allocator = @ptrCast(@alignCast(ptr));
+    alloc.free(@as([*]u8, @ptrCast(mem_ptr.?)));
+>>>>>>> dfbfbda (Build is working again (on Zig master branch))
 }

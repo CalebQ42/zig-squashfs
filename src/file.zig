@@ -37,7 +37,7 @@ pub fn init(alloc: std.mem.Allocator, archive: Archive, in: Inode, name: []const
 }
 pub fn fromDirEntry(alloc: std.mem.Allocator, archive: Archive, ent: DirEntry) !File {
     var rdr = archive.file.readerAt(archive.super.inode_start + ent.block_start);
-    var meta: MetadataReader = .init(alloc, &rdr.interface, archive.stateless_decomp);
+    var meta: MetadataReader = .init(alloc, &rdr, archive.stateless_decomp);
     try meta.interface.discardAll(ent.block_offset);
 
     var in: Inode = try .read(alloc, &meta.interface, archive.super.block_size);
@@ -52,7 +52,6 @@ pub fn deinit(self: File) void {
 pub fn open(self: File, alloc: std.mem.Allocator, io: Io, filepath: []const u8) !File {
     const entries = try self.inode.readDirectory(
         alloc,
-        io,
         self.archive.file,
         self.archive.stateless_decomp,
         self.archive.super.dir_start,
@@ -77,7 +76,7 @@ pub fn open(self: File, alloc: std.mem.Allocator, io: Io, filepath: []const u8) 
         }
     } else return Error.FileNotFound;
 
-    const first_elem_file = try fromDirEntry(alloc, io, self.archive, search_slice[idx]);
+    const first_elem_file = try fromDirEntry(alloc, self.archive, search_slice[idx]);
     if (first_element.len == path.len)
         return first_elem_file;
     defer first_elem_file.deinit();

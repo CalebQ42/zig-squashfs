@@ -68,7 +68,13 @@ pub fn main(init: std.process.Init) !void {
 
     if (force)
         try Io.Dir.cwd().deleteTree(io, extLoc);
-    try arc.extract(alloc, io, extLoc, options); //TODO: Handle error gracefully.
+    if (threads != 0) {
+        if (threads == 1)
+            return arc.extract(alloc, Io.Threaded.global_single_threaded.io(), extLoc, options); //TODO: Handle error gracefully.
+        var limited_io = Io.Threaded.init(alloc, .{ .async_limit = .limited(threads - 1), .concurrent_limit = .limited(threads - 1) });
+        return arc.extract(alloc, limited_io.io(), extLoc, options); //TODO: Handle error gracefully.
+    }
+    return arc.extract(alloc, io, extLoc, options); //TODO: Handle error gracefully.
 }
 
 fn handleArgs(args: std.process.Args, out: *Writer) !void {
