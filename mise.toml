@@ -1,2 +1,2 @@
 [tools]
-zig = "master" # 0.16.0 compilation errors with SEGV
+zig = "master"

@@ -26,7 +26,7 @@ pub const ExtDir = extern struct {
 
     pub fn read(rdr: *Reader) !ExtDir {
         var d: ExtDir = undefined;
-        try rdr.readSliceEndian(Dir, @ptrCast(&d), .little);
+        try rdr.readSliceEndian(ExtDir, @ptrCast(&d), .little);
         return d;
     }
 };

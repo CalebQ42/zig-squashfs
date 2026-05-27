@@ -56,7 +56,7 @@ pub fn main(init: std.process.Init) !void {
 
     var fil: std.Io.File = try Io.Dir.cwd().openFile(io, archive, .{}); //TODO: Handle error gracefully.
     defer fil.close(io);
-    var arc: squashfs.Archive = try .init(alloc, io, fil, offset, 1 * 1024 * 1024 * 1024); //TODO: Update when memory size matters. //TODO: Handle error gracefully.
+    var arc: squashfs.Archive = try .initAdvanced(alloc, io, fil, offset, 0); //TODO: Update when memory size matters. //TODO: Handle error gracefully.
     defer arc.deinit(io);
     const options: squashfs.ExtractionOptions = .{
         .single_threaded = threads == 1,
@@ -67,7 +67,7 @@ pub fn main(init: std.process.Init) !void {
     };
     if (force)
         try Io.Dir.cwd().deleteTree(io, extLoc);
-    try arc.extract(alloc, extLoc, options); //TODO: Handle error gracefully.
+    try arc.extract(alloc, io, extLoc, options); //TODO: Handle error gracefully.
 }
 
 fn handleArgs(out: *Writer, args: std.process.Args) !void {
@@ -134,4 +134,8 @@ fn handleArgs(out: *Writer, args: std.process.Args) !void {
         }
         archive = arg;
     }
+}
+
+test {
+    std.testing.refAllDecls(squashfs.Archive);
 }

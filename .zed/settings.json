@@ -9,12 +9,13 @@
 				"usePlaceholders": false,
 			},
 			"settings": {
-				"build_on_save": true,
+				// "build_on_save": true,
 				"use_placeholders": false,
 				"build_on_save_args": [
 					"-fincremental",
 					"-Dallow_lzo=true",
 					"-Ddebug=true",
+					"test",
 				],
 			},
 		},

@@ -51,7 +51,7 @@ pub fn build(b: *std.Build) !void {
             .optimize = optimize,
             .valgrind = debug,
             .error_tracing = debug,
-            .strip = debug,
+            .strip = !debug,
             .imports = &.{
                 .{ .name = "config", .module = zig_squashfs_options.createModule() },
                 .{ .name = "c", .module = c_import.createModule() },
@@ -78,7 +78,7 @@ pub fn build(b: *std.Build) !void {
             },
             .valgrind = debug,
             .error_tracing = debug,
-            .strip = if (debug == true) false else null,
+            .strip = !debug,
         }),
         .use_llvm = debug,
         .version = version,
@@ -92,19 +92,15 @@ pub fn build(b: *std.Build) !void {
             .root_source_file = b.path("src/root.zig"),
             .target = target,
             .optimize = optimize,
-            .valgrind = debug,
-            .error_tracing = debug,
-            .strip = debug,
+            .valgrind = true,
+            .error_tracing = true,
+            .strip = false,
             .imports = &.{
                 .{ .name = "config", .module = zig_squashfs_options.createModule() },
                 .{ .name = "c", .module = c_import.createModule() },
             },
         }),
-        .use_llvm = true, // Helps with lldb degugging
-        .test_runner = .{
-            .mode = .simple,
-            .path = b.path("src/test.zig"),
-        },
+        .use_llvm = debug, // Helps with lldb degugging
     });
 
     for (deps) |d|

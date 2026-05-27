@@ -1,4 +1,5 @@
 const std = @import("std");
+const Io = std.Io;
 const stuff = @import("builtin");
 
 const Archive = @import("archive.zig");
@@ -7,40 +8,46 @@ const Superblock = @import("super.zig").Superblock;
 const TestArchive = "testing/LinuxPATest.sfs";
 
 test "Basics" {
-    var fil = try std.fs.cwd().openFile(TestArchive, .{});
-    defer fil.close();
-    var sfs: Archive = try .init(std.testing.allocator, fil);
-    defer sfs.deinit();
-    if (sfs.super != LinuxPATestCorrectSuperblock) {
-        std.debug.print("Superblock wrong\nShould be: {}\n\nis: {}\n", .{ LinuxPATestCorrectSuperblock, sfs.super });
-        return error.BadSuperblock;
-    }
+    const io = std.testing.io;
+    const alloc = std.testing.allocator;
+
+    var fil = try Io.Dir.cwd().openFile(io, TestArchive, .{});
+    defer fil.close(io);
+    var sfs: Archive = try .init(alloc, io, fil);
+    defer sfs.deinit(io);
+    try std.testing.expectEqualDeep(sfs.super, LinuxPATestCorrectSuperblock);
 }
 
 const TestFile = "Start.exe";
 const TestFileExtractLocation = "testing/Start.exe";
 
 test "ExtractSingleFile" {
-    std.fs.cwd().deleteFile(TestFileExtractLocation) catch {};
-    var fil = try std.fs.cwd().openFile(TestArchive, .{});
-    defer fil.close();
-    var sfs: Archive = try .init(std.testing.allocator, fil);
-    defer sfs.deinit();
-    var test_fil = try sfs.open(TestFile);
+    const io = std.testing.io;
+    const alloc = std.testing.allocator;
+
+    Io.Dir.cwd().deleteFile(io, TestFileExtractLocation) catch {};
+    var fil = try Io.Dir.cwd().openFile(io, TestArchive, .{});
+    defer fil.close(io);
+    var sfs: Archive = try .init(alloc, io, fil);
+    defer sfs.deinit(io);
+    var test_fil = try sfs.open(alloc, io, TestFile);
     defer test_fil.deinit();
-    try test_fil.extract(TestFileExtractLocation, .Default);
+    try test_fil.extract(alloc, io, TestFileExtractLocation, .default);
     //TODO: validate extracted file.
 }
 
 const TestFullExtractLocation = "testing/TestExtract";
 
 test "ExtractCompleteArchive" {
-    std.fs.cwd().deleteTree(TestFullExtractLocation) catch {};
-    var fil = try std.fs.cwd().openFile(TestArchive, .{});
-    defer fil.close();
-    var sfs: Archive = try .init(std.testing.allocator, fil);
-    defer sfs.deinit();
-    try sfs.extract(TestFullExtractLocation, .Default);
+    const io = std.testing.io;
+    const alloc = std.testing.allocator;
+
+    Io.Dir.cwd().deleteTree(io, TestFullExtractLocation) catch {};
+    var fil = try Io.Dir.cwd().openFile(io, TestArchive, .{});
+    defer fil.close(io);
+    var sfs: Archive = try .init(alloc, io, fil);
+    defer sfs.deinit(io);
+    try sfs.extract(alloc, io, TestFullExtractLocation, .default);
 }
 
 const LinuxPATestCorrectSuperblock: Superblock = .{
