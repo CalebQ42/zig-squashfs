@@ -2,6 +2,7 @@ const std = @import("std");
 const math = std.math;
 
 const InodeRef = @import("inode.zig").Ref;
+const CompressionType = @import("util/decompress.zig").CompressionType;
 
 const SQUASHFS_MAGIC: u32 = std.mem.readInt(u32, "hsqs", .little);
 
@@ -13,22 +14,15 @@ const SuperblockError = error{
 };
 
 /// A squashfs Superblock
-pub const Superblock = packed struct {
+pub const Superblock = extern struct {
     magic: u32,
     inode_count: u32,
     mod_time: u32,
     block_size: u32,
     frag_count: u32,
-    compression: enum(u16) {
-        gzip = 1,
-        lzma,
-        lzo,
-        xz,
-        lz4,
-        zstd,
-    },
+    compression: CompressionType,
     block_log: u16,
-    flags: packed struct {
+    flags: packed struct(u16) {
         inode_uncompressed: bool,
         data_uncompressed: bool,
         check: bool,

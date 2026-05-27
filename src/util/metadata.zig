@@ -1,97 +1,67 @@
 const std = @import("std");
-const Reader = std.Io.Reader;
-const Writer = std.Io.Writer;
-const Limit = std.Io.Limit;
-const StreamError = std.Io.Reader.StreamError;
+const Io = std.Io;
+const Reader = Io.Reader;
+const Writer = Io.Writer;
+const Limit = Io.Limit;
 
-const DecompFn = @import("../decomp.zig").DecompFn;
+const DecompCache = @import("decomp_cache.zig");
 
-const BlockHeader = packed struct {
+const MetadataReader = @This();
+
+const BlockHeader = packed struct(u16) {
     size: u15,
     uncompressed: bool,
 };
 
-const This = @This();
+io: Io,
 
-alloc: std.mem.Allocator,
-rdr: *Reader,
-decomp: DecompFn,
+cur_offset: u64 = 0,
+next_offset: u64,
 
-buf: [8192]u8 = undefined,
+cache: *DecompCache,
 
-interface: Reader,
-err: ?anyerror = null,
+interface: Reader = .{
+    .buffer = &[0]u8{},
+    .end = 0,
+    .seek = 0,
+    .vtable = &.{
+        .stream = stream,
+        .discard = discard,
+        .readVec = readVec,
+    },
+},
 
-pub fn init(alloc: std.mem.Allocator, rdr: *Reader, decomp: DecompFn) This {
+pub fn init(io: Io, cache: *DecompCache, offset: u64) void {
     return .{
-        .alloc = alloc,
-        .rdr = rdr,
-        .decomp = decomp,
-        .interface = .{
-            .buffer = &[0]u8{},
-            .end = 0,
-            .seek = 0,
-            .vtable = &.{
-                .stream = stream,
-                .discard = discard,
-                .readVec = readVec,
-            },
-        },
+        .io = io,
+
+        .next_offset = offset,
+
+        .cache = cache,
     };
 }
+pub fn deinit(self: *MetadataReader) void {
+    if (self.cur_block_offset != 0)
+        self.cache.checkinBlock(self.io, self.cur_block_offset);
+}
 
-fn advance(self: *This) !void {
-    self.interface.seek = 0;
-    var hdr: BlockHeader = undefined;
-    try self.rdr.readSliceEndian(BlockHeader, @ptrCast(&hdr), .little);
+fn advance(self: *MetadataReader) !void {
+    if (self.interface.buffer.len > 0)
+        self.cache.checkinBlock(self.io, self.cur_offset);
+    const hdr = std.mem.readInt(BlockHeader, self.cache.map[self.next_offset..][0..2], .little);
+    self.cur_offset = self.next_offset + 2;
+    self.next_offset += hdr.size;
     if (hdr.uncompressed) {
-        try self.rdr.readSliceEndian(u8, self.buf[0..hdr.size], .little);
+        self.interface.buffer = self.cache.map[self.cur_offset..][0..hdr.size];
         self.interface.end = hdr.size;
-        self.interface.buffer = self.buf[0..hdr.size];
+        self.interface.seek = 0;
         return;
     }
-    var tmp_buf: [8192]u8 = undefined;
-    try self.rdr.readSliceAll(tmp_buf[0..hdr.size]);
-    self.interface.end = try self.decomp(self.alloc, tmp_buf[0..hdr.size], &self.buf);
-    self.interface.buffer = self.buf[0..self.interface.end];
+    self.interface.buffer = try self.cache.checkoutBlock(self.io, self.cur_offset, hdr.size, 8192);
+    self.interface.end = self.interface.buffer.len;
+    self.interface.seek = 0;
 }
 
-fn stream(rdr: *Reader, wrt: *Writer, limit: Limit) StreamError!usize {
-    const self: *This = @fieldParentPtr("interface", rdr);
-    if (rdr.end == rdr.seek) self.advance() catch |err| {
-        self.err = err;
-        return StreamError.ReadFailed;
-    };
-    if (@intFromEnum(limit) == 0) return 0;
-    const to_write = @min(rdr.end - rdr.seek, @intFromEnum(limit));
-    const wrote = try wrt.write(self.buf[rdr.seek .. rdr.seek + to_write]);
-    self.interface.seek += wrote;
-    return wrote;
-}
-fn discard(rdr: *Reader, limit: Limit) error{ EndOfStream, ReadFailed }!usize {
-    const self: *This = @fieldParentPtr("interface", rdr);
-    if (rdr.end == rdr.seek) self.advance() catch |err| {
-        self.err = err;
-        return StreamError.ReadFailed;
-    };
-    if (@intFromEnum(limit) == 0) return 0;
-    const to_skip = @min(rdr.end - rdr.seek, @intFromEnum(limit));
-    rdr.seek += to_skip;
-    return to_skip;
-}
-fn readVec(rdr: *Reader, vec: [][]u8) error{ EndOfStream, ReadFailed }!usize {
-    const self: *This = @fieldParentPtr("interface", rdr);
-    if (rdr.end == rdr.seek) self.advance() catch |err| {
-        self.err = err;
-        return StreamError.ReadFailed;
-    };
-    var cur_red: usize = 0;
-    for (vec) |s| {
-        const to_copy: usize = @min(rdr.end - rdr.seek, s.len);
-        @memcpy(s[0..to_copy], self.buf[rdr.seek .. rdr.seek + to_copy]);
-        rdr.seek += to_copy;
-        cur_red += to_copy;
-        if (rdr.end == rdr.seek) break;
-    }
-    return cur_red;
-}
+fn stream(r: *Reader, w: *Writer, limit: Limit) Reader.StreamError!usize {}
+fn discard(r: *Reader, limit: Limit) Reader.Error!usize {}
+fn readVec(r: *Reader, vec: [][]u8) Reader.Error!usize {}

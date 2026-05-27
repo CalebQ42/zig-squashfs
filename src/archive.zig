@@ -1,105 +1,43 @@
-//! A squashfs archive read from a file.
-//! Can be used to directly access File's contents or extract to the filesystem.
-
 const std = @import("std");
-const File = std.fs.File;
-const builtin = @import("builtin");
+const Io = std.Io;
+const MemoryMap = Io.File.MemoryMap;
 
+const c = @import("c");
 const config = @import("config");
 
-const cDecomp = @import("decomp/misc_c.zig");
-const Decomp = @import("decomp/zig_decomp.zig");
-const ExtractionOptions = @import("options.zig");
-const Inode = @import("inode.zig");
-const InodeRef = Inode.Ref;
-const BlockSize = @import("inode_data/file.zig").BlockSize;
-const SfsFile = @import("file.zig");
 const Superblock = @import("super.zig").Superblock;
-const Tables = @import("tables.zig");
-const MetadataReader = @import("util/metadata.zig");
-const OffsetFile = @import("util/offset_file.zig");
-const XattrTable = @import("xattr.zig");
+const DecompCache = @import("util/decomp_cache.zig");
+const CompressionType = @import("util/decompress.zig").CompressionType;
 
 const Archive = @This();
 
-alloc: std.mem.Allocator,
-
-fil: OffsetFile,
+map: MemoryMap,
+cache: DecompCache,
 
 super: Superblock,
 
-tables: ?Tables = null,
+pub fn init(alloc: std.mem.Allocator, io: Io, file: Io.File, offset: u64, max_cache_size: u64) !Archive {
+    var rdr = file.reader(io, &[0]u8{});
+    try rdr.seekTo(offset);
 
-decomp: @import("decomp/types.zig").Decomp,
-
-/// Default settings using std.Thread.getCpuCount() threads and the minimum of 4gb or half of system memory for memory usage.
-pub fn init(alloc: std.mem.Allocator, fil: File, offset: u64) !Archive {
     var super: Superblock = undefined;
-    const red = try fil.pread(@ptrCast(&super), offset);
-    std.debug.assert(red == @sizeOf(Superblock));
+    try rdr.interface.readSliceEndian(Superblock, @ptrCast(&super), .little);
     try super.validate();
-    const off_fil: OffsetFile = .init(fil, offset);
+
+    if (!config.use_zig_decomp and config.allow_lzo)
+        _ = c.lzo_init();
+
+    const map = try file.createMemoryMap(
+        io,
+        .{ .offset = offset, .len = super.size, .protection = .{ .read = true } },
+    );
     return .{
-        .alloc = alloc,
-        .fil = off_fil,
-        .decomp = if (config.use_zig_decomp)
-            switch (super.compression) {
-                .lz4 => return error.Lz4Unsupported,
-                .lzo => return error.LzoUnsupported,
-                .gzip => .{ .gzip = .{} },
-                .lzma => .{ .lzma = .{} },
-                .xz => .{ .xz = .{} },
-                .zstd => .{ .zstd = .{} },
-            }
-        else switch (super.compression) {
-            .gzip => .{ .gzip = .init(alloc) },
-            .zstd => .{ .zstd = .init(alloc) },
-            .xz => .{ .xz = .init(alloc) },
-            .lzma => .{ .lzma = .init(alloc) },
-            .lzo => .{ .lzo = .{} },
-            .lz4 => .{ .lz4 = .{} },
-        },
+        .map = map,
+        .cache = try .init(alloc, map, super.compression, max_cache_size),
+
         .super = super,
     };
 }
-pub fn deinit(self: *Archive) void {
-    if (self.tables != null)
-        self.tables.?.deinit();
-    self.decomp.deinit();
-}
-
-pub fn inode(self: *Archive, alloc: std.mem.Allocator, num: u32) !Inode {
-    if (self.tables == null)
-        self.tables = try .init(alloc, self);
-    const ref = try self.export_table.get(num - 1);
-    var rdr = try self.fil.readerAt(ref.block_start + self.super.inode_start, &[0]u8{});
-    var meta: MetadataReader = .init(alloc, &rdr.interface, &self.decomp);
-    try meta.interface.discardAll(ref.block_offset);
-    return try .read(alloc, &meta.interface, self.super.block_size);
-}
-
-pub fn root(self: *Archive, alloc: std.mem.Allocator) !SfsFile {
-    if (self.tables == null)
-        self.tables = try .init(alloc, self);
-    var rdr = try self.fil.readerAt(self.super.root_ref.block_start + self.super.inode_start, &[0]u8{});
-    var meta: MetadataReader = .init(alloc, &rdr.interface, self.decomp);
-    try meta.interface.discardAll(self.super.root_ref.block_offset);
-    const in: Inode = try .read(alloc, &meta.interface, self.super.block_size);
-    return .init(self, in, "");
-}
-
-pub fn open(self: *Archive, alloc: std.mem.Allocator, path: []const u8) !SfsFile {
-    if (self.tables == null)
-        self.tables = try .init(alloc, self);
-    var root_fil = try self.root(alloc);
-    defer if (!SfsFile.pathIsSelf(path)) root_fil.deinit();
-    return root_fil.open(path);
-}
-
-pub fn extract(self: Archive, alloc: std.mem.Allocator, path: []const u8, options: ExtractionOptions) !void {
-    var rdr = try self.fil.readerAt(self.super.root_ref.block_start + self.super.inode_start, &[0]u8{});
-    var meta: MetadataReader = .init(self.alloc, &rdr.interface, self.decomp);
-    try meta.interface.discardAll(self.super.root_ref.block_offset);
-    const in: Inode = try .read(self.alloc, &meta.interface, self.super.block_size);
-    try in.extractTo(alloc, self, path, options);
+pub fn deinit(self: *Archive, io: Io) void {
+    self.map.destroy(io);
 }
