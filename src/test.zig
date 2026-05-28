@@ -36,6 +36,24 @@ test "ExtractSingleFile" {
     //TODO: validate extracted file.
 }
 
+const TestDir = "Documents";
+const TestDirExtractLocation = "testing/Documents";
+
+test "ExtractSmallDir" {
+    const io = std.testing.io;
+    const alloc = std.testing.allocator;
+
+    Io.Dir.cwd().deleteTree(io, TestDirExtractLocation) catch {};
+    var fil = try Io.Dir.cwd().openFile(io, TestArchive, .{});
+    defer fil.close(io);
+    var sfs: Archive = try .init(alloc, io, fil);
+    defer sfs.deinit(io);
+    var test_fil = try sfs.open(alloc, io, TestDir);
+    defer test_fil.deinit();
+    try test_fil.extract(alloc, io, TestDirExtractLocation, .default);
+    //TODO: validate extracted file.
+}
+
 const TestFullExtractLocation = "testing/TestExtract";
 
 test "ExtractCompleteArchive" {

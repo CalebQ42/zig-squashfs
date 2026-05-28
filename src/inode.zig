@@ -154,61 +154,6 @@ fn readDirectoryFromData(alloc: std.mem.Allocator, io: Io, cache: *DecompCache, 
 
 // Extraction
 
-pub const ExtractionError = error{ SetXattr, Mknod, Canceled } || DirEntry.Error || Io.Dir.CreateFileAtomicError || DataExtract.Error || Io.File.Atomic.LinkError ||
-    Io.Dir.SymLinkError;
-
-const ExtractReturn = struct {
-    path: []const u8,
-    inode: Inode,
-
-    fn deinit(self: ExtractReturn, alloc: std.mem.Allocator) void {
-        self.inode.deinit(alloc);
-        alloc.free(self.path);
-    }
-    fn setMetadata(self: ExtractReturn, alloc: std.mem.Allocator, io: Io, cache: *DecompCache, id_start: u64, xattr_start: u64, options: ExtractionOptions) !void {
-        defer self.deinit(alloc);
-        if (options.ignore_permissions and options.ignore_xattr) return;
-
-        var fil = try Io.Dir.cwd().openFile(io, self.path, .{});
-        defer fil.close(io);
-
-        if (!options.ignore_permissions) {
-            try fil.setTimestamps(io, .{ .modify_timestamp = .{
-                .new = .{ .nanoseconds = self.inode.hdr.mod_time * std.time.ns_per_s },
-            } });
-            try fil.setPermissions(io, @enumFromInt(self.inode.hdr.permissions));
-            try fil.setOwner(
-                io,
-                try LookupTable.lookup(u16, io, cache, id_start, self.inode.hdr.uid_idx),
-                try LookupTable.lookup(u16, io, cache, id_start, self.inode.hdr.gid_idx),
-            );
-        }
-        if (options.ignore_xattr or @hasField(std.os, "linux")) return;
-        const xattr_idx: u32 = switch (self.inode.data) {
-            .ext_dir => |d| d.xattr_idx,
-            .ext_file => |f| f.xattr_idx,
-            .ext_symlink => |s| s.xattr_idx,
-            .ext_block_dev, .ext_char_dev => |d| d.xattr_idx,
-            .ext_fifo, .ext_socket => |i| i.xattr_idx,
-            else => return,
-        };
-        if (xattr_idx == 0xFFFFFFFF) return;
-        const xattrs = try LookupTable.xattrLookup(alloc, io, cache, xattr_start, xattr_idx);
-        defer {
-            for (xattrs) |kv|
-                kv.deinit(alloc);
-            alloc.free(xattrs);
-        }
-
-        for (xattrs) |kv| {
-            const res = std.os.linux.fsetxattr(fil.handle, kv.key.ptr, kv.value.ptr, kv.value.len, 0);
-            if (res != 0)
-                return ExtractionError.SetXattr;
-        }
-    }
-};
-const ExtractUnion = union { ret: ExtractionError!ExtractReturn };
-
 pub fn extract(
     self: Inode,
     alloc: std.mem.Allocator,
@@ -225,13 +170,16 @@ pub fn extract(
 ) !void {
     const path = std.mem.trimEnd(u8, ext_loc, "/");
 
+    var sel_val: std.atomic.Value(usize) = .init(1);
+
     var sel_buf: [5]ExtractUnion = undefined;
     var sel: Io.Select(ExtractUnion) = .init(io, &sel_buf);
     defer sel.cancelDiscard();
 
-    var meta_loop = io.async(metadataLoop, .{ alloc, io, cache, id_start, xattr_start, &sel, options });
+    var meta_loop = io.async(metadataLoop, .{ alloc, io, cache, id_start, xattr_start, &sel, &sel_val, options });
+    defer _ = meta_loop.cancel(io) catch {};
 
-    sel.async(.ret, extractReal, .{ self, alloc, io, cache, dir_start, inode_start, frag_start, block_size, &sel, path, true });
+    sel.async(.ret, extractReal, .{ self, alloc, io, cache, dir_start, inode_start, frag_start, block_size, &sel, &sel_val, path, true });
 
     try meta_loop.await(io);
 }
@@ -244,7 +192,8 @@ fn extractReal(
     inode_start: u64,
     frag_start: u64,
     block_size: u32,
-    master_sel: *Io.Select(ExtractUnion),
+    sel: *Io.Select(ExtractUnion),
+    sel_val: *std.atomic.Value(usize),
     path: []const u8,
     origin: bool,
 ) ExtractionError!ExtractReturn {
@@ -254,6 +203,8 @@ fn extractReal(
     };
     switch (self.hdr.inode_type) {
         .dir, .ext_dir => {
+            try Io.Dir.cwd().createDir(io, path, @enumFromInt(0o777));
+
             const entries = self.readDirectory(alloc, io, cache, dir_start) catch |err| switch (err) {
                 error.NotDirectory => unreachable,
                 else => |e| return e,
@@ -264,68 +215,67 @@ fn extractReal(
                 alloc.free(entries);
             }
 
-            var sel_buf: [5]ExtractUnion = undefined;
-            var sel: Io.Select(ExtractUnion) = .init(io, &sel_buf);
-            defer sel.cancelDiscard();
+            if (entries.len != 0) {
+                _ = sel_val.fetchAdd(entries.len, .acq_rel);
 
-            var dir_loop = io.async(dirLoop, .{ alloc, io, &sel, master_sel });
+                for (entries) |entry| {
+                    var meta: MetadataReader = .init(io, cache, inode_start + entry.block_start);
+                    defer meta.deinit();
+                    try meta.interface.discardAll(entry.block_offset);
 
-            for (entries) |entry| {
-                var meta: MetadataReader = .init(io, cache, inode_start + entry.block_start);
-                defer meta.deinit();
-                try meta.interface.discardAll(entry.block_offset);
+                    var new_inode: Inode = try .fromReader(alloc, &meta.interface, block_size);
+                    errdefer new_inode.deinit(alloc);
 
-                var new_inode: Inode = try .fromReader(alloc, &meta.interface, block_size);
-                errdefer new_inode.deinit(alloc);
-
-                const new_path = try std.mem.concat(alloc, u8, &.{ path, "/", entry.name });
-                errdefer alloc.free(new_path);
-
-                sel.async(.ret, extractReal, .{ new_inode, alloc, io, cache, dir_start, inode_start, frag_start, block_size, master_sel, new_path, false });
+                    const new_path = try std.mem.concat(alloc, u8, &.{ path, "/", entry.name });
+                    errdefer alloc.free(new_path);
+                    sel.async(
+                        .ret,
+                        extractReal,
+                        .{ new_inode, alloc, io, cache, dir_start, inode_start, frag_start, block_size, sel, sel_val, new_path, false },
+                    );
+                }
             }
-
-            try dir_loop.await(io);
         },
         .file, .ext_file => {
-            var atomic = try Io.Dir.cwd().createFileAtomic(io, path, .{});
-            defer atomic.deinit(io);
+            std.debug.print("{s} {}\n", .{ path, self.data });
+            // var atomic = try Io.Dir.cwd().createFileAtomic(io, path, .{});
+            // defer atomic.deinit(io);
 
-            var data: DataExtract = undefined;
-            var frag_offset: ?u64 = null;
-            switch (self.data) {
-                .file => |f| {
-                    data = .init(cache.decomp, cache.map, block_size, f.block_start, f.size, f.block_sizes);
-                    if (f.frag_idx != 0xFFFFFFFF) {
-                        const entry: FragEntry = try LookupTable.lookup(FragEntry, io, cache, frag_start, f.frag_idx);
-                        if (entry.size.uncompressed) {
-                            data.addFrag(cache.map.memory[entry.start..][0..entry.size.size], f.frag_offset);
-                        } else {
-                            frag_offset = entry.start;
-                            const block = try cache.checkoutBlock(io, entry.start, entry.size.size, block_size);
-                            data.addFrag(block, f.frag_offset);
-                        }
-                    }
-                },
-                .ext_file => |f| {
-                    data = .init(cache.decomp, cache.map, block_size, f.block_start, f.size, f.block_sizes);
-                    if (f.frag_idx != 0xFFFFFFFF) {
-                        const entry: FragEntry = try LookupTable.lookup(FragEntry, io, cache, frag_start, f.frag_idx);
-                        if (entry.size.uncompressed) {
-                            data.addFrag(cache.map.memory[entry.start..][0..entry.size.size], f.frag_offset);
-                        } else {
-                            frag_offset = entry.start;
-                            const block = try cache.checkoutBlock(io, entry.start, entry.size.size, block_size);
-                            data.addFrag(block, f.frag_offset);
-                        }
-                    }
-                },
-                else => unreachable,
-            }
-            defer if (frag_offset != null) cache.checkinBlock(io, frag_offset.?);
+            // var data: DataExtract = undefined;
+            // var frag_offset: ?u64 = null;
+            // switch (self.data) {
+            //     .file => |f| {
+            //         data = .init(cache.decomp, cache.map, block_size, f.block_start, f.size, f.block_sizes);
+            //         if (f.frag_idx != 0xFFFFFFFF) {
+            //             const entry: FragEntry = try LookupTable.lookup(FragEntry, io, cache, frag_start, f.frag_idx);
+            //             if (entry.size.uncompressed) {
+            //                 data.addFrag(cache.map.memory[entry.start..][0..entry.size.size], f.frag_offset);
+            //             } else {
+            //                 frag_offset = entry.start;
+            //                 const block = try cache.checkoutBlock(io, entry.start, entry.size.size, block_size);
+            //                 data.addFrag(block, f.frag_offset);
+            //             }
+            //         }
+            //     },
+            //     .ext_file => |f| {
+            //         data = .init(cache.decomp, cache.map, block_size, f.block_start, f.size, f.block_sizes);
+            //         if (f.frag_idx != 0xFFFFFFFF) {
+            //             const entry: FragEntry = try LookupTable.lookup(FragEntry, io, cache, frag_start, f.frag_idx);
+            //             if (entry.size.uncompressed) {
+            //                 data.addFrag(cache.map.memory[entry.start..][0..entry.size.size], f.frag_offset);
+            //             } else {
+            //                 frag_offset = entry.start;
+            //                 const block = try cache.checkoutBlock(io, entry.start, entry.size.size, block_size);
+            //                 data.addFrag(block, f.frag_offset);
+            //             }
+            //         }
+            //     },
+            //     else => unreachable,
+            // }
+            // defer if (frag_offset != null) cache.checkinBlock(io, frag_offset.?) catch {};
+            // try data.asyncExtract(alloc, io, atomic.file);
 
-            try data.asyncExtract(alloc, io, atomic.file);
-
-            try atomic.link(io);
+            // try atomic.link(io);
         },
         .symlink, .ext_symlink => {
             const target = switch (self.data) {
@@ -374,32 +324,111 @@ fn extractReal(
     return .{
         .path = path,
         .inode = self,
+        .origin = origin,
     };
 }
-fn metadataLoop(alloc: std.mem.Allocator, io: Io, cache: *DecompCache, id_start: u64, xattr_start: u64, sel: *Io.Select(ExtractUnion), options: ExtractionOptions) !void {
-    defer {
-        while (sel.cancel()) |ret| {
+
+const ExtractUnion = union { ret: ExtractionError!ExtractReturn };
+pub const ExtractionError = error{ SetXattr, Mknod, Canceled } || DirEntry.Error || Io.Dir.CreateFileAtomicError || DataExtract.Error || Io.File.Atomic.LinkError ||
+    Io.Dir.SymLinkError;
+
+const ExtractReturn = struct {
+    path: []const u8,
+    inode: Inode,
+    origin: bool,
+
+    fn deinit(self: ExtractReturn, alloc: std.mem.Allocator) void {
+        if (self.origin) return;
+        alloc.free(self.path);
+        self.inode.deinit(alloc);
+    }
+    fn setMetadata(self: ExtractReturn, alloc: std.mem.Allocator, io: Io, cache: *DecompCache, id_start: u64, xattr_start: u64, options: ExtractionOptions) !void {
+        if (options.ignore_permissions and options.ignore_xattr) return;
+
+        var fil = try Io.Dir.cwd().openFile(io, self.path, .{});
+        defer fil.close(io);
+
+        if (!options.ignore_permissions) {
+            try fil.setTimestamps(io, .{ .modify_timestamp = .{
+                .new = .{ .nanoseconds = @as(i96, @intCast(self.inode.hdr.mod_time)) * std.time.ns_per_s },
+            } });
+            try fil.setPermissions(io, @enumFromInt(self.inode.hdr.permissions));
+            try fil.setOwner(
+                io,
+                try LookupTable.lookup(u16, io, cache, id_start, self.inode.hdr.uid_idx),
+                try LookupTable.lookup(u16, io, cache, id_start, self.inode.hdr.gid_idx),
+            );
+        }
+        if (options.ignore_xattr) return;
+        const xattr_idx: u32 = switch (self.inode.data) {
+            .ext_dir => |d| d.xattr_idx,
+            .ext_file => |f| f.xattr_idx,
+            .ext_symlink => |s| s.xattr_idx,
+            .ext_block_dev, .ext_char_dev => |d| d.xattr_idx,
+            .ext_fifo, .ext_socket => |i| i.xattr_idx,
+            else => return,
+        };
+        if (xattr_idx == 0xFFFFFFFF) return;
+        const xattrs = try LookupTable.xattrLookup(alloc, io, cache, xattr_start, xattr_idx);
+        defer {
+            for (xattrs) |kv|
+                kv.deinit(alloc);
+            alloc.free(xattrs);
+        }
+
+        for (xattrs) |kv| {
+            const res = std.os.linux.fsetxattr(fil.handle, kv.key.ptr, kv.value.ptr, kv.value.len, 0);
+            if (res != 0)
+                return ExtractionError.SetXattr;
+        }
+    }
+};
+
+fn metadataLoop(
+    alloc: std.mem.Allocator,
+    io: Io,
+    cache: *DecompCache,
+    id_start: u64,
+    xattr_start: u64,
+    sel: *Io.Select(ExtractUnion),
+    sel_val: *std.atomic.Value(usize),
+    options: ExtractionOptions,
+) !void {
+    errdefer {
+        while (sel.group.token.load(.unordered) != null) {
+            const ret = sel.queue.getOne(io) catch break;
+
             const res = ret.ret catch continue;
             res.deinit(alloc);
         }
     }
-    while (sel.group.token.load(.unordered) != null) {
-        const ret = try sel.await();
+    var dir_queue: std.PriorityDequeue(ExtractReturn, void, dirReturnQueueOrder) = .empty;
+    defer {
+        while (dir_queue.popMax()) |ret|
+            ret.deinit(alloc);
+        dir_queue.deinit(alloc);
+    }
+
+    while (sel_val.load(.unordered) > 0) {
+        defer _ = sel_val.fetchSub(1, .acq_rel);
+        const ret = try sel.queue.getOne(io);
 
         const res = try ret.ret;
 
+        if (res.inode.hdr.inode_type == .dir or res.inode.hdr.inode_type == .ext_dir) {
+            try dir_queue.push(alloc, res);
+        } else {
+            defer res.deinit(alloc);
+            try res.setMetadata(alloc, io, cache, id_start, xattr_start, options);
+        }
+    }
+
+    while (dir_queue.popMax()) |res| {
+        defer res.deinit(alloc);
         try res.setMetadata(alloc, io, cache, id_start, xattr_start, options);
     }
 }
-fn dirLoop(alloc: std.mem.Allocator, io: Io, dir_sel: *Io.Select(ExtractUnion), master_sel: *Io.Select(ExtractUnion)) ExtractionError!void {
-    while (dir_sel.group.token.load(.unordered) != null) {
-        const ret = try dir_sel.await();
-        master_sel.queue.putOne(io, ret) catch |err| switch (err) {
-            error.Closed => {
-                const res = try ret.ret;
-                res.deinit(alloc);
-            },
-            else => |e| return e,
-        };
-    }
+
+fn dirReturnQueueOrder(_: void, a: ExtractReturn, b: ExtractReturn) std.math.Order {
+    return std.math.order(std.mem.count(u8, a.path, "/"), std.mem.count(u8, b.path, "/"));
 }

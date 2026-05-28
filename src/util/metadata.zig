@@ -22,6 +22,8 @@ next_offset: u64,
 
 cache: *DecompCache,
 
+buf_uncompress: bool = false,
+
 interface: Reader = .{
     .buffer = &[0]u8{},
     .end = 0,
@@ -43,16 +45,21 @@ pub fn init(io: Io, cache: *DecompCache, offset: u64) MetadataReader {
     };
 }
 pub fn deinit(self: *MetadataReader) void {
-    if (self.cur_offset != 0)
-        self.cache.checkinBlock(self.io, self.cur_offset);
+    if (self.cur_offset != 0 and !self.buf_uncompress)
+        self.cache.checkinBlock(self.io, self.cur_offset) catch {};
 }
 
 fn advance(self: *MetadataReader) !void {
-    if (self.interface.buffer.len > 0)
-        self.cache.checkinBlock(self.io, self.cur_offset);
+    if (self.interface.buffer.len > 0 and !self.buf_uncompress)
+        self.cache.checkinBlock(self.io, self.cur_offset) catch |err| {
+            std.debug.print("UH OH! {}\n", .{err});
+            return error.ReadFailed;
+        };
     const hdr: BlockHeader = @bitCast(std.mem.readInt(u16, self.cache.map.memory[self.next_offset..][0..2], .little));
     self.cur_offset = self.next_offset + 2;
-    self.next_offset += hdr.size;
+    self.next_offset = self.cur_offset + hdr.size;
+
+    self.buf_uncompress = hdr.uncompressed;
     if (hdr.uncompressed) {
         self.interface.buffer = self.cache.map.memory[self.cur_offset..][0..hdr.size];
         self.interface.end = hdr.size;

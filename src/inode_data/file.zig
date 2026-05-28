@@ -15,7 +15,7 @@ pub const File = struct {
     block_sizes: []BlockSize,
 
     pub fn read(alloc: std.mem.Allocator, rdr: *Reader, block_size: u32) !File {
-        const raw_values = struct {
+        const raw_values = extern struct {
             block_start: u32, // bytes 0-3
             frag_idx: u32, // bytes 4-7
             frag_offset: u32, // bytes 8-11
@@ -55,7 +55,7 @@ pub const ExtFile = struct {
     block_sizes: []BlockSize,
 
     pub fn read(alloc: std.mem.Allocator, rdr: *Reader, block_size: u32) !ExtFile {
-        const raw_values = struct {
+        const raw_values = extern struct {
             block_start: u64, // bytes 0-7
             size: u64, // bytes 8-15
             sparse: u64, // bytes 16-23

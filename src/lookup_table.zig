@@ -11,6 +11,7 @@ pub fn lookup(comptime T: anytype, io: Io, cache: *DecompCache, table_start: u64
     const block_idx = idx / PER_BLOCK;
     const block_offset = idx % PER_BLOCK;
 
+    if (table_start + (block_idx * 8) > cache.map.memory.len) return error.ReadFailed;
     const offset: u64 = std.mem.readInt(u64, cache.map.memory[table_start + (block_idx * 8) ..][0..8], .little);
 
     var meta: MetadataReader = .init(io, cache, offset);
@@ -47,7 +48,7 @@ const KeyEntry = extern struct {
         out_of_line: bool,
         _: u7,
     },
-    name_size: u8,
+    name_size: u16,
 };
 
 pub fn xattrLookup(alloc: std.mem.Allocator, io: Io, cache: *DecompCache, xattr_start: u64, idx: u32) ![]XattrKV {
@@ -72,17 +73,23 @@ pub fn xattrLookup(alloc: std.mem.Allocator, io: Io, cache: *DecompCache, xattr_
         var key_entry: KeyEntry = undefined;
         try meta.interface.readSliceEndian(KeyEntry, @ptrCast(&key_entry), .little);
 
-        var key_len = key_entry.name_size;
-        key_len += switch (key_entry.prefix.prefix) {
+        const prefix_len: u16 = switch (key_entry.prefix.prefix) {
             .user => 5,
             .trusted => 8,
             .security => 9,
         };
+        var key_len = key_entry.name_size;
+        key_len += prefix_len;
 
         kv.key = try alloc.allocSentinel(u8, key_len, 0);
         errdefer alloc.free(kv.key);
 
-        try meta.interface.readSliceEndian(u8, kv.key, .little);
+        try meta.interface.readSliceEndian(u8, kv.key[prefix_len..], .little);
+        switch (key_entry.prefix.prefix) {
+            .user => @memcpy(kv.key[0..prefix_len], "user."),
+            .trusted => @memcpy(kv.key[0..prefix_len], "trusted."),
+            .security => @memcpy(kv.key[0..prefix_len], "security."),
+        }
 
         if (key_entry.prefix.out_of_line) {
             try meta.interface.discardAll(8);

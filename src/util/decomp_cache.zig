@@ -60,12 +60,12 @@ fn makeRoom(self: *DecompCache, io: Io, size: u32) !void {
     return self.makeRoom(io, size);
 }
 
-pub fn checkinBlock(self: *DecompCache, io: Io, offset: u64) void {
+pub fn checkinBlock(self: *DecompCache, io: Io, offset: u64) !void {
     self.mut.lockSharedUncancelable(io);
     defer self.mut.unlockShared(io);
 
     const get = self.cache.getPtr(offset);
-    if (get == null) return;
+    if (get == null) return error.NotACachedBlock;
     const res = get.?.usage.fetchSub(1, .acq_rel);
     if (res == 0) self.cond.broadcast(io);
 }

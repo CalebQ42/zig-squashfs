@@ -33,27 +33,30 @@ pub fn addFrag(self: *DataExtract, frag_block: []u8, frag_offset: u32) void {
     self.frag_offset = frag_offset;
 }
 
-pub const Error = error{} || Io.File.MemoryMap.CreateError || Io.File.WritePositionalError || Decompress.Error;
+pub const Error = error{} || Io.File.MemoryMap.CreateError || Io.File.WritePositionalError || Decompress.Error || Io.File.MemoryMap.SetLengthError;
 
 pub fn asyncExtract(self: DataExtract, alloc: std.mem.Allocator, io: Io, fil: Io.File) Error!void {
-    var err: ?Error = null;
+    if (self.size == 0) return;
 
+    try fil.writePositionalAll(io, &.{0}, self.size - 1);
     var map = try fil.createMemoryMap(io, .{ .len = self.size, .protection = .{ .write = true }, .undefined_contents = true });
     defer map.destroy(io);
 
     var group: Io.Group = .init;
     defer group.cancel(io);
 
+    var ret_err: ?Error = null;
+
     var offset: u64 = self.block_start;
     for (0..self.blocks.len) |i| {
-        group.async(io, blockThread, .{ self, alloc, map, offset, i, &err });
+        group.async(io, blockThread, .{ self, alloc, map, offset, i, &ret_err });
         offset += self.blocks[i].size;
     }
     if (self.frag_data != null)
         group.async(io, fragThread, .{ self, map });
 
     try group.await(io);
-    if (err != null) return err.?;
+    if (ret_err != null) return ret_err.?;
     return map.write(io);
 }
 fn blockThread(self: DataExtract, alloc: std.mem.Allocator, map: Io.File.MemoryMap, read_offset: u64, idx: usize, ret_err: *?Error) error{Canceled}!void {
@@ -69,14 +72,12 @@ fn blockThread(self: DataExtract, alloc: std.mem.Allocator, map: Io.File.MemoryM
         @memset(map.memory[write_offset..][0..size], 0);
         return;
     } else if (block.uncompressed) {
-        @memcpy(self.map.memory[read_offset..][0..size], map.memory[write_offset..][0..size]);
+        @memcpy(map.memory[write_offset..][0..size], self.map.memory[read_offset..][0..block.size]);
     }
-    var tmp: [1024 * 1024]u8 = undefined;
-    _ = self.decomp(alloc, self.map.memory[read_offset..][0..block.size], tmp[0..size]) catch |err| {
+    _ = self.decomp(alloc, self.map.memory[read_offset..][0..block.size], map.memory[write_offset..][0..size]) catch |err| {
         ret_err.* = err;
         return error.Canceled;
     };
-    @memcpy(map.memory[write_offset..][0..size], tmp[0..size]);
 }
 fn fragThread(self: DataExtract, map: Io.File.MemoryMap) error{Canceled}!void {
     const size = self.size % self.block_size;
