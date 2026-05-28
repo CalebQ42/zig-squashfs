@@ -1,25 +1,41 @@
 const std = @import("std");
 
-const Decompressor = @This();
+const options = @import("options");
 
-pub const Error = error{
-    OutOfMemory,
-    BadInput,
-    OutputTooSmall,
-    ReadFailed,
-    WriteFailed,
-    EndOfStream,
+const c_decomp = @import("c_decomp.zig");
+const zig_decomp = @import("zig_decomp.zig");
+
+pub const Error = error{} || std.Io.Reader.UnlimitedAllocError;
+
+pub const Enum = enum(u16) {
+    zlib = 1,
+    lzma,
+    lzo,
+    xz,
+    lz4,
+    zstd,
 };
 
-vtable: *const struct {
-    decompress: *const fn (*Decompressor, []u8, []u8) Error!usize = DefaultDecompress,
-    stateless: *const fn (std.mem.Allocator, []u8, []u8) Error!usize,
-},
+pub const Fn = *const fn (std.mem.Allocator, in: []u8, out: []u8) Error!usize;
 
-pub fn decompress(self: *Decompressor, in: []u8, out: []u8) Error!usize {
-    return self.vtable.decompress(self, in, out);
-}
-
-fn DefaultDecompress(self: *Decompressor, in: []u8, out: []u8) Error!usize {
-    return self.vtable.stateless(std.heap.smp_allocator, in, out);
+pub fn DecompFn(comp: Enum) !Fn {
+    return if (options.use_zig_decomp)
+        switch (comp) {
+            .zlib => zig_decomp.zlibDecompress,
+            .lzma => zig_decomp.lzmaDecompress,
+            .xz => zig_decomp.xzDecompress,
+            .zstd => zig_decomp.zstdDecompress,
+            .lz4 => error.Lz4Unsupported,
+            .lzo => error.LzoUnsupported,
+        }
+    else switch (comp) {
+        .zlib => c_decomp.zlibDecompress,
+        .lzma, .xz => c_decomp.lzmaDecompress,
+        .zstd => c_decomp.zstdDecompress,
+        .lz4 => c_decomp.lz4Decompress,
+        .lzo => if (options.allow_lzo)
+            c_decomp.zstdDecompress
+        else
+            error.LzoUnsupported,
+    };
 }
