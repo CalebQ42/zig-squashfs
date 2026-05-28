@@ -21,7 +21,7 @@ pub const ExtDir = extern struct {
     parent_num: u32,
     idx_count: u16,
     block_offset: u16,
-    xattr_id: u32,
+    xattr_idx: u32,
     // index: []DirIndex
 
     pub fn read(rdr: *Reader) !ExtDir {

@@ -7,6 +7,7 @@ const config = @import("config");
 
 const ExtractionOptions = @import("options.zig");
 const File = @import("file.zig");
+const Inode = @import("inode.zig");
 const Superblock = @import("super.zig").Superblock;
 const DecompCache = @import("util/decomp_cache.zig");
 const CompressionType = @import("util/decompress.zig").CompressionType;
@@ -16,7 +17,6 @@ const Archive = @This();
 const CACHE_MIN = 16 * 1024 * 1024;
 const CACHE_MAX = 1 * 1024 * 1024 * 1024;
 
-map: MemoryMap,
 cache: DecompCache,
 
 super: Superblock,
@@ -37,14 +37,6 @@ pub fn initAdvanced(alloc: std.mem.Allocator, io: Io, file: Io.File, offset: u64
     if (!config.use_zig_decomp and config.allow_lzo)
         _ = c.lzo_init();
 
-    const map = try file.createMemoryMap(
-        io,
-        .{
-            .offset = offset,
-            .len = super.size,
-            .protection = .{ .read = true },
-        },
-    );
     const cache_size = blk: {
         if (max_cache_size > CACHE_MIN) break :blk CACHE_MIN;
         const sys_mem = std.process.totalSystemMemory() catch break :blk CACHE_MIN;
@@ -54,10 +46,16 @@ pub fn initAdvanced(alloc: std.mem.Allocator, io: Io, file: Io.File, offset: u64
         break :blk min;
     };
     return .{
-        .map = map,
         .cache = try .init(
             alloc,
-            map,
+            try file.createMemoryMap(
+                io,
+                .{
+                    .offset = offset,
+                    .len = super.size,
+                    .protection = .{ .read = true },
+                },
+            ),
             super.compression,
             cache_size,
         ),
@@ -67,7 +65,6 @@ pub fn initAdvanced(alloc: std.mem.Allocator, io: Io, file: Io.File, offset: u64
 }
 pub fn deinit(self: *Archive, io: Io) void {
     self.cache.deinit(io);
-    self.map.destroy(io);
 }
 
 pub fn root(self: *Archive, alloc: std.mem.Allocator, io: Io) !File {
@@ -86,10 +83,18 @@ pub fn open(self: *Archive, alloc: std.mem.Allocator, io: Io, filepath: []const 
 }
 
 pub fn extract(self: *Archive, alloc: std.mem.Allocator, io: Io, ext_dir: []const u8, options: ExtractionOptions) !void {
-    _ = self;
-    _ = alloc;
-    _ = io;
-    _ = ext_dir;
-    _ = options;
-    return error.TODO;
+    const root_inode: Inode = try .fromRef(alloc, io, &self.cache, self.super.inode_start, self.super.block_size, self.super.root_ref);
+    return root_inode.extract(
+        alloc,
+        io,
+        &self.cache,
+        self.super.dir_start,
+        self.super.inode_start,
+        self.super.frag_start,
+        self.super.block_size,
+        self.super.id_start,
+        self.super.xattr_start,
+        ext_dir,
+        options,
+    );
 }

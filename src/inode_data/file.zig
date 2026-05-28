@@ -1,7 +1,7 @@
 const std = @import("std");
 const Reader = std.Io.Reader;
 
-pub const BlockSize = packed struct {
+pub const BlockSize = packed struct(u32) {
     size: u24,
     uncompressed: bool,
     _: u7,

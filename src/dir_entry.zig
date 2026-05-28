@@ -15,6 +15,8 @@ const Entry = extern struct {
     name_size: u16,
 };
 
+pub const Error = error{OutOfMemory} || std.Io.Reader.Error;
+
 const DirEntry = @This();
 
 inode_type: Inode.Type,
@@ -28,7 +30,7 @@ pub fn deinit(self: DirEntry, alloc: std.mem.Allocator) void {
     alloc.free(self.name);
 }
 
-pub fn readEntries(alloc: std.mem.Allocator, rdr: *Reader, size: u32) ![]DirEntry {
+pub fn readEntries(alloc: std.mem.Allocator, rdr: *Reader, size: u32) Error![]DirEntry {
     var out: std.ArrayList(DirEntry) = try .initCapacity(alloc, 50);
     errdefer out.deinit(alloc);
 

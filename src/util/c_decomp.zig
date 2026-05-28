@@ -2,7 +2,7 @@ const std = @import("std");
 
 const c = @import("c");
 
-const Error = @import("decompress.zig").DecompressionError;
+const Error = @import("decompress.zig").Error;
 
 pub fn zlibDecompress(_: std.mem.Allocator, in: []u8, out: []u8) Error!usize {
     var strem: c.zng_stream = .{

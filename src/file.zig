@@ -7,6 +7,7 @@ const Archive = @import("archive.zig");
 const DirEntry = @import("dir_entry.zig");
 const ExtractionOptions = @import("options.zig");
 const Inode = @import("inode.zig");
+const LookupTable = @import("lookup_table.zig");
 const MetadataReader = @import("util/metadata.zig");
 
 pub const Error = error{
@@ -108,11 +109,18 @@ pub fn open(self: File, alloc: std.mem.Allocator, io: Io, filepath: []const u8) 
     return fil.open(alloc, io, filepath[first_element.len..]);
 }
 
-pub fn extract(self: File, alloc: std.mem.Allocator, io: Io, ext_loc: []const u8, options: ExtractionOptions) !void {
-    _ = self;
-    _ = alloc;
-    _ = io;
-    _ = ext_loc;
-    _ = options;
-    return error.TODO;
+pub fn extract(self: File, alloc: std.mem.Allocator, io: Io, path: []const u8, options: ExtractionOptions) !void {
+    return self.inode.extract(
+        alloc,
+        io,
+        &self.archive.cache,
+        self.archive.super.dir_start,
+        self.archive.super.inode_start,
+        self.archive.super.frag_start,
+        self.archive.super.block_size,
+        self.archive.super.id_start,
+        self.archive.super.xattr_start,
+        path,
+        options,
+    );
 }

@@ -4,7 +4,7 @@ const ArrayHashMap = std.array_hash_map.Auto;
 const Atomic = std.atomic.Value;
 
 const Decompress = @import("decompress.zig");
-const DecompressFn = Decompress.DecompressFn;
+const Fn = Decompress.Fn;
 const DecompressType = Decompress.CompressionType;
 
 const DecompCache = @This();
@@ -15,7 +15,7 @@ const Cache = struct {
 };
 
 arena: std.heap.ArenaAllocator,
-decomp: DecompressFn,
+decomp: Fn,
 
 map: Io.File.MemoryMap,
 
@@ -42,6 +42,7 @@ pub fn deinit(self: *DecompCache, io: Io) void {
     self.mut.lockUncancelable(io);
     self.cache.deinit(self.arena.child_allocator);
     self.arena.deinit();
+    self.map.destroy(io);
 }
 
 fn makeRoom(self: *DecompCache, io: Io, size: u32) !void {
@@ -68,7 +69,7 @@ pub fn checkinBlock(self: *DecompCache, io: Io, offset: u64) void {
     const res = get.?.usage.fetchSub(1, .acq_rel);
     if (res == 0) self.cond.broadcast(io);
 }
-pub fn checkoutBlock(self: *DecompCache, io: Io, offset: u64, block_size: u32, max_result_size: u32) ![]u8 {
+pub fn checkoutBlock(self: *DecompCache, io: Io, offset: u64, data_size: u32, max_result_size: u32) ![]u8 {
     {
         try self.mut.lockShared(io);
         defer self.mut.unlockShared(io);
@@ -90,7 +91,7 @@ pub fn checkoutBlock(self: *DecompCache, io: Io, offset: u64, block_size: u32, m
     var out = try alloc.alloc(u8, max_result_size);
     errdefer alloc.free(out);
 
-    const out_size = try self.decomp(buf_alloc, self.map.memory[offset..][0..block_size], out);
+    const out_size = try self.decomp(buf_alloc, self.map.memory[offset..][0..data_size], out);
     if (out_size != max_result_size) {
         if (alloc.resize(out, out_size)) {
             out.len = out_size;

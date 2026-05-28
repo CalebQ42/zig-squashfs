@@ -5,7 +5,7 @@ const zstd = std.compress.zstd;
 const xz = std.compress.xz;
 const lzma = std.compress.lzma;
 
-const Error = @import("decompress.zig").DecompressionError;
+const Error = @import("decompress.zig").Error;
 
 pub fn zlibDecompress(_: std.mem.Allocator, in: []u8, out: []u8) Error!usize {
     var buf: [flate.max_window_len]u8 = undefined;
