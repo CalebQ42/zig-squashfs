@@ -5,6 +5,7 @@ const MemoryMap = File.MemoryMap;
 
 const Decomp = @import("decomp.zig");
 const DecompCache = @import("decomp_cache.zig");
+const Extract = @import("extract.zig");
 const ExtractionOptions = @import("options.zig");
 const Inode = @import("inode.zig");
 const SfsFile = @import("file.zig");
@@ -36,7 +37,7 @@ pub fn initAdvanced(alloc: std.mem.Allocator, io: Io, fil: File, offset: u64, ca
     return .{
         .super = super,
 
-        .cache = .init(
+        .cache = try .init(
             alloc,
             map,
             super.compression,
@@ -74,12 +75,15 @@ pub fn open(self: *Archive, alloc: std.mem.Allocator, io: Io, filepath: []const 
 }
 
 pub fn extract(self: *Archive, alloc: std.mem.Allocator, io: Io, ext_loc: []const u8, options: ExtractionOptions) !void {
-    _ = self;
-    _ = alloc;
-    _ = io;
-    _ = ext_loc;
-    _ = options;
-    return error.TODO;
+    const root_inode: Inode = try .initRef(
+        alloc,
+        io,
+        &self.cache,
+        self.super.inode_start,
+        self.super.block_size,
+        self.super.root_ref,
+    );
+    return Extract.extract(alloc, io, root_inode, &self.cache, self.super, ext_loc, options);
 }
 
 // Superblock
@@ -93,7 +97,19 @@ pub const Superblock = extern struct {
     compression: Decomp.Enum,
     block_log: u16,
     flags: packed struct(u16) {
-        TODO: u16,
+        inode_uncompressed: bool,
+        data_uncompressed: bool,
+        check: bool,
+        frag_uncompressed: bool,
+        frag_never: bool,
+        frag_always: bool,
+        de_dupe: bool,
+        exportable: bool,
+        xattr_uncompressed: bool,
+        xattr_never: bool,
+        compression_options: bool,
+        id_uncompressed: bool,
+        _: u4,
     },
     id_count: u16,
     ver_maj: u16,
@@ -114,6 +130,8 @@ pub const Superblock = extern struct {
             return error.InvalidVersion;
         if (self.block_log != std.math.log2(self.block_size))
             return error.BadBlockLog;
+        if (self.flags.check)
+            return error.BadCheckFlag;
     }
 };
 
@@ -127,10 +145,10 @@ test "Basics" {
 
     var archive_file = try Io.Dir.cwd().openFile(io, TestArchive, .{});
     defer archive_file.close(io);
-    var arc: Archive = try .init(io, archive_file);
+    var arc: Archive = try .init(alloc, io, archive_file);
     defer arc.deinit(io);
 
-    var root_file = try arc.root(alloc);
+    var root_file = try arc.root(alloc, io);
     defer root_file.deinit();
 }
 
@@ -143,10 +161,10 @@ test "SingleFileExtraction" {
 
     var archive_file = try Io.Dir.cwd().openFile(io, TestArchive, .{});
     defer archive_file.close(io);
-    var arc: Archive = try .init(io, archive_file);
+    var arc: Archive = try .init(alloc, io, archive_file);
     defer arc.deinit(io);
 
-    var ext_file = try arc.open(alloc, TestFile);
+    var ext_file = try arc.open(alloc, io, TestFile);
     defer ext_file.deinit();
 
     try ext_file.extract(alloc, io, TestFileExtractLocation, .default);
@@ -160,7 +178,7 @@ test "FullExtraction" {
 
     var archive_file = try Io.Dir.cwd().openFile(io, TestArchive, .{});
     defer archive_file.close(io);
-    var arc: Archive = try .init(io, archive_file);
+    var arc: Archive = try .init(alloc, io, archive_file);
     defer arc.deinit(io);
 
     try arc.extract(alloc, io, TestFullExtractLocation, .default);

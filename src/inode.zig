@@ -280,7 +280,7 @@ const ExtFile = struct {
             .blocks = blocks,
         };
     }
-    pub fn deinit(self: File, alloc: std.mem.Allocator) void {
+    pub fn deinit(self: ExtFile, alloc: std.mem.Allocator) void {
         alloc.free(self.blocks);
     }
 };
@@ -342,7 +342,7 @@ const ExtSymlink = struct {
         };
     }
 
-    pub fn deinit(self: Symlink, alloc: std.mem.Allocator) void {
+    pub fn deinit(self: ExtSymlink, alloc: std.mem.Allocator) void {
         alloc.free(self.target);
     }
 };

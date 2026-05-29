@@ -46,7 +46,7 @@ pub fn init(alloc: std.mem.Allocator, rdr: *Reader, size: u32) !Directory {
         }
     }
 
-    return entries.toOwnedSlice(alloc);
+    return .{ .entries = try entries.toOwnedSlice(alloc) };
 }
 pub fn deinit(self: Directory, alloc: std.mem.Allocator) void {
     for (self.entries) |entry|

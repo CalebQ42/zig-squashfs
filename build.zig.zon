@@ -2,7 +2,7 @@
     .name = .squashfs,
     .version = "0.0.6",
     .fingerprint = 0x37ba29474b87f145, // Changing this has security and trust implications.
-    .minimum_zig_version = "0.15.2",
+    .minimum_zig_version = "0.16.0",
     .dependencies = .{
         .zlib_ng = .{
             .url = "git+https://github.com/CalebQ42/zig-zlib-ng#5f2f02dfb28acca2517dacbbd09e9b987f57b133",

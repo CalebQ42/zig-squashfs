@@ -5,17 +5,17 @@ const c = @import("c");
 const Error = @import("decomp.zig").Error;
 
 pub fn zlibDecompress(_: std.mem.Allocator, in: []u8, out: []u8) Error!usize {
-    var strem: c.zng_stream = .{
+    var strem: c.z_stream = .{
         .next_in = in.ptr,
         .avail_in = @truncate(in.len),
         .next_out = out.ptr,
         .avail_out = @truncate(out.len),
     };
-    var res = c.zng_inflateInit(&strem);
+    var res = c.inflateInit(&strem);
     if (res != c.Z_OK) return Error.ReadFailed;
-    defer _ = c.zng_inflateEnd(&strem);
+    defer _ = c.inflateEnd(&strem);
 
-    res = c.zng_inflate(&strem, c.Z_FULL_FLUSH);
+    res = c.inflate(&strem, c.Z_FULL_FLUSH);
     if (res != c.Z_OK) return Error.ReadFailed;
 
     return strem.total_out;

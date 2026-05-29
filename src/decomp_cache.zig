@@ -19,7 +19,7 @@ cond: std.Io.Condition = .init,
 max_mem: u64,
 cur_mem: u64 = 0,
 
-pub fn init(alloc: std.mem.Allocator, map: MemoryMap, compression: Decomp.Enum, max_mem: u64) DecompCache {
+pub fn init(alloc: std.mem.Allocator, map: MemoryMap, compression: Decomp.Enum, max_mem: u64) !DecompCache {
     return .{
         .alloc = alloc,
         .map = map,
@@ -55,8 +55,8 @@ pub fn get(self: *DecompCache, io: Io, offset: u64, compressed_size: u32, max_si
 
     const cache = try self.cache.getOrPut(offset);
     if (cache.found_existing) {
-        _ = cache.?.usage.fetchAdd(1, .acquire);
-        return cache.?.data;
+        _ = cache.value_ptr.usage.fetchAdd(1, .acquire);
+        return cache.value_ptr.data;
     }
     errdefer self.cache.removeByPtr(cache.key_ptr);
 
@@ -104,7 +104,7 @@ fn ensureSpace(self: *DecompCache, io: Io, size: u64) !void {
             }
         }
         if (self.cur_mem + size <= self.max_mem) return;
-        try self.cond.wait(io, self.mut.mutex);
+        try self.cond.wait(io, &self.mut.mutex);
     }
 }
 

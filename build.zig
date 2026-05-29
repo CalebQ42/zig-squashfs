@@ -56,6 +56,9 @@ pub fn build(b: *std.Build) !void {
 
     b.installArtifact(lib);
 
+    const exe_config = b.addOptions();
+    exe_config.addOption(std.SemanticVersion,"version", version);
+
     const exe = b.addExecutable(.{
         .name = "unsquashfs",
         .use_llvm = debug,
@@ -65,9 +68,12 @@ pub fn build(b: *std.Build) !void {
             .target = target,
             .root_source_file = b.path("src/bin/unsquashfs.zig"),
             .valgrind = debug,
+            .imports = &.{
+                .{ .name = "config", .module = exe_config.createModule() },
+                .{ .name = "squashfs", .module = lib.root_module }
+            },
         }),
     });
-    exe.root_module.linkLibrary(lib);
 
     b.installArtifact(exe);
 

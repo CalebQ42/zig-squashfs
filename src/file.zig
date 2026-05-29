@@ -1,3 +1,11 @@
+const std = @import("std");
+const Io = std.Io;
+
+const Archive = @import("archive.zig");
+const Directory = @import("directory.zig");
+const ExtractionOptions = @import("options.zig");
+const Inode = @import("inode.zig");
+
 const SfsFile = @This();
 
 alloc: std.mem.Allocator,
@@ -28,7 +36,7 @@ pub fn initDirEntry(alloc: std.mem.Allocator, io: Io, archive: *Archive, entry: 
         .inode = try .initDirEntry(
             alloc,
             io,
-            archive.cache,
+            &archive.cache,
             archive.super.inode_start,
             archive.super.block_size,
             entry,
@@ -61,7 +69,7 @@ pub fn open(self: SfsFile, alloc: std.mem.Allocator, io: Io, filepath: []const u
 
     const first_element: []const u8 = std.mem.sliceTo(path, '/');
 
-    const dir: Directory = try self.inode.directory(alloc, io, self.archive.cache, self.archive.super.dir_start);
+    const dir: Directory = try self.inode.directory(alloc, io, &self.archive.cache, self.archive.super.dir_start);
     defer dir.deinit(alloc);
 
     var cur_slice = dir.entries;
@@ -76,7 +84,7 @@ pub fn open(self: SfsFile, alloc: std.mem.Allocator, io: Io, filepath: []const u
     } else {
         return error.NotFound;
     }
-    if (first_element.len == path) return .initDirEntry(alloc, io, self.archive, cur_slice[idx]);
+    if (first_element.len == path.len) return .initDirEntry(alloc, io, self.archive, cur_slice[idx]);
     if (cur_slice[idx].type != .dir) return error.NotFound;
     const tmp_file: SfsFile = try .initDirEntry(alloc, io, self.archive, cur_slice[idx]);
     defer tmp_file.deinit();
@@ -84,9 +92,11 @@ pub fn open(self: SfsFile, alloc: std.mem.Allocator, io: Io, filepath: []const u
     return tmp_file.open(alloc, io, path[first_element.len..]);
 }
 
-const std = @import("std");
-const Io = std.Io;
-
-const Archive = @import("archive.zig");
-const Directory = @import("directory.zig");
-const Inode = @import("inode.zig");
+pub fn extract(self: SfsFile, alloc: std.mem.Allocator, io: Io, ext_dir: []const u8, options: ExtractionOptions) !void {
+    _ = self;
+    _ = alloc;
+    _ = io;
+    _ = ext_dir;
+    _ = options;
+    return error.TODO;
+}
