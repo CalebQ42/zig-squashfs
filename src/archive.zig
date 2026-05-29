@@ -4,28 +4,83 @@ const File = Io.File;
 const MemoryMap = File.MemoryMap;
 
 const Decomp = @import("decomp.zig");
+const DecompCache = @import("decomp_cache.zig");
 const ExtractionOptions = @import("options.zig");
 const Inode = @import("inode.zig");
 const SfsFile = @import("file.zig");
 
 const Archive = @This();
 
-map: MemoryMap,
+const CACHE_MEM_MAX = 1024 * 1024 * 1024;
 
-decomp: Decomp.Fn,
+super: Superblock,
 
-pub fn init(io: Io, fil: File) !Archive {
-    return initAdvanced(io, fil, 0);
+cache: DecompCache,
+
+pub fn init(alloc: std.mem.Allocator, io: Io, fil: File) !Archive {
+    return initAdvanced(alloc, io, fil, 0, 0);
 }
-pub fn initAdvanced(io: Io, fil: File, offset: u64) !Archive {}
+pub fn initAdvanced(alloc: std.mem.Allocator, io: Io, fil: File, offset: u64, cache_memory_max: u64) !Archive {
+    var rdr = fil.reader(io, &[0]u8{});
+    try rdr.seekTo(offset);
+    var super: Superblock = undefined;
+    try rdr.interface.readSliceEndian(Superblock, @ptrCast(&super), .little);
+    try super.validate();
+
+    const map = try fil.createMemoryMap(io, .{
+        .offset = offset,
+        .len = super.size,
+        .protection = .{ .read = true },
+    });
+
+    return .{
+        .super = super,
+
+        .cache = .init(
+            alloc,
+            map,
+            super.compression,
+            if (cache_memory_max != 0)
+                cache_memory_max
+            else
+                @min(CACHE_MEM_MAX, (try std.process.totalSystemMemory()) / 2),
+        ),
+    };
+}
 pub fn deinit(self: *Archive, io: Io) void {
-    self.map.destroy(io);
+    self.cache.deinit(io);
 }
 
-pub fn root(self: Archive, alloc: std.mem.Allocator) !SfsFile {}
-pub fn open(self: Archive, alloc: std.mem.Allocator, filepath: []const u8) !SfsFile {}
+pub fn root(self: *Archive, alloc: std.mem.Allocator, io: Io) !SfsFile {
+    const inode: Inode = try .initRef(
+        alloc,
+        io,
+        &self.cache,
+        self.super.inode_start,
+        self.super.block_size,
+        self.super.root_ref,
+    );
+    return .init(alloc, self, inode, "");
+}
+pub fn open(self: *Archive, alloc: std.mem.Allocator, io: Io, filepath: []const u8) !SfsFile {
+    const path = std.mem.trim(u8, filepath, "/");
 
-pub fn extract(self: Archive, alloc: std.mem.Allocator, io: Io, ext_loc: []const u8, options: ExtractionOptions) !void {}
+    var root_file = try self.root(alloc, io);
+
+    if (path.len == 0 or path[0] == '.') return root_file;
+
+    defer root_file.deinit();
+    return root_file.open(alloc, io, filepath);
+}
+
+pub fn extract(self: *Archive, alloc: std.mem.Allocator, io: Io, ext_loc: []const u8, options: ExtractionOptions) !void {
+    _ = self;
+    _ = alloc;
+    _ = io;
+    _ = ext_loc;
+    _ = options;
+    return error.TODO;
+}
 
 // Superblock
 
@@ -37,7 +92,9 @@ pub const Superblock = extern struct {
     frag_count: u32,
     compression: Decomp.Enum,
     block_log: u16,
-    flags: packed struct(u16) {},
+    flags: packed struct(u16) {
+        TODO: u16,
+    },
     id_count: u16,
     ver_maj: u16,
     ver_min: u16,
@@ -49,6 +106,15 @@ pub const Superblock = extern struct {
     dir_start: u64,
     frag_start: u64,
     export_start: u64,
+
+    pub fn validate(self: Superblock) !void {
+        if (self.magic != std.mem.readInt(u32, "hsqs", .little))
+            return error.BadMagic;
+        if (self.ver_maj != 4 or self.ver_min != 0)
+            return error.InvalidVersion;
+        if (self.block_log != std.math.log2(self.block_size))
+            return error.BadBlockLog;
+    }
 };
 
 // Test
@@ -61,7 +127,7 @@ test "Basics" {
 
     var archive_file = try Io.Dir.cwd().openFile(io, TestArchive, .{});
     defer archive_file.close(io);
-    var arc: Archive = .init(io, archive_file);
+    var arc: Archive = try .init(io, archive_file);
     defer arc.deinit(io);
 
     var root_file = try arc.root(alloc);
@@ -77,7 +143,7 @@ test "SingleFileExtraction" {
 
     var archive_file = try Io.Dir.cwd().openFile(io, TestArchive, .{});
     defer archive_file.close(io);
-    var arc: Archive = .init(io, archive_file);
+    var arc: Archive = try .init(io, archive_file);
     defer arc.deinit(io);
 
     var ext_file = try arc.open(alloc, TestFile);
@@ -94,7 +160,7 @@ test "FullExtraction" {
 
     var archive_file = try Io.Dir.cwd().openFile(io, TestArchive, .{});
     defer archive_file.close(io);
-    var arc: Archive = .init(io, archive_file);
+    var arc: Archive = try .init(io, archive_file);
     defer arc.deinit(io);
 
     try arc.extract(alloc, io, TestFullExtractLocation, .default);

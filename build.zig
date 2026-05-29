@@ -36,7 +36,7 @@ pub fn build(b: *std.Build) !void {
     const deps = try getDependencies(b, optimize, target, allow_lzo);
 
     const lib = b.addLibrary(.{
-        .name = "unsquashfs",
+        .name = "squashfs",
         .use_llvm = debug,
         .version = version,
         .root_module = b.createModule(.{
@@ -54,6 +54,23 @@ pub fn build(b: *std.Build) !void {
     for (deps) |d|
         lib.root_module.linkLibrary(d);
 
+    b.installArtifact(lib);
+
+    const exe = b.addExecutable(.{
+        .name = "unsquashfs",
+        .use_llvm = debug,
+        .version = version,
+        .root_module = b.createModule(.{
+            .optimize = optimize,
+            .target = target,
+            .root_source_file = b.path("src/bin/unsquashfs.zig"),
+            .valgrind = debug,
+        }),
+    });
+    exe.root_module.linkLibrary(lib);
+
+    b.installArtifact(exe);
+
     const lib_test = b.addTest(.{
         .name = "squashfs-test",
         .root_module = lib.root_module,
@@ -66,9 +83,14 @@ pub fn build(b: *std.Build) !void {
         .name = "squashfs-check",
         .root_module = lib.root_module,
     });
+    const exe_check = b.addLibrary(.{
+        .name = "unsquashfs-check",
+        .root_module = exe.root_module,
+    });
 
     const check = b.step("check", "Check if squashfs compiles");
     check.dependOn(&lib_check.step);
+    check.dependOn(&exe_check.step);
 }
 
 fn getDependencies(b: *Build, optimize: std.builtin.OptimizeMode, target: Build.ResolvedTarget, allow_lzo: bool) ![]*Build.Step.Compile {
