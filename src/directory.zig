@@ -8,7 +8,7 @@ const Directory = @This();
 
 entries: []Entry,
 
-pub fn init(alloc: std.mem.Allocator, rdr: *Reader, size: u32) !Directory {
+pub fn init(alloc: std.mem.Allocator, rdr: *Reader, size: u32) Error!Directory {
     if (size <= 3) return .{ .entries = &[0]Entry{} };
 
     var entries: std.ArrayList(Entry) = try .initCapacity(alloc, 50);
@@ -55,6 +55,8 @@ pub fn deinit(self: Directory, alloc: std.mem.Allocator) void {
 }
 
 // Types
+
+pub const Error = Reader.Error || std.mem.Allocator.Error;
 
 pub const Entry = struct {
     inode_num: u32,
