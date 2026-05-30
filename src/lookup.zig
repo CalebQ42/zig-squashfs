@@ -1,6 +1,8 @@
 const std = @import("std");
 const Io = std.Io;
 
+const DataBlock = @import("inode.zig").DataBlock;
+const InodeRef = @import("inode.zig").Ref;
 const DecompCache = @import("decomp_cache.zig");
 const MetadataReader = @import("meta_rdr.zig");
 
@@ -26,7 +28,7 @@ pub fn Table(comptime T: anytype) type {
     return struct {
         const PER_BLOCK = 8192 / @sizeOf(T);
 
-        const Table = @This();
+        const LookupTable = @This();
 
         alloc: std.mem.Allocator,
 
@@ -35,9 +37,9 @@ pub fn Table(comptime T: anytype) type {
 
         num: u32,
         values: std.AutoHashMap(u32, []T),
-        mut: Io.RwLock,
+        mut: Io.RwLock = .init,
 
-        pub fn init(alloc: std.mem.Allocator, cache: *DecompCache, table_start: u64, num_values: u32) Table {
+        pub fn init(alloc: std.mem.Allocator, cache: *DecompCache, table_start: u64, num_values: u32) LookupTable {
             return .{
                 .alloc = alloc,
 
@@ -48,14 +50,14 @@ pub fn Table(comptime T: anytype) type {
                 .values = .init(alloc),
             };
         }
-        pub fn deinit(self: *Table) void {
+        pub fn deinit(self: *LookupTable) void {
             var iter = self.values.valueIterator();
             while (iter.next()) |v|
                 self.alloc.free(v);
             self.values.deinit();
         }
 
-        pub fn get(self: *Table, io: Io, idx: u32) Error!T {
+        pub fn get(self: *LookupTable, io: Io, idx: u32) Error!T {
             const block = idx / PER_BLOCK;
             const block_idx = idx % PER_BLOCK;
             {
@@ -99,6 +101,14 @@ pub fn Table(comptime T: anytype) type {
 
 pub const Error = error{} || std.mem.Allocator.Error;
 
-pub const FragmentEntry = extern struct {};
+pub const FragmentEntry = extern struct {
+    start: u64,
+    size: DataBlock,
+    _: u32,
+};
 
-pub const XattrEntry = extern struct {};
+pub const XattrEntry = extern struct {
+    ref: InodeRef,
+    count: u32,
+    size: u32,
+};

@@ -10,17 +10,36 @@ const Superblock = @import("archive.zig").Superblock;
 const Directory = @import("directory.zig");
 const DataExtractor = @import("data/extractor.zig");
 const DataReader = @import("data/reader.zig");
+const Lookup = @import("lookup.zig");
 
 pub fn extract(alloc: std.mem.Allocator, io: Io, inode: Inode, cache: *DecompCache, super: Superblock, ext_loc: []const u8, options: ExtractionOptions) !void {
     const path = std.mem.trim(u8, ext_loc, "/");
 
     var buf: [50]ReturnUnion = undefined;
     var sel: Io.Select(ReturnUnion) = .init(io, &buf);
-    defer sel.cancelDiscard();
+
+    defer {
+        while (sel.cancel()) |ret| {
+            switch (ret) {
+                .dir_ret => |d| {
+                    const res = d catch continue;
+                    alloc.free(res.path);
+                },
+                .file_ret => |f| {
+                    const res = f catch continue;
+                    alloc.free(res.path);
+                },
+                else => {},
+            }
+        }
+    }
+
+    var frag_table: Lookup.Table(Lookup.FragmentEntry) = .init(alloc, cache, super.frag_start, super.frag_count);
+    defer frag_table.deinit();
 
     var ret_loop = io.async(returnLoop, .{ alloc, &sel, options });
 
-    try extractReal(alloc, io, cache, super, &sel, path, inode, null, false);
+    try extractReal(alloc, io, cache, super, &sel, &frag_table, path, inode, null, false);
 
     ret_loop.await(io) catch |err| {
         // TODO: Drain sel
@@ -34,6 +53,7 @@ fn extractReal(
     cache: *DecompCache,
     super: Superblock,
     sel: *Io.Select(ReturnUnion),
+    frag_table: *Lookup.Table(Lookup.FragmentEntry),
     path: []const u8,
     inode: Inode,
     parent: ?*Atomic(usize),
@@ -45,7 +65,12 @@ fn extractReal(
         .dir, .ext_dir => sel.async(
             .dir_ret,
             extractDir,
-            .{ alloc, io, cache, super, sel, path, inode, parent, origin },
+            .{ alloc, io, cache, super, sel, frag_table, path, inode, parent, origin },
+        ),
+        .file, .ext_file => sel.async(
+            .file_ret,
+            extractFile,
+            .{ alloc, io, cache, super.block_size, frag_table, path, inode, parent, origin },
         ),
         else => return error.Canceled,
     }
@@ -57,6 +82,7 @@ fn extractDir(
     cache: *DecompCache,
     super: Superblock,
     sel: *Io.Select(ReturnUnion),
+    frag_table: *Lookup.Table(Lookup.FragmentEntry),
     path: []const u8,
     inode: Inode,
     parent: ?*Atomic(usize),
@@ -106,6 +132,7 @@ fn extractDir(
             cache,
             super,
             sel,
+            frag_table,
             new_path,
             new_inode,
             sub_files,
@@ -119,6 +146,7 @@ fn extractFile(
     io: Io,
     cache: *DecompCache,
     block_size: u32,
+    frag_table: *Lookup.Table(Lookup.FragmentEntry),
     path: []const u8,
     inode: Inode,
     parent: ?*Atomic(usize),
@@ -131,7 +159,7 @@ fn extractFile(
     }
     errdefer if (!origin) alloc.free(path);
 
-    const atomic = try Io.Dir.cwd().createFileAtomic(io, path, .{});
+    var atomic = try Io.Dir.cwd().createFileAtomic(io, path, .{});
     defer atomic.deinit(io);
 
     var ret: FileReturn = .{
@@ -144,29 +172,42 @@ fn extractFile(
         .mod_time = inode.hdr.mod_time,
     };
 
-    var data: DataExtractor = switch (inode.data) {
+    const data: DataExtractor = switch (inode.data) {
         .file => |f| blk: {
             var data: DataExtractor = .init(cache, block_size, f.size, f.data_start, f.blocks);
             if (f.frag_idx != 0xFFFFFFFF) {
-                // TODO
+                const entry: Lookup.FragmentEntry = try frag_table.get(io, f.frag_idx);
+                if (entry.size.uncompressed) {
+                    data.addFragment(cache.map.memory[entry.start..][0..entry.size.size], f.frag_offset);
+                } else {
+                    const block = try cache.get(io, entry.start, entry.size.size, block_size);
+                    data.addFragment(block, f.frag_offset);
+                }
             }
             break :blk data;
         },
         .ext_file => |f| blk: {
             var data: DataExtractor = .init(cache, block_size, f.size, f.data_start, f.blocks);
             if (f.frag_idx != 0xFFFFFFFF) {
-                //TODO
+                const entry: Lookup.FragmentEntry = try frag_table.get(io, f.frag_idx);
+                if (entry.size.uncompressed) {
+                    data.addFragment(cache.map.memory[entry.start..][0..entry.size.size], f.frag_offset);
+                } else {
+                    const block = try cache.get(io, entry.start, entry.size.size, block_size);
+                    data.addFragment(block, f.frag_offset);
+                }
             }
+            if (f.xattr_idx != 0xFFFFFFFF)
+                ret.xattr_idx = f.xattr_idx;
             break :blk data;
         },
         else => unreachable,
     };
+    try data.asyncExtract(io, atomic.file);
 
     try atomic.link(io);
-    // return .{
-    //     .path = path,
-    // };
-    return error.Canceled;
+
+    return ret;
 }
 
 // Loop
@@ -215,7 +256,7 @@ const ReturnUnion = union(enum) {
     void_ret: Error!void,
 };
 
-const Error = error{Canceled} || Directory.Error;
+const Error = error{Canceled} || Directory.Error || Io.Dir.CreateFileAtomicError || Io.File.Atomic.LinkError || DataExtractor.Error;
 
 const FileReturn = struct {
     path: []const u8,
