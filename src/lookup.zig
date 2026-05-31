@@ -2,7 +2,6 @@ const std = @import("std");
 const Io = std.Io;
 
 const DataBlock = @import("inode.zig").DataBlock;
-const InodeRef = @import("inode.zig").Ref;
 const DecompCache = @import("decomp_cache.zig");
 const MetadataReader = @import("meta_rdr.zig");
 
@@ -105,10 +104,4 @@ pub const FragmentEntry = extern struct {
     start: u64,
     size: DataBlock,
     _: u32,
-};
-
-pub const XattrEntry = extern struct {
-    ref: InodeRef,
-    count: u32,
-    size: u32,
 };
