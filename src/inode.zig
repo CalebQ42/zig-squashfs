@@ -1,24 +1,51 @@
-//! A file-system object. Represents a File or directory.
-
 const std = @import("std");
-const Reader = std.Io.Reader;
-const WaitGroup = std.Thread.WaitGroup;
-const Pool = std.Thread.Pool;
-const Mutex = std.Thread.Mutex;
+const Io = std.Io;
+const Reader = Io.Reader;
 
-const Archive = @import("archive.zig");
-const DirEntry = @import("dir_entry.zig");
-const ExtractionOptions = @import("options.zig");
-const dir = @import("inode_data/dir.zig");
-const file = @import("inode_data/file.zig");
-const misc = @import("inode_data/misc.zig");
-const Tables = @import("tables.zig");
-const DataReader = @import("util/data.zig");
-const ThreadedDataReader = @import("util/data_threaded.zig");
-const InodeExtract = @import("util/extract.zig");
-const InodeFinish = @import("util/inode_finish.zig");
-const FinishUnion = InodeFinish.FinishUnion;
-const MetadataReader = @import("util/metadata.zig");
+const Decomp = @import("decomp.zig");
+const Directory = @import("directory.zig");
+const MetadataReader = @import("meta_rdr.zig");
+
+const Inode = @This();
+
+hdr: Header,
+data: Data,
+
+pub fn init(alloc: std.mem.Allocator, rdr: *Reader, block_size: u32) !Inode {
+    var hdr: Header = undefined;
+    try rdr.readSliceEndian(Header, @ptrCast(&hdr), .little);
+
+    const data: Data = switch (hdr.type) {
+        .dir => .{ .dir = try .init(rdr) },
+        .ext_dir => .{ .ext_dir = try .init(rdr) },
+        .file => .{ .file = try .init(alloc, rdr, block_size) },
+        .ext_file => .{ .ext_file = try .init(alloc, rdr, block_size) },
+        .symlink => .{ .symlink = try .init(alloc, rdr) },
+        .ext_symlink => .{ .ext_symlink = try .init(alloc, rdr) },
+        .block_dev => .{ .block_dev = try .init(rdr) },
+        .ext_block_dev => .{ .ext_block_dev = try .init(rdr) },
+        .char_dev => .{ .char_dev = try .init(rdr) },
+        .ext_char_dev => .{ .ext_char_dev = try .init(rdr) },
+        .fifo => .{ .fifo = try .init(rdr) },
+        .ext_fifo => .{ .ext_fifo = try .init(rdr) },
+        .socket => .{ .socket = try .init(rdr) },
+        .ext_socket => .{ .ext_socket = try .init(rdr) },
+    };
+    return .{ .hdr = hdr, .data = data };
+}
+pub fn initRef(alloc: std.mem.Allocator, ref: Ref, data: []u8, decomp: Decomp.Fn, inode_start: u64, block_size: u32) !Inode {}
+pub fn initEntry(alloc: std.mem.Allocator, entry: Directory.Entry, block_size: u32) !Inode {}
+pub fn deinit(self: Inode, alloc: std.mem.Allocator) void {
+    switch (self.data) {
+        .file => |f| alloc.free(f.blocks),
+        .ext_file => |f| alloc.free(f.blocks),
+        .symlink => |s| alloc.free(s.target),
+        .ext_symlink => |s| alloc.free(s.target),
+        else => {},
+    }
+}
+
+// Types
 
 pub const Ref = packed struct {
     block_offset: u16,
@@ -26,7 +53,7 @@ pub const Ref = packed struct {
     _: u16,
 };
 
-pub const InodeType = enum(u16) {
+pub const Type = enum(u16) {
     dir = 1,
     file,
     symlink,
@@ -43,25 +70,8 @@ pub const InodeType = enum(u16) {
     ext_socket,
 };
 
-pub const InodeData = union(InodeType) {
-    dir: dir.Dir,
-    file: file.File,
-    symlink: misc.Symlink,
-    block_dev: misc.Dev,
-    char_dev: misc.Dev,
-    fifo: misc.IPC,
-    socket: misc.IPC,
-    ext_dir: dir.ExtDir,
-    ext_file: file.ExtFile,
-    ext_symlink: misc.ExtSymlink,
-    ext_block_dev: misc.ExtDev,
-    ext_char_dev: misc.ExtDev,
-    ext_fifo: misc.ExtIPC,
-    ext_socket: misc.ExtIPC,
-};
-
-pub const Header = packed struct {
-    inode_type: InodeType,
+pub const Header = extern struct {
+    type: Type,
     permissions: u16,
     uid_idx: u16,
     gid_idx: u16,
@@ -69,121 +79,197 @@ pub const Header = packed struct {
     num: u32,
 };
 
-const Inode = @This();
+pub const Data = union(Type) {
+    dir: Dir,
+    file: File,
+    symlink: Symlink,
+    block_dev: Dev,
+    char_dev: Dev,
+    fifo: IPC,
+    socket: IPC,
+    ext_dir: ExtDir,
+    ext_file: ExtFile,
+    ext_symlink: ExtSymlink,
+    ext_block_dev: ExtDev,
+    ext_char_dev: ExtDev,
+    ext_fifo: ExtIPC,
+    ext_socket: ExtIPC,
+};
 
-hdr: Header,
-data: InodeData,
+pub const DataBlock = packed struct(u32) {
+    size: u24,
+    uncompressed: bool,
+    _: u7,
+};
 
-pub fn read(alloc: std.mem.Allocator, rdr: *Reader, block_size: u32) !Inode {
-    var hdr: Header = undefined;
-    try rdr.readSliceEndian(Header, @ptrCast(&hdr), .little);
-    return .{
-        .hdr = hdr,
-        .data = switch (hdr.inode_type) {
-            .dir => .{ .dir = try .read(rdr) },
-            .file => .{ .file = try .read(alloc, rdr, block_size) },
-            .symlink => .{ .symlink = try .read(alloc, rdr) },
-            .block_dev => .{ .block_dev = try .read(rdr) },
-            .char_dev => .{ .char_dev = try .read(rdr) },
-            .fifo => .{ .fifo = try .read(rdr) },
-            .socket => .{ .socket = try .read(rdr) },
-            .ext_dir => .{ .ext_dir = try .read(rdr) },
-            .ext_file => .{ .ext_file = try .read(alloc, rdr, block_size) },
-            .ext_symlink => .{ .ext_symlink = try .read(alloc, rdr) },
-            .ext_block_dev => .{ .ext_block_dev = try .read(rdr) },
-            .ext_char_dev => .{ .ext_char_dev = try .read(rdr) },
-            .ext_fifo => .{ .ext_fifo = try .read(rdr) },
-            .ext_socket => .{ .ext_socket = try .read(rdr) },
-        },
-    };
-}
-pub fn readFromEntry(alloc: std.mem.Allocator, archive: Archive, entry: DirEntry) !Inode {
-    var rdr = try archive.fil.readerAt(archive.super.inode_start + entry.block_start, &[0]u8{});
-    var meta: MetadataReader = .init(alloc, &rdr.interface, archive.decomp);
-    try meta.interface.discardAll(entry.block_offset);
-    return read(alloc, &meta.interface, archive.super.block_size);
-}
+pub const Dir = extern struct {
+    block_start: u32,
+    hard_links: u32,
+    size: u16,
+    block_offset: u16,
+    parent_num: u32,
 
-pub fn deinit(self: Inode, alloc: std.mem.Allocator) void {
-    switch (self.data) {
-        .file => |f| alloc.free(f.block_sizes),
-        .ext_file => |f| alloc.free(f.block_sizes),
-        .symlink => |s| alloc.free(s.target),
-        .ext_symlink => |s| alloc.free(s.target),
-        else => {},
+    fn init(rdr: *Reader) !Dir {
+        var new: Dir = undefined;
+        try rdr.readSliceEndian(Dir, @ptrCast(&new), .little);
+        return new;
     }
-}
+};
+pub const ExtDir = extern struct {
+    hard_links: u32,
+    size: u32,
+    block_start: u32,
+    parent_num: u32,
+    idx_count: u16,
+    block_offset: u16,
+    xattr_idx: u32,
 
-/// Get the data reader for a file inode.
-pub fn dataReader(self: Inode, alloc: std.mem.Allocator, archive: Archive, tables: *Tables) !DataReader {
-    return switch (self.hdr.inode_type) {
-        .file => readerFromData(alloc, archive, tables, self.data.file),
-        .ext_file => readerFromData(alloc, archive, tables, self.data.ext_file),
-        else => error.NotRegularFile,
-    };
-}
-fn readerFromData(alloc: std.mem.Allocator, archive: Archive, tables: *Tables, data: anytype) !DataReader {
-    var out: DataReader = .init(alloc, archive, data.block_sizes, data.block_start, data.size);
-    if (data.frag_idx != 0xFFFFFFFF)
-        out.addFragment(try tables.frag_table.get(data.frag_idx), data.frag_block_offset);
-    return out;
-}
-
-/// Get the directory entries for a directory inode.
-pub fn dirEntries(self: Inode, alloc: std.mem.Allocator, archive: Archive) ![]DirEntry {
-    return switch (self.hdr.inode_type) {
-        .dir => entriesFromData(alloc, archive, self.data.dir),
-        .ext_dir => entriesFromData(alloc, archive, self.data.ext_dir),
-        else => error.NotDirectory,
-    };
-}
-fn entriesFromData(alloc: std.mem.Allocator, archive: Archive, data: anytype) ![]DirEntry {
-    var rdr = try archive.fil.readerAt(archive.super.dir_start + data.block_start, &[0]u8{});
-    var meta: MetadataReader = .init(alloc, &rdr.interface, archive.decomp);
-    try meta.interface.discardAll(data.block_offset);
-    return DirEntry.readDir(alloc, &meta.interface, data.size);
-}
-
-/// Returns the xattr index for the given inode. If the inode isn't an extended variant or doesn't have any, the u32 max is returned (0xFFFFFFFF).
-pub fn xattrIdx(self: Inode) u32 {
-    return switch (self.data) {
-        .ext_dir => |d| d.xattr_id,
-        .ext_file => |f| f.xattr_idx,
-        .ext_symlink => |s| s.xattr_idx,
-        .ext_block_dev, .ext_char_dev => |d| d.xattr_idx,
-        .ext_fifo, .ext_socket => |i| i.xattr_idx,
-        else => 0xFFFFFFFF,
-    };
-}
-
-/// Applies the Inode's metadata to the given File.
-/// Mod time is always set, but permissions and xattrs are set based on the given ExtractionOptions.
-pub fn setMetadata(self: Inode, alloc: std.mem.Allocator, tables: *Tables, fil: std.fs.File, options: ExtractionOptions) !void {
-    const time = @as(i128, self.hdr.mod_time) * 1000000000;
-    try fil.updateTimes(time, time);
-    if (!options.ignore_permissions) {
-        try fil.chmod(self.hdr.permissions);
-        try fil.chown(try tables.id_table.get(self.hdr.uid_idx), try tables.id_table.get(self.hdr.gid_idx));
+    fn init(rdr: *Reader) !ExtDir {
+        var new: ExtDir = undefined;
+        try rdr.readSliceEndian(ExtDir, @ptrCast(&new), .little);
+        return new;
     }
-    if (!options.ignore_xattr) {
-        const idx = self.xattrIdx();
-        if (idx == 0xFFFFFFFF) return;
-        const xattrs = try tables.xattr_table.get(alloc, idx);
-        defer alloc.free(xattrs);
-        for (xattrs) |kv| {
-            const res = std.os.linux.fsetxattr(fil.handle, kv.key, kv.value.ptr, kv.value.len, 0);
-            alloc.free(kv.key);
-            alloc.free(kv.value);
-            if (res != 0) {
-                if (options.verbose)
-                    options.verbose_writer.?.print("fsetxattr has result of: {}\n", .{res}) catch {};
-                return error.SetXattr;
-            }
-        }
-    }
-}
+};
+pub const File = struct {
+    block_start: u32,
+    frag_idx: u32,
+    frag_offset: u32,
+    size: u32,
+    blocks: []DataBlock,
 
-/// Extract the inode to the given path.
-pub fn extractTo(self: Inode, alloc: std.mem.Allocator, archive: Archive, path: []const u8, options: ExtractionOptions) !void {
-    return InodeExtract.extractTo(alloc, self, archive, path, options);
-}
+    fn init(alloc: std.mem.Allocator, rdr: *Reader, block_size: u32) !File {
+        var data: [16]u8 = undefined;
+        try rdr.readSliceAll(&data);
+
+        const frag_idx = std.mem.readInt(u32, data[4..8], .little);
+        const size = std.mem.readInt(u32, data[12..], .little);
+
+        var blocks_num = size / block_size;
+        if (size % block_size != 0 and frag_idx == 0xFFFFFFFF)
+            blocks_num += 1;
+
+        const blocks = try alloc.alloc(DataBlock, blocks_num);
+        try rdr.readSliceEndian(DataBlock, blocks, .little);
+
+        return .{
+            .block_start = std.mem.readInt(u32, data[0..4], .little),
+            .frag_idx = frag_idx,
+            .frag_offset = std.mem.readInt(u32, data[8..12], .little),
+            .size = size,
+            .blocks = blocks,
+        };
+    }
+};
+pub const ExtFile = struct {
+    block_start: u64,
+    size: u64,
+    sparse: u64,
+    hard_links: u32,
+    frag_idx: u32,
+    frag_offset: u32,
+    xattr_idx: u32,
+    blocks: []DataBlock,
+
+    fn init(alloc: std.mem.Allocator, rdr: *Reader, block_size: u32) !ExtFile {
+        var data: [40]u8 = undefined;
+        try rdr.readSliceAll(&data);
+
+        const frag_idx = std.mem.readInt(u32, data[28..], .little);
+        const size = std.mem.readInt(u64, data[8..16], .little);
+
+        var blocks_num = size / block_size;
+        if (size % block_size != 0 and frag_idx == 0xFFFFFFFF)
+            blocks_num += 1;
+
+        const blocks = try alloc.alloc(DataBlock, blocks_num);
+        try rdr.readSliceEndian(DataBlock, blocks, .little);
+
+        return .{
+            .block_start = std.mem.readInt(u64, data[0..8], .little),
+            .size = size,
+            .sparse = std.mem.readInt(u64, data[16..24], .little),
+            .hard_links = std.mem.readInt(u32, data[24..28], .little),
+            .frag_idx = frag_idx,
+            .frag_offset = std.mem.readInt(u32, data[32..36], .little),
+            .xattr_idx = std.mem.readInt(u32, data[36..], .little),
+            .blocks = blocks,
+        };
+    }
+};
+pub const Symlink = struct {
+    hard_links: u32,
+    target: []const u8,
+
+    fn init(alloc: std.mem.Allocator, rdr: *Reader) !Symlink {
+        var data: [8]u8 = undefined;
+        try rdr.readSliceAll(&data);
+
+        const target_size = std.mem.readInt(u32, data[4..], .little);
+
+        const target = try alloc.alloc(u8, target_size);
+        try rdr.readSliceEndian(u8, target, .little);
+
+        return .{
+            .hard_links = std.mem.readInt(u32, data[0..4], .little),
+            .target = target,
+        };
+    }
+};
+pub const ExtSymlink = struct {
+    hard_links: u32,
+    target: []const u8,
+    xattr_idx: u32,
+
+    fn init(alloc: std.mem.Allocator, rdr: *Reader) !ExtSymlink {
+        const sym: Symlink = .init(alloc, rdr);
+
+        var xattr_idx: u32 = undefined;
+        try rdr.readSliceEndian(u32, @ptrCast(&xattr_idx), .little);
+
+        return .{
+            .hard_links = sym.hard_links,
+            .target = sym.target,
+            .xattr_idx = xattr_idx,
+        };
+    }
+};
+pub const Dev = extern struct {
+    hard_links: u32,
+    device: u32,
+
+    fn init(rdr: *Reader) !Dev {
+        var new: Dev = undefined;
+        try rdr.readSliceEndian(Dev, @ptrCast(&new), .little);
+        return new;
+    }
+};
+pub const ExtDev = extern struct {
+    hard_links: u32,
+    device: u32,
+    xattr_idx: u32,
+
+    fn init(rdr: *Reader) !ExtDev {
+        var new: ExtDev = undefined;
+        try rdr.readSliceEndian(ExtDev, @ptrCast(&new), .little);
+        return new;
+    }
+};
+pub const IPC = extern struct {
+    hard_links: u32,
+
+    fn init(rdr: *Reader) !IPC {
+        var new: IPC = undefined;
+        try rdr.readSliceEndian(IPC, @ptrCast(&new), .little);
+        return new;
+    }
+};
+pub const ExtIPC = extern struct {
+    hard_links: u32,
+    xattr_idx: u32,
+
+    fn init(rdr: *Reader) !ExtIPC {
+        var new: ExtIPC = undefined;
+        try rdr.readSliceEndian(ExtIPC, @ptrCast(&new), .little);
+        return new;
+    }
+};

@@ -5,8 +5,8 @@ const Writer = std.Io.Writer;
 
 const ExtractionOptions = @This();
 
-/// The number of threads used for extraction. 0 implies single threaded.
-threads: usize = 1,
+/// Whether to use single threaded extraction. For finer control, create an std.Io instance.
+single_threaded: bool = false,
 /// Don't set the file's owner & permissions after extraction
 ignore_permissions: bool = false,
 /// Don't set xattr values. Currently xattrs are never set anyway.
@@ -18,12 +18,9 @@ verbose: bool = false,
 /// Where to print verbose log.
 verbose_writer: ?*Writer = null,
 
-pub const SingleThreadedDefault: ExtractionOptions = .{};
-pub fn Default() !ExtractionOptions {
-    return .{
-        .threads = try std.Thread.getCpuCount(),
-    };
-}
+pub const default: ExtractionOptions = .{};
+pub const single_threaded_default: ExtractionOptions = .{ .single_threaded = true };
+
 pub fn VerboseDefault(wrt: *Writer) !ExtractionOptions {
     return .{
         .verbose = true,

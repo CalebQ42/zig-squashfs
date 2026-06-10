@@ -2,11 +2,11 @@
     .name = .squashfs,
     .version = "0.0.6",
     .fingerprint = 0x37ba29474b87f145, // Changing this has security and trust implications.
-    .minimum_zig_version = "0.15.2",
+    .minimum_zig_version = "0.16.0",
     .dependencies = .{
         .zlib_ng = .{
-            .url = "git+https://github.com/CalebQ42/zig-zlib-ng#5f2f02dfb28acca2517dacbbd09e9b987f57b133",
-            .hash = "zlib_ng-2.3.3-pre1-2HYS4ClFAABW8KlHMyBHtlNKE3V7kCS8wqfxawG7xeaa",
+            .url = "git+https://github.com/CalebQ42/zig-zlib-ng#915db2dbd4a540d8a933336d67520b786f168f01",
+            .hash = "zlib_ng-2.3.3-pre1-2HYS4MlFAADc-eSZv4_xjkxZRCdGUVOYZKdtqhybstgk",
         },
         .zstd = .{
             .url = "git+https://github.com/allyourcodebase/zstd.git?ref=1.5.7-1#e1a501be57f42c541e8a5597e4b59a074dfd09a3",
@@ -16,9 +16,13 @@
             .url = "git+https://github.com/allyourcodebase/lz4.git?ref=1.10.0-6#41f52ab227caf9d48cf88c89a4d2946caa12b102",
             .hash = "lz4-1.10.0-6-ewyzw-4NAAAWDpY4xpiqr4LQhZQAC0x_rGnW2iPh6jk2",
         },
+        .xz = .{
+            .url = "git+https://github.com/akunaakwei/zig-xz.git#e2d389262c8291907e3e4c6fb119819141c16c0f",
+            .hash = "xz-5.8.2-6v47_JYeAABSL-jonprpL5-E_YaaGc4B5xrbe93WsJ3G",
+        },
         .minilzo = .{
-            .url = "git+https://github.com/CalebQ42/zig-minilzo.git#7cbae997b91a44d74b7cd6c073584dc9562a6c90",
-            .hash = "minilzo-2.10.0-Ij7BO8wLAADeWI4Pe4jp8XTDsDaquZR14oZ7_9yKKDWP",
+            .url = "git+https://github.com/CalebQ42/zig-minilzo.git#f72a0e20a30fad38cd10104f393c8f3440478697",
+            .hash = "minilzo-2.10.0-Ij7BO7YLAABd6oK2YdimXwvFTOC8wD1sNm0PHGoRNEwR",
         },
     },
     .paths = .{
