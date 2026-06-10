@@ -5,13 +5,16 @@ const Reader = Io.Reader;
 const Decomp = @import("decomp.zig");
 const Directory = @import("directory.zig");
 const MetadataReader = @import("meta_rdr.zig");
+const Superblock = @import("archive.zig").Superblock;
+const Extract = @import("extract.zig");
+const ExtractionOptions = @import("options.zig");
 
 const Inode = @This();
 
 hdr: Header,
 data: Data,
 
-pub fn init(alloc: std.mem.Allocator, rdr: *Reader, block_size: u32) !Inode {
+pub fn init(alloc: std.mem.Allocator, block_size: u32, rdr: *Reader) !Inode {
     var hdr: Header = undefined;
     try rdr.readSliceEndian(Header, @ptrCast(&hdr), .little);
 
@@ -33,8 +36,18 @@ pub fn init(alloc: std.mem.Allocator, rdr: *Reader, block_size: u32) !Inode {
     };
     return .{ .hdr = hdr, .data = data };
 }
-pub fn initRef(alloc: std.mem.Allocator, ref: Ref, data: []u8, decomp: Decomp.Fn, inode_start: u64, block_size: u32) !Inode {}
-pub fn initEntry(alloc: std.mem.Allocator, entry: Directory.Entry, block_size: u32) !Inode {}
+pub fn initRef(alloc: std.mem.Allocator, data: []u8, decomp: Decomp.Fn, inode_start: u64, block_size: u32, ref: Ref) !Inode {
+    var meta: MetadataReader = .init(alloc, data, decomp, inode_start + ref.block_start);
+    try meta.interface.discardAll(ref.block_offset);
+
+    return .init(alloc, &meta.interface, block_size);
+}
+pub fn initEntry(alloc: std.mem.Allocator, data: []u8, decomp: Decomp.Fn, inode_start: u64, block_size: u32, entry: Directory.Entry) !Inode {
+    var meta: MetadataReader = .init(alloc, data, decomp, inode_start + entry.block_start);
+    try meta.interface.discardAll(entry.block_offset);
+
+    return .init(alloc, &meta.interface, block_size);
+}
 pub fn deinit(self: Inode, alloc: std.mem.Allocator) void {
     switch (self.data) {
         .file => |f| alloc.free(f.blocks),
@@ -43,6 +56,10 @@ pub fn deinit(self: Inode, alloc: std.mem.Allocator) void {
         .ext_symlink => |s| alloc.free(s.target),
         else => {},
     }
+}
+
+pub fn extract(self: Inode, alloc: std.mem.Allocator, io: Io, super: Superblock, data: []u8, decomp: Decomp.Fn, location: []const u8, options: ExtractionOptions) !void {
+    return Extract.extract(alloc, io, super, data, decomp, self, location, options);
 }
 
 // Types

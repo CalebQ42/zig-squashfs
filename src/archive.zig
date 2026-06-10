@@ -4,12 +4,16 @@ const MemoryMap = Io.File.MemoryMap;
 
 const Decomp = @import("decomp.zig");
 const Inode = @import("inode.zig");
+const File = @import("file.zig");
+const ExtractionOptions = @import("options.zig");
+const Extract = @import("extract.zig");
 
 const Archive = @This();
 
 super: Superblock,
 
 map: MemoryMap,
+decomp: Decomp.Fn,
 
 pub fn init(io: Io, file: Io.File, offset: u64) !Archive {
     var rdr = file.reader(io, &[0]u8{});
@@ -28,10 +32,42 @@ pub fn init(io: Io, file: Io.File, offset: u64) !Archive {
             .len = super.size,
             .protection = .{ .read = true },
         }),
+        .decomp = try Decomp.getFn(super.compression),
     };
 }
 pub fn deinit(self: *Archive, io: Io) void {
     self.map.destroy(io);
+}
+
+pub fn root(self: Archive, alloc: std.mem.Allocator) !File {
+    return .initRef(alloc, self.super, self.map.memory, self.decomp, "", self.super.root_ref);
+}
+
+pub fn open(self: Archive, alloc: std.mem.Allocator, filepath: []const u8) !File {
+    const root_file = try self.root(alloc);
+
+    const path = std.mem.trim(u8, filepath, "/");
+
+    if (path.len == 0 or (path.len == 1 and path[0] == '.'))
+        return root_file;
+
+    defer root_file.deinit();
+
+    return root_file.open(alloc, filepath);
+}
+
+pub fn extract(self: Archive, alloc: std.mem.Allocator, io: Io, location: []const u8, options: ExtractionOptions) !void {
+    const root_inode: Inode = try .initRef(
+        alloc,
+        self.map.memory,
+        self.decomp,
+        self.super.inode_start,
+        self.super.block_size,
+        self.super.root_ref,
+    );
+    defer root_inode.deinit(alloc);
+
+    root_inode.extract(alloc, io, self.super, self.map.memory, self.decomp, location, options);
 }
 
 // Superblock
@@ -54,7 +90,7 @@ pub const Superblock = extern struct {
     frag_count: u32,
     compression: Decomp.Enum,
     block_log: u16,
-    flags: packed struct {
+    flags: packed struct(u16) {
         inode_uncompressed: bool,
         data_uncompressed: bool,
         check: bool,
