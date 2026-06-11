@@ -2,6 +2,8 @@ const std = @import("std");
 const Io = std.Io;
 
 const Decomp = @import("decomp.zig");
+const MetadataReader = @import("meta_rdr.zig");
+const ProtectedMap = @import("util/protected_map.zig");
 
 pub fn Table(comptime T: anytype) type {
     return struct {
@@ -15,91 +17,43 @@ pub fn Table(comptime T: anytype) type {
         table_start: u64,
         table_num: u32,
 
-        pub fn init(alloc: std.mem.Allocator, table_start: u64, table_num: u32) Self {}
-        pub fn deinit(self: *Self) void {}
+        table: ProtectedMap(u32, []T, getBlock),
 
-        pub fn get(self: *Self, io: Io, idx: u32) !T {}
-    };
-}
-
-pub fn ProtectedMap(comptime K: anytype, comptime T: anytype, comptime create_fn: anytype) type {
-    std.debug.assert(std.meta.activeTag(@typeInfo(create_fn)) == .@"fn");
-
-    const ret_info = @typeInfo(create_fn).@"fn".return_type;
-
-    std.debug.assert(ret_info == T or
-        (std.meta.activeTag(@typeInfo(ret_info)) == .error_union and @typeInfo(ret_info).error_union.payload == T));
-
-    return struct {
-        const Map = @This();
-
-        alloc: std.mem.Allocator,
-
-        map: std.AutoHashMap(K, ProtectedValue),
-        mut: Io.RwLock = .init,
-
-        pub fn init(alloc: std.mem.Allocator, default_value: T) Map {
-            return .{
-                .alloc = alloc,
-
-                .map = .init(alloc),
-
-                .default_value = default_value,
-            };
+        pub fn init(alloc: std.mem.Allocator, data: []u8, decomp: Decomp.Fn, table_start: u64, table_num: u32) Self {
+            return .{ .data = data, .decomp = decomp, .table_start = table_start, .table_num = table_num, .table = .init(alloc) };
         }
-        pub fn deinit(self: *Map) void {}
+        pub fn deinit(self: *Self) void {
+            var iter = self.table.map.valueIterator();
 
-        pub fn getOrPut(self: *Map, io: Io, key: K, create_fn_args: std.meta.ArgsTuple(create_fn)) !*T {
-            {
-                try self.mut.lockShared(io);
-                defer self.mut.unlockShared(io);
+            while (iter.next()) |val| {
+                if (val.err != null) continue;
 
-                const value = self.map.getPtr(key);
-                if (value != null) {
-                    if (!value.?.filled.isSet())
-                        value.?.filled.wait(io);
-                    if (value.?.err != null) return value.?.err != null;
-                    return value.?.value;
-                }
+                self.table.alloc.free(val.value);
             }
-            try self.mut.lock(io);
-
-            const res = self.map.getOrPut(key) catch |err| {
-                self.mut.unlock(io);
-                return err;
-            };
-            if (res.found_existing) {
-                self.mut.unlock(io);
-                return self.getOrPut(io, key, create_fn_args);
-            }
-            res.value_ptr.* = .{};
-            defer res.value_ptr.filled.set(io);
-
-            res.mut.unlock(io);
-
-            self.mut.lockSharedUncancelable(io);
-            defer self.mut.unlockShared(io);
-
-            if (@TypeOf(CreateError) == void) {
-                res.value_ptr.value = @call(.auto, create_fn, create_fn_args);
-            } else {
-                res.value_ptr.value = @call(.auto, create_fn, create_fn_args) catch |err| {
-                    res.value_ptr.err = err;
-                };
-            }
+            self.table.deinit();
         }
 
-        // Map Types
+        pub fn get(self: *Self, io: Io, idx: u32) !T {
+            const block = idx / VALUES_PER_BLOCK;
+            const block_idx = idx % VALUES_PER_BLOCK;
 
-        const CreateError: type = switch (@typeInfo(@typeInfo(create_fn).@"fn".return_type)) {
-            .error_union => |e| e.error_set,
-            else => void,
-        };
+            const values = try self.table.getOrPut(io, block, .{ self.*, block });
 
-        const ProtectedValue = struct {
-            value: T = undefined,
-            err: ?CreateError = null,
-            filled: Io.Event = .unset,
-        };
+            return values[block_idx];
+        }
+
+        pub fn getBlock(self: Self, block_idx: u32) ![]T {
+            const offset: u64 = std.mem.readInt(u64, self.data[self.table_start + (block_idx * 8) ..][0..8], .little);
+
+            const block = try self.table.alloc(T, if (block_idx == (self.table_num - 1 / VALUES_PER_BLOCK))
+                self.table_num % VALUES_PER_BLOCK
+            else
+                VALUES_PER_BLOCK);
+
+            var meta: MetadataReader = .init(self.table.alloc, self.data, self.decomp, offset);
+            try meta.interface.readSliceEndian(T, block, .little);
+
+            return block;
+        }
     };
 }
