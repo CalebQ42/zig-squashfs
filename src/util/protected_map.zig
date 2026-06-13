@@ -28,7 +28,7 @@ pub fn ProtectedMap(comptime K: anytype, comptime T: anytype, comptime create_fn
             self.map.deinit();
         }
 
-        pub fn getOrPut(self: *Map, io: Io, key: K, create_fn_args: std.meta.ArgsTuple(create_fn)) !*T {
+        pub fn getOrPut(self: *Map, io: Io, key: K, create_fn_args: std.meta.ArgsTuple(create_fn)) Error!*T {
             {
                 try self.mut.lockShared(io);
                 defer self.mut.unlockShared(io);
@@ -69,6 +69,9 @@ pub fn ProtectedMap(comptime K: anytype, comptime T: anytype, comptime create_fn
         }
 
         // Map Types
+
+        pub const Error = error{ Canceled, OutOfMemory } ||
+            if (@TypeOf(CreateError) == void) error{} else CreateError;
 
         const CreateError: type = switch (@typeInfo(@typeInfo(create_fn).@"fn".return_type)) {
             .error_union => |e| e.error_set,

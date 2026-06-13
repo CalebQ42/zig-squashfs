@@ -58,6 +58,8 @@ pub fn deinit(self: Directory, alloc: std.mem.Allocator) void {
 
 // Types
 
+pub const Error = error{OutOfMemory} || Reader.Error;
+
 pub const Entry = struct {
     name: []const u8,
     block_start: u32,

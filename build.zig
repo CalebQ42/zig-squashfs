@@ -15,6 +15,7 @@ pub fn build(b: *std.Build) !void {
     const build_options = b.addOptions();
     build_options.addOption(bool, "use_zig_decomp", use_zig_decomp);
     build_options.addOption(bool, "allow_lzo", allow_lzo);
+    build_options.addOption(std.SemanticVersion, "version", version);
 
     const c = b.addTranslateC(.{
         .optimize = optimize,
@@ -79,6 +80,7 @@ pub fn build(b: *std.Build) !void {
             .valgrind = debug,
             .imports = &.{
                 .{ .name = "squashfs", .module = lib.root_module },
+                .{ .name = "build_options", .module = build_options.createModule() },
             },
         }),
     });

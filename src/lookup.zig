@@ -1,6 +1,7 @@
 const std = @import("std");
 const Io = std.Io;
 
+const DataBlock = @import("inode.zig").DataBlock;
 const Decomp = @import("decomp.zig");
 const MetadataReader = @import("meta_rdr.zig");
 const ProtectedMap = @import("util/protected_map.zig");
@@ -57,3 +58,11 @@ pub fn Table(comptime T: anytype) type {
         }
     };
 }
+
+// Types
+
+pub const FragEntry = extern struct {
+    block_start: u64,
+    size: DataBlock,
+    _: u32,
+};

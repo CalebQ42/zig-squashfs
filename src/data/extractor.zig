@@ -3,6 +3,7 @@ const Io = std.Io;
 
 const Decomp = @import("../decomp.zig");
 const DataBlock = @import("../inode.zig").DataBlock;
+const Cache = @import("../util/cache.zig");
 
 const Extractor = @This();
 
@@ -17,6 +18,8 @@ size: u64,
 
 frag_data: ?[]u8 = null,
 frag_offset: u32 = 0,
+
+cache: ?Cache = null,
 
 pub fn init(data: []u8, decomp: Decomp.Fn, block_size: u32, blocks: []DataBlock, start: u64, size: u64) Extractor {
     return .{
@@ -33,6 +36,9 @@ pub fn init(data: []u8, decomp: Decomp.Fn, block_size: u32, blocks: []DataBlock,
 pub fn addFrag(self: *Extractor, frag_data: []u8, frag_offset: u32) void {
     self.frag_data = frag_data;
     self.frag_offset = frag_offset;
+}
+pub fn addCache(self: *Extractor, cache: Cache) void {
+    self.cache = cache;
 }
 
 pub fn extractAsync(self: Extractor, alloc: std.mem.Allocator, io: Io, file: Io.File) Error!void {
@@ -86,10 +92,20 @@ fn blockThread(self: Extractor, alloc: std.mem.Allocator, map_data: []u8, read_o
         return;
     }
 
-    _ = self.decomp(alloc, data, map_data[offset..][0..size]) catch |inner_err| {
-        err.* = inner_err;
-        return;
-    };
+    if (self.cache != null) {
+        const decomp_block = self.cache.?.get(read_offset, block.size) catch |inner_err| {
+            switch (inner_err) {
+                error.Canceled => return error.Canceled,
+                else => |e| err.* = e,
+            }
+            return;
+        };
+        @memcpy(map_data[offset..][0..size], decomp_block[0..size]);
+    } else {
+        _ = self.decomp(alloc, data, map_data[offset..][0..size]) catch |inner_err| {
+            err.* = inner_err;
+        };
+    }
 }
 fn fragThread(self: Extractor, map_data: []u8) error{Canceled}!void {
     const size = self.size % self.block_size;
@@ -100,4 +116,4 @@ fn fragThread(self: Extractor, map_data: []u8) error{Canceled}!void {
 
 // Types
 
-const Error = Io.File.WritePositionalError || Io.File.MemoryMap.CreateError || Decomp.Error;
+pub const Error = Io.File.WritePositionalError || Io.File.MemoryMap.CreateError || Decomp.Error || Cache.Error;

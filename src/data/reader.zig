@@ -3,6 +3,7 @@ const Io = std.Io;
 
 const Decomp = @import("../decomp.zig");
 const DataBlock = @import("../inode.zig").DataBlock;
+const Cache = @import("../util/cache.zig");
 
 const Reader = @This();
 
@@ -22,6 +23,8 @@ sparse_block: bool = false,
 
 frag_data: ?[]u8 = null,
 frag_offset: u32 = 0,
+
+cache: ?Cache = null,
 
 block: [1024 * 1024]u8 = undefined,
 
@@ -54,6 +57,9 @@ pub fn init(alloc: std.mem.Allocator, data: []u8, decomp: Decomp.Fn, block_size:
 pub fn addFrag(self: *Reader, frag_data: []u8, frag_offset: u32) void {
     self.frag_data = frag_data;
     self.frag_offset = frag_offset;
+}
+pub fn addCache(self: *Reader, cache: Cache) void {
+    self.cache = cache;
 }
 
 fn advance(self: *Reader) Io.Reader.Error!void {
@@ -98,9 +104,14 @@ fn advance(self: *Reader) Io.Reader.Error!void {
         return;
     }
 
-    _ = self.decomp(self.alloc, self.data[self.offset..][0..block.size], self.block[0..size]) catch return error.ReadFailed;
-    self.interface.buffer = self.block[0..size];
-    self.interface.end = size;
+    if (self.cache == null) {
+        _ = self.decomp(self.alloc, self.data[self.offset..][0..block.size], self.block[0..size]) catch return error.ReadFailed;
+        self.interface.buffer = self.block[0..size];
+        self.interface.end = size;
+    } else {
+        self.interface.buffer = self.cache.?.get(self.io, self.offset, block.size) catch return error.ReadFailed;
+        self.interface.end = self.interface.buffer.len;
+    }
 }
 
 fn stream(r: *Io.Reader, w: *Io.Writer, limit: Io.Limit) Io.Reader.StreamError!usize {
