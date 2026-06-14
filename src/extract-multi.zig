@@ -42,7 +42,7 @@ pub fn extract(
             else => {},
         };
 
-    var loop = io.async(io, finishLoop, .{ alloc, io, &sel, &id_table, &xattr_table, options });
+    var loop = io.async(io, finishLoop, .{ alloc, io, &sel, &id_table, &xattr_table, inode.hdr.num, options });
 
     var cache: Cache = .init(alloc, data, decomp);
     defer cache.deinit();
@@ -54,7 +54,7 @@ pub fn extract(
         .file, .ext_file => try sel.async(
             .path,
             extractFile,
-            .{ alloc, io, data, decomp, &cache, &frag_table, inode, path, true },
+            .{ alloc, io, data, decomp, super.block_size, &cache, &frag_table, inode, path, true },
         ),
         .dir, .ext_dir => try sel.async(
             .path,
@@ -69,77 +69,68 @@ pub fn extract(
         else => try sel.async(
             .path,
             extractNod,
-            .{ alloc, io, inode, path, true },
+            .{ alloc, inode, path, true },
         ),
     }
 
     try loop.await(io);
 }
 
-fn finishLoop(alloc: std.mem.Allocator, io: Io, id_table: *Lookup.Table(u16), xattr_table: *XattrTable, options: ExtractionOptions) !void {}
-
-fn extractFile(
-    alloc: std.mem.Allocator,
-    io: Io,
-    data: []u8,
-    decomp: Decomp.Fn,
-    cache: *Cache,
-    frag_table: *Lookup.Table(Lookup.FragEntry),
-    inode: Inode,
-    path: []const u8,
-    origin: bool,
-) Error!PathReturn {
-    defer if (!origin) inode.deinit(alloc);
-    errdefer alloc.free(path);
-
-    try io.checkCancel();
-
-    var ret: PathReturn = .{
-        .hdr = inode.hdr,
-        .path = path,
-    };
-
-    var ext: DataExtractor = switch (inode.data) {
-        .file => |f| blk: {
-            var rdr: DataExtractor = .init(data, decomp, super.block_size, f.blocks, f.size, f.block_start);
-            rdr.addCache(cache);
-
-            if (f.frag_idx == 0xFFFFFFFF) break :blk rdr;
-
-            const entry: Lookup.FragEntry = try frag_table.get(io, f.frag_idx);
-            if (entry.size.uncompressed) {
-                rdr.addFrag(data[entry.block_start..][0..entry.size.size]);
-            } else {
-                rdr.addFrag(try cache.get(io, entry.block_start, entry.size));
-            }
-        },
-        .ext_file => |f| blk: {
-            if (f.xattr_idx != 0xFFFFFFFF) ret.xattr_idx = f.xattr_idx;
-
-            var rdr: DataExtractor = .init(data, decomp, super.block_size, f.blocks, f.size, f.block_start);
-            rdr.addCache(cache);
-
-            if (f.frag_idx == 0xFFFFFFFF) break :blk rdr;
-
-            const entry: Lookup.FragEntry = try frag_table.get(io, f.frag_idx);
-            if (entry.size.uncompressed) {
-                rdr.addFrag(data[entry.block_start..][0..entry.size.size]);
-            } else {
-                rdr.addFrag(try cache.get(io, entry.block_start, entry.size));
-            }
-        },
-        else => unreachable,
-    };
-
-    var atomic = try Io.Dir.cwd().createFileAtomic(io, path, .{});
-    defer atomic.deinit(io);
-
-    try ext.extractAsync(alloc, io, atomic.file);
-
-    try atomic.link(io);
-
-    return ret;
+fn dirOrder(a: PathReturn, b: PathReturn) std.math.Order {
+    return std.math.order(std.mem.count(u8, a.path, "/"), std.mem.count(u8, b.path, "/"));
 }
+fn finishLoop(alloc: std.mem.Allocator, io: Io, sel: *Io.Select(ReturnUnion), id_table: *Lookup.Table(u16), xattr_table: *XattrTable, start_num: u32, options: ExtractionOptions) !void {
+    var dirs: std.PriorityDequeue(PathReturn, void, dirOrder) = .empty;
+    defer dirs.deinit(alloc);
+    errdefer while (dirs.popMax()) |d|
+        alloc.free(d.path);
+
+    while (true) {
+        const value: ReturnUnion = try sel.await();
+
+        switch (value) {
+            .void => continue,
+            else => {},
+        }
+
+        const path_ret: PathReturn = value.path;
+
+        if (path_ret.hdr.type == .dir or path_ret.hdr.type == .ext_dir) {
+            dirs.push(alloc, path_ret) catch |err| {
+                if (path_ret.hdr.num != start_num)
+                    alloc.free(path_ret.path);
+                return err;
+            };
+            continue;
+        }
+        defer if (path_ret.hdr.num != start_num)
+            alloc.free(path_ret.path);
+
+        if (options.ignore_permissions and (options.ignore_xattr or path_ret.xattr_idx == null)) continue;
+
+        var file = try Io.Dir.cwd().openFile(io, path_ret.path, .{});
+        defer file.close();
+
+        if (!options.ignore_xattr and path_ret.xattr_idx != null) {
+            const xattr = try xattr_table.get(alloc, io, path_ret.xattr_idx.?);
+            defer xattr.deinit(alloc);
+
+            for (xattr.kvs) |kv| {
+                const res = std.os.linux.fsetxattr(file.handle, kv.key, kv.value, kv.value.len, 0);
+                if (res != 0)
+                    return error.SetXattrError;
+            }
+        }
+        if (!options.ignore_permissions) {
+            try file.setTimestamps(io, .{
+                .modify_timestamp = .init(Io.Timestamp.fromNanoseconds(@as(i96, @intCast(path_ret.hdr.mod_time)) * std.time.ns_per_s)),
+            });
+            try file.setPermissions(io, @enumFromInt(path_ret.hdr.permissions));
+            try file.setOwner(io, try id_table.get(io, path_ret.hdr.uid_idx), try id_table.get(io, path_ret.hdr.gid_idx));
+        }
+    }
+}
+
 fn extractDir(
     alloc: std.mem.Allocator,
     io: Io,
@@ -190,8 +181,76 @@ fn extractDir(
             return err;
         };
 
-        sel.async();
+        switch (entry.type) {
+            .dir => sel.async(.path, extractDir, .{ alloc, io, super, data, decomp, sel, cache, frag_table, new_inode, new_path, false }),
+            .file => sel.async(.path, extractFile, .{ alloc, io, data, decomp, super.block_size, cache, frag_table, new_inode, new_path, false }),
+            .symlink => sel.async(.void, extractSymlink, .{ alloc, io, data, decomp, new_inode, new_path, false }),
+            else => sel.async(.path, extractNod, .{ alloc, data, decomp, new_inode, new_path, false }),
+        }
     }
+}
+fn extractFile(
+    alloc: std.mem.Allocator,
+    io: Io,
+    data: []u8,
+    decomp: Decomp.Fn,
+    block_size: u32,
+    cache: *Cache,
+    frag_table: *Lookup.Table(Lookup.FragEntry),
+    inode: Inode,
+    path: []const u8,
+    origin: bool,
+) Error!PathReturn {
+    defer if (!origin) inode.deinit(alloc);
+    errdefer alloc.free(path);
+
+    try io.checkCancel();
+
+    var ret: PathReturn = .{
+        .hdr = inode.hdr,
+        .path = path,
+    };
+
+    var ext: DataExtractor = switch (inode.data) {
+        .file => |f| blk: {
+            var rdr: DataExtractor = .init(data, decomp, block_size, f.blocks, f.size, f.block_start);
+            rdr.addCache(cache);
+
+            if (f.frag_idx == 0xFFFFFFFF) break :blk rdr;
+
+            const entry: Lookup.FragEntry = try frag_table.get(io, f.frag_idx);
+            if (entry.size.uncompressed) {
+                rdr.addFrag(data[entry.block_start..][0..entry.size.size]);
+            } else {
+                rdr.addFrag(try cache.get(io, entry.block_start, entry.size));
+            }
+        },
+        .ext_file => |f| blk: {
+            if (f.xattr_idx != 0xFFFFFFFF) ret.xattr_idx = f.xattr_idx;
+
+            var rdr: DataExtractor = .init(data, decomp, block_size, f.blocks, f.size, f.block_start);
+            rdr.addCache(cache);
+
+            if (f.frag_idx == 0xFFFFFFFF) break :blk rdr;
+
+            const entry: Lookup.FragEntry = try frag_table.get(io, f.frag_idx);
+            if (entry.size.uncompressed) {
+                rdr.addFrag(data[entry.block_start..][0..entry.size.size]);
+            } else {
+                rdr.addFrag(try cache.get(io, entry.block_start, entry.size));
+            }
+        },
+        else => unreachable,
+    };
+
+    var atomic = try Io.Dir.cwd().createFileAtomic(io, path, .{});
+    defer atomic.deinit(io);
+
+    try ext.extractAsync(alloc, io, atomic.file);
+
+    try atomic.link(io);
+
+    return ret;
 }
 fn extractSymlink(alloc: std.mem.Allocator, io: Io, inode: Inode, path: []const u8, origin: bool) Error!void {
     defer if (!origin) {
@@ -205,6 +264,65 @@ fn extractSymlink(alloc: std.mem.Allocator, io: Io, inode: Inode, path: []const 
         else => unreachable,
     };
     try Io.Dir.cwd().symLink(io, target, path, .{});
+}
+fn extractNod(alloc: std.mem.Allocator, inode: Inode, path: []const u8, origin: bool) Error!PathReturn {
+    errdefer if (!origin)
+        alloc.free(path);
+
+    var ret: PathReturn = .{
+        .hdr = inode.hdr,
+        .path = path,
+    };
+
+    var dev: u32 = 0;
+    var mode: u32 = undefined;
+
+    const DT = std.posix.DT;
+
+    switch (inode.data) {
+        .char_dev => |d| {
+            dev = d.device;
+            mode = DT.CHR;
+        },
+        .block_dev => |d| {
+            dev = d.device;
+            mode = DT.BLK;
+        },
+        .ext_char_dev => |d| {
+            if (d.xattr_idx != 0xFFFFFFFF) ret.xattr_idx = d.xattr_idx;
+
+            dev = d.device;
+            mode = DT.CHR;
+        },
+        .ext_block_dev => |d| {
+            if (d.xattr_idx != 0xFFFFFFFF) ret.xattr_idx = d.xattr_idx;
+
+            dev = d.device;
+            mode = DT.BLK;
+        },
+        .fifo => mode = DT.FIFO,
+        .socket => mode = DT.SOCK,
+        .ext_fifo => |i| {
+            if (i.xattr_idx != 0xFFFFFFFF) ret.xattr_idx = i.xattr_idx;
+
+            mode = DT.FIFO;
+        },
+        .ext_socket => |i| {
+            if (i.xattr_idx != 0xFFFFFFFF) ret.xattr_idx = i.xattr_idx;
+
+            mode = DT.SOCK;
+        },
+        else => unreachable,
+    }
+
+    const sentinel_path = try alloc.dupeSentinel(u8, path, 0);
+    defer alloc.free(sentinel_path);
+
+    const res = std.os.linux.mknod(sentinel_path, mode, dev);
+    if (res != 0)
+        return error.MknodError;
+
+    return ret;
 }
 
 // Types
