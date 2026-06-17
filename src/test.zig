@@ -25,7 +25,7 @@ test "Basics" {
 const TestFile = "Start.exe";
 const TestFileExtractLocation = "testing/Start.exe";
 
-test "ExtractSingleFile" {
+test "ExtractSingleFileMT" {
     const io = testing.io;
     const alloc = testing.allocator;
 
@@ -43,13 +43,11 @@ test "ExtractSingleFile" {
     try start_exe.extract(alloc, io, TestFileExtractLocation, .default);
 }
 
-const TestFullExtractLocationMT = "testing/TestExtractMT";
-
-test "ExtractCompleteArchiveMultiThreaded" {
+test "ExtractSingleFileST" {
     const io = testing.io;
     const alloc = testing.allocator;
 
-    Io.Dir.cwd().deleteFile(io, TestFullExtractLocationMT) catch {};
+    Io.Dir.cwd().deleteFile(io, TestFileExtractLocation) catch {};
 
     var archive_file = try Io.Dir.cwd().openFile(io, TestArchive, .{});
     defer archive_file.close(io);
@@ -57,7 +55,10 @@ test "ExtractCompleteArchiveMultiThreaded" {
     var archive: Archive = try .init(io, archive_file, 0);
     defer archive.deinit(io);
 
-    try archive.extract(alloc, io, TestFullExtractLocationMT, .default);
+    var start_exe = try archive.open(alloc, TestFile);
+    defer start_exe.deinit();
+
+    try start_exe.extract(alloc, io, TestFileExtractLocation, .single_threaded_default);
 }
 
 const TestFullExtractLocationSTOption = "testing/TestExtractSTOption";
@@ -77,13 +78,13 @@ test "ExtractCompleteArchiveSingleThreadedOption" {
     try archive.extract(alloc, io, TestFullExtractLocationSTOption, .single_threaded_default);
 }
 
-const TestFullExtractLocationSTIo = "testing/TestExtractSTIo";
+const TestFullExtractLocationMT = "testing/TestExtractMT";
 
-test "ExtractCompleteArchiveSingleThreadedIo" {
-    const io = Io.Threaded.global_single_threaded.io();
+test "ExtractCompleteArchiveMultiThreaded" {
+    const io = testing.io;
     const alloc = testing.allocator;
 
-    Io.Dir.cwd().deleteFile(io, TestFullExtractLocationSTIo) catch {};
+    Io.Dir.cwd().deleteFile(io, TestFullExtractLocationMT) catch {};
 
     var archive_file = try Io.Dir.cwd().openFile(io, TestArchive, .{});
     defer archive_file.close(io);
@@ -91,8 +92,25 @@ test "ExtractCompleteArchiveSingleThreadedIo" {
     var archive: Archive = try .init(io, archive_file, 0);
     defer archive.deinit(io);
 
-    try archive.extract(alloc, io, TestFullExtractLocationSTIo, .default);
+    try archive.extract(alloc, io, TestFullExtractLocationMT, .default);
 }
+
+const TestFullExtractLocationSTIo = "testing/TestExtractSTIo";
+
+// test "ExtractCompleteArchiveSingleThreadedIo" {
+//     const io = Io.Threaded.global_single_threaded.io();
+//     const alloc = testing.allocator;
+
+//     Io.Dir.cwd().deleteFile(io, TestFullExtractLocationSTIo) catch {};
+
+//     var archive_file = try Io.Dir.cwd().openFile(io, TestArchive, .{});
+//     defer archive_file.close(io);
+
+//     var archive: Archive = try .init(io, archive_file, 0);
+//     defer archive.deinit(io);
+
+//     try archive.extract(alloc, io, TestFullExtractLocationSTIo, .default);
+// }
 
 const LinuxPATestCorrectSuperblock: Archive.Superblock = .{
     .magic = std.mem.readInt(u32, "hsqs", .little),

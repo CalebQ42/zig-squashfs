@@ -166,6 +166,7 @@ pub const File = struct {
             blocks_num += 1;
 
         const blocks = try alloc.alloc(DataBlock, blocks_num);
+        errdefer alloc.free(blocks);
         try rdr.readSliceEndian(DataBlock, blocks, .little);
 
         return .{
@@ -199,6 +200,7 @@ pub const ExtFile = struct {
             blocks_num += 1;
 
         const blocks = try alloc.alloc(DataBlock, blocks_num);
+        errdefer alloc.free(blocks);
         try rdr.readSliceEndian(DataBlock, blocks, .little);
 
         return .{
@@ -224,6 +226,7 @@ pub const Symlink = struct {
         const target_size = std.mem.readInt(u32, data[4..], .little);
 
         const target = try alloc.alloc(u8, target_size);
+        errdefer alloc.free(target);
         try rdr.readSliceEndian(u8, target, .little);
 
         return .{
@@ -239,6 +242,7 @@ pub const ExtSymlink = struct {
 
     fn init(alloc: std.mem.Allocator, rdr: *Reader) !ExtSymlink {
         const sym: Symlink = try .init(alloc, rdr);
+        errdefer alloc.free(sym.target);
 
         var xattr_idx: u32 = undefined;
         try rdr.readSliceEndian(u32, @ptrCast(&xattr_idx), .little);

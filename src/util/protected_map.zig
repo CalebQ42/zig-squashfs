@@ -61,14 +61,13 @@ pub fn ProtectedMap(comptime K: anytype, comptime T: anytype, comptime create_fn
             self.mut.lockSharedUncancelable(io);
             defer self.mut.unlockShared(io);
 
-            if (@TypeOf(CreateError) == void) {
-                res.value_ptr.value = @call(.auto, create_fn, create_fn_args);
-            } else {
-                res.value_ptr.value = @call(.auto, create_fn, create_fn_args) catch |err| {
+            res.value_ptr.value = if (@TypeOf(CreateError) == void)
+                @call(.auto, create_fn, create_fn_args)
+            else
+                @call(.auto, create_fn, create_fn_args) catch |err| {
                     res.value_ptr.err = err;
                     return err;
                 };
-            }
 
             return &res.value_ptr.value;
         }

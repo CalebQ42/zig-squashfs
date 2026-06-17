@@ -2,7 +2,7 @@ const std = @import("std");
 const Io = std.Io;
 const Writer = Io.Writer;
 const builtin = @import("builtin");
-const build = @import("build_options");
+const build = @import("build");
 
 const squashfs = @import("squashfs");
 
@@ -41,7 +41,7 @@ var force: bool = false;
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
-    const alloc = init.alloc;
+    const alloc = init.gpa;
 
     var stdout = Io.File.stdout();
     var out = stdout.writer(io, &[0]u8{});
@@ -54,23 +54,23 @@ pub fn main(init: std.process.Init) !void {
         return;
     }
     var fil = try Io.Dir.cwd().openFile(io, archive, .{}); //TODO: Handle error gracefully.
-    defer fil.close();
+    defer fil.close(io);
     var arc: squashfs.Archive = try .init(io, fil, offset); //TODO: Update when memory size matters. //TODO: Handle error gracefully.
-    defer arc.deinit();
+    defer arc.deinit(io);
     const options: squashfs.ExtractionOptions = .{
-        .single_threaded = threads == 1,
+        .single_threaded = (threads == 1),
         .verbose = verbose,
         .verbose_writer = if (verbose) &out.interface else null,
         .ignore_xattr = ignore_xattrs,
         .ignore_permissions = ignore_permissions,
     };
     if (force)
-        try std.fs.cwd().deleteTree(ext_loc);
+        try Io.Dir.cwd().deleteTree(io, ext_loc);
     if (threads > 1) {
         var limited_io = Io.Threaded.init(alloc, .{
             .argv0 = .init(init.minimal.args),
-            .async_limit = threads,
-            .concurrent_limit = threads,
+            .async_limit = @enumFromInt(threads),
+            .concurrent_limit = @enumFromInt(threads),
             .environ = init.minimal.environ,
         });
         try arc.extract(alloc, limited_io.io(), ext_loc, options); //TODO: Handle error gracefully.

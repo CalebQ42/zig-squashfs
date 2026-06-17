@@ -76,7 +76,8 @@ fn blockThread(self: Extractor, alloc: std.mem.Allocator, io: Io, map_data: []u8
         self.size % self.block_size
     else
         self.block_size;
-    const offset = self.block_size * block_idx;
+
+    const offset = block_idx * self.block_size;
 
     const block = self.blocks[block_idx];
 
@@ -92,17 +93,22 @@ fn blockThread(self: Extractor, alloc: std.mem.Allocator, io: Io, map_data: []u8
         return;
     }
 
+    std.debug.print("offset: {} start: {} block: {any}\n", .{ read_offset, self.start, block });
+
     if (self.cache != null) {
         const decomp_block = self.cache.?.get(io, read_offset, block.size) catch |inner_err| {
+            std.debug.print("cache extractor err: {}\n", .{inner_err});
             switch (inner_err) {
                 error.Canceled => return error.Canceled,
                 else => |e| err.* = e,
             }
             return;
         };
+        std.debug.print("cached block size: {} should be {}\n", .{ decomp_block.len, size });
         @memcpy(map_data[offset..][0..size], decomp_block[0..size]);
     } else {
         _ = self.decomp(alloc, data, map_data[offset..][0..size]) catch |inner_err| {
+            std.debug.print("data decomp err: {}\n", .{inner_err});
             err.* = inner_err;
         };
     }

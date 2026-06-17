@@ -58,10 +58,10 @@ pub fn Table(comptime T: anytype) type {
             return values.*[block_idx];
         }
 
-        pub fn getBlock(alloc: std.mem.Allocator, data: []u8, decomp: Decomp.Fn, table_start: u64, table_num: u32, block_idx: u32) ![]T {
+        fn getBlock(alloc: std.mem.Allocator, data: []u8, decomp: Decomp.Fn, table_start: u64, table_num: u32, block_idx: u32) ![]T {
             const offset: u64 = std.mem.readInt(u64, data[table_start + (block_idx * 8) ..][0..8], .little);
 
-            const block = try alloc.alloc(T, if (block_idx == (table_num - 1 / VALUES_PER_BLOCK))
+            const block = try alloc.alloc(T, if (block_idx == (table_num - 1) / VALUES_PER_BLOCK)
                 table_num % VALUES_PER_BLOCK
             else
                 VALUES_PER_BLOCK);

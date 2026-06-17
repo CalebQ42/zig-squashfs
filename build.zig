@@ -12,10 +12,10 @@ pub fn build(b: *std.Build) !void {
 
     const version: std.SemanticVersion = try .parse(version_string_option);
 
-    const build_options = b.addOptions();
-    build_options.addOption(bool, "use_zig_decomp", use_zig_decomp);
-    build_options.addOption(bool, "allow_lzo", allow_lzo);
-    build_options.addOption(std.SemanticVersion, "version", version);
+    const options = b.addOptions();
+    options.addOption(bool, "use_zig_decomp", use_zig_decomp);
+    options.addOption(bool, "allow_lzo", allow_lzo);
+    options.addOption(std.SemanticVersion, "version", version);
 
     const c = b.addTranslateC(.{
         .optimize = optimize,
@@ -44,7 +44,7 @@ pub fn build(b: *std.Build) !void {
             .valgrind = debug,
             .imports = &.{
                 .{ .name = "c", .module = c.createModule() },
-                .{ .name = "build_options", .module = build_options.createModule() },
+                .{ .name = "build_options", .module = options.createModule() },
             },
         }),
     });
@@ -69,6 +69,9 @@ pub fn build(b: *std.Build) !void {
 
     b.installArtifact(lib);
 
+    const unsquashfs_options = b.addOptions();
+    unsquashfs_options.addOption(std.SemanticVersion, "version", version);
+
     const exe = b.addExecutable(.{
         .name = "unsquashfs",
         .use_llvm = debug,
@@ -80,10 +83,12 @@ pub fn build(b: *std.Build) !void {
             .valgrind = debug,
             .imports = &.{
                 .{ .name = "squashfs", .module = lib.root_module },
-                .{ .name = "build_options", .module = build_options.createModule() },
+                .{ .name = "build", .module = unsquashfs_options.createModule() },
             },
         }),
     });
+
+    b.installArtifact(exe);
 
     const mod_tests = b.addTest(.{
         .root_module = lib.root_module,

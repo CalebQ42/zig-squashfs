@@ -48,7 +48,9 @@ pub fn lz4(_: std.mem.Allocator, in: []u8, out: []u8) Error!usize {
 }
 pub fn zstd(_: std.mem.Allocator, in: []u8, out: []u8) Error!usize {
     const res = c.ZSTD_decompress(out.ptr, out.len, in.ptr, in.len);
-    if (c.ZSTD_isError(res) != 0)
+    if (c.ZSTD_isError(res) != 0) {
+        std.debug.print("decompression failed: {s}\n", .{c.ZSTD_getErrorName(res)});
         return Error.DecompressionFailed;
+    }
     return res;
 }

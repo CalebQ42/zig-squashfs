@@ -2,6 +2,7 @@ const std = @import("std");
 const Io = std.Io;
 
 const DataExtractor = @import("data/extractor.zig");
+const DataReader = @import("data/reader.zig");
 const Decomp = @import("decomp.zig");
 const Directory = @import("directory.zig");
 const ExtractionOptions = @import("options.zig");
@@ -83,7 +84,7 @@ fn finishLoop(alloc: std.mem.Allocator, io: Io, sel: *Io.Select(ReturnUnion), id
     var dirs: std.PriorityDequeue(PathReturn, void, dirOrder) = .empty;
     defer dirs.deinit(alloc);
     errdefer while (dirs.popMax()) |d|
-        alloc.free(d.path);
+        if (d.hdr.num != start_num) alloc.free(d.path);
 
     while (true) {
         const value: ReturnUnion = try sel.await();
@@ -178,7 +179,7 @@ fn extractDir(
     origin: bool,
 ) Error!PathReturn {
     defer if (!origin) inode.deinit(alloc);
-    errdefer alloc.free(path);
+    errdefer if (!origin) alloc.free(path);
 
     var ret: PathReturn = .{
         .hdr = inode.hdr,
@@ -189,7 +190,7 @@ fn extractDir(
 
     var dir: Directory = switch (inode.data) {
         .dir => |d| blk: {
-            var meta: MetadataReader = .init(alloc, data, decomp, d.block_start);
+            var meta: MetadataReader = .init(alloc, data, decomp, d.block_start + super.dir_start);
             try meta.interface.discardAll(d.block_offset);
 
             break :blk try Directory.init(alloc, &meta.interface, d.size);
@@ -197,7 +198,7 @@ fn extractDir(
         .ext_dir => |d| blk: {
             if (d.xattr_idx != 0xFFFFFFFF) ret.xattr_idx = d.xattr_idx;
 
-            var meta: MetadataReader = .init(alloc, data, decomp, d.block_start);
+            var meta: MetadataReader = .init(alloc, data, decomp, d.block_start + super.dir_start);
             try meta.interface.discardAll(d.block_offset);
 
             break :blk try Directory.init(alloc, &meta.interface, d.size);
@@ -237,7 +238,7 @@ fn extractFile(
     origin: bool,
 ) Error!PathReturn {
     defer if (!origin) inode.deinit(alloc);
-    errdefer alloc.free(path);
+    errdefer if (!origin) alloc.free(path);
 
     try io.checkCancel();
 
@@ -246,10 +247,53 @@ fn extractFile(
         .path = path,
     };
 
-    var ext: DataExtractor = switch (inode.data) {
+    // var ext: DataExtractor = switch (inode.data) {
+    //     .file => |f| blk: {
+    //         var rdr: DataExtractor = .init(data, decomp, block_size, f.blocks, f.size, f.block_start);
+    //         rdr.addCache(cache);
+
+    //         if (f.frag_idx == 0xFFFFFFFF) break :blk rdr;
+
+    //         const entry: Lookup.FragEntry = try frag_table.get(io, f.frag_idx);
+    //         if (entry.size.uncompressed) {
+    //             rdr.addFrag(data[entry.block_start..][0..entry.size.size], f.frag_offset);
+    //         } else {
+    //             rdr.addFrag(try cache.get(io, entry.block_start, entry.size.size), f.frag_offset);
+    //         }
+
+    //         break :blk rdr;
+    //     },
+    //     .ext_file => |f| blk: {
+    //         if (f.xattr_idx != 0xFFFFFFFF) ret.xattr_idx = f.xattr_idx;
+
+    //         var rdr: DataExtractor = .init(data, decomp, block_size, f.blocks, f.size, f.block_start);
+    //         rdr.addCache(cache);
+
+    //         if (f.frag_idx == 0xFFFFFFFF) break :blk rdr;
+
+    //         const entry: Lookup.FragEntry = try frag_table.get(io, f.frag_idx);
+    //         if (entry.size.uncompressed) {
+    //             rdr.addFrag(data[entry.block_start..][0..entry.size.size], f.frag_offset);
+    //         } else {
+    //             rdr.addFrag(try cache.get(io, entry.block_start, entry.size.size), f.frag_offset);
+    //         }
+
+    //         break :blk rdr;
+    //     },
+    //     else => unreachable,
+    // };
+
+    // var atomic = try Io.Dir.cwd().createFileAtomic(io, path, .{});
+    // defer atomic.deinit(io);
+
+    // try ext.extractAsync(alloc, io, atomic.file);
+
+    // try atomic.link(io);
+
+    var rdr: DataReader = switch (inode.data) {
         .file => |f| blk: {
-            var rdr: DataExtractor = .init(data, decomp, block_size, f.blocks, f.size, f.block_start);
-            rdr.addCache(cache);
+            var rdr: DataReader = .init(alloc, data, decomp, block_size, f.blocks, f.size, f.block_start);
+            rdr.addCache(io, cache);
 
             if (f.frag_idx == 0xFFFFFFFF) break :blk rdr;
 
@@ -265,8 +309,8 @@ fn extractFile(
         .ext_file => |f| blk: {
             if (f.xattr_idx != 0xFFFFFFFF) ret.xattr_idx = f.xattr_idx;
 
-            var rdr: DataExtractor = .init(data, decomp, block_size, f.blocks, f.size, f.block_start);
-            rdr.addCache(cache);
+            var rdr: DataReader = .init(alloc, data, decomp, block_size, f.blocks, f.size, f.block_start);
+            rdr.addCache(io, cache);
 
             if (f.frag_idx == 0xFFFFFFFF) break :blk rdr;
 
@@ -285,7 +329,9 @@ fn extractFile(
     var atomic = try Io.Dir.cwd().createFileAtomic(io, path, .{});
     defer atomic.deinit(io);
 
-    try ext.extractAsync(alloc, io, atomic.file);
+    var writer = atomic.file.writer(io, &[0]u8{});
+    _ = try rdr.interface.streamRemaining(&writer.interface);
+    try writer.flush();
 
     try atomic.link(io);
 
@@ -372,7 +418,7 @@ const ReturnUnion = union(enum) {
 };
 
 const Error = error{MknodError} || Decomp.Error || Directory.Error || DataExtractor.Error || Io.Dir.CreateDirPathError ||
-    Io.Dir.SymLinkError || Io.File.Atomic.LinkError;
+    Io.Dir.SymLinkError || Io.File.Atomic.LinkError || Io.Reader.StreamRemainingError;
 
 const PathReturn = struct {
     hdr: Inode.Header,
