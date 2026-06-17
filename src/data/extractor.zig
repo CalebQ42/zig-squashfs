@@ -19,7 +19,7 @@ size: u64,
 frag_data: ?[]u8 = null,
 frag_offset: u32 = 0,
 
-cache: ?Cache = null,
+cache: ?*Cache = null,
 
 pub fn init(data: []u8, decomp: Decomp.Fn, block_size: u32, blocks: []DataBlock, start: u64, size: u64) Extractor {
     return .{
@@ -37,7 +37,7 @@ pub fn addFrag(self: *Extractor, frag_data: []u8, frag_offset: u32) void {
     self.frag_data = frag_data;
     self.frag_offset = frag_offset;
 }
-pub fn addCache(self: *Extractor, cache: Cache) void {
+pub fn addCache(self: *Extractor, cache: *Cache) void {
     self.cache = cache;
 }
 
@@ -57,7 +57,7 @@ pub fn extractAsync(self: Extractor, alloc: std.mem.Allocator, io: Io, file: Io.
 
     var read_offset: u64 = self.start;
     for (0.., self.blocks) |i, block| {
-        group.async(io, blockThread, .{ self, alloc, map.memory, read_offset, i, &err });
+        group.async(io, blockThread, .{ self, alloc, io, map.memory, read_offset, @truncate(i), &err });
         read_offset += block.size;
     }
     if (self.frag_data != null)
@@ -66,12 +66,12 @@ pub fn extractAsync(self: Extractor, alloc: std.mem.Allocator, io: Io, file: Io.
     try group.await(io);
 
     if (err != null)
-        return err;
+        return err.?;
 
     try map.write(io);
 }
 
-fn blockThread(self: Extractor, alloc: std.mem.Allocator, map_data: []u8, read_offset: u64, block_idx: u32, err: *?Error) error{Canceled}!void {
+fn blockThread(self: Extractor, alloc: std.mem.Allocator, io: Io, map_data: []u8, read_offset: u64, block_idx: u32, err: *?Error) error{Canceled}!void {
     const size = if (self.frag_data == null and block_idx == (self.size - 1 / self.block_size))
         self.size % self.block_size
     else
@@ -93,7 +93,7 @@ fn blockThread(self: Extractor, alloc: std.mem.Allocator, map_data: []u8, read_o
     }
 
     if (self.cache != null) {
-        const decomp_block = self.cache.?.get(read_offset, block.size) catch |inner_err| {
+        const decomp_block = self.cache.?.get(io, read_offset, block.size) catch |inner_err| {
             switch (inner_err) {
                 error.Canceled => return error.Canceled,
                 else => |e| err.* = e,

@@ -22,7 +22,7 @@ pub fn extract(
     ext_loc: []const u8,
     options: ExtractionOptions,
 ) !void {
-    const path = std.mem.trim(ext_loc, "/");
+    const path = std.mem.trim(u8, ext_loc, "/");
 
     var cache: Cache = .init(alloc, data, decomp);
     defer cache.deinit();
@@ -84,7 +84,7 @@ pub fn extractReal(
                     var meta: MetadaReader = .init(alloc, data, decomp, d.block_start);
                     try meta.interface.discardAll(d.block_offset);
 
-                    break :blk Directory.init(alloc, &meta.interface, d.size);
+                    break :blk try Directory.init(alloc, &meta.interface, d.size);
                 },
                 .ext_dir => |d| blk: {
                     if (d.xattr_idx != 0xFFFFFFFF) xattr_idx = d.xattr_idx;
@@ -92,7 +92,7 @@ pub fn extractReal(
                     var meta: MetadaReader = .init(alloc, data, decomp, d.block_start);
                     try meta.interface.discardAll(d.block_offset);
 
-                    break :blk Directory.init(alloc, &meta.interface, d.size);
+                    break :blk try Directory.init(alloc, &meta.interface, d.size);
                 },
                 else => unreachable,
             };
@@ -101,7 +101,7 @@ pub fn extractReal(
             for (dir.entries) |entry| {
                 var new_inode: Inode = try .initEntry(alloc, data, decomp, super.inode_start, super.block_size, entry);
 
-                const new_path = std.mem.concat(alloc, &.{ path, "/", entry.name }) catch |err| {
+                const new_path = std.mem.concat(alloc, u8, &.{ path, "/", entry.name }) catch |err| {
                     new_inode.deinit(alloc);
                     return err;
                 };
@@ -113,31 +113,35 @@ pub fn extractReal(
             var rdr: DataReader = switch (inode.data) {
                 .file => |f| blk: {
                     var rdr: DataReader = .init(alloc, data, decomp, super.block_size, f.blocks, f.size, f.block_start);
-                    rdr.addCache(cache);
+                    rdr.addCache(io, cache);
 
                     if (f.frag_idx == 0xFFFFFFFF) break :blk rdr;
 
                     const entry: Lookup.FragEntry = try frag_table.get(io, f.frag_idx);
                     if (entry.size.uncompressed) {
-                        rdr.addFrag(data[entry.block_start..][0..entry.size.size]);
+                        rdr.addFrag(data[entry.block_start..][0..entry.size.size], f.frag_offset);
                     } else {
-                        rdr.addFrag(try cache.get(io, entry.block_start, entry.size));
+                        rdr.addFrag(try cache.get(io, entry.block_start, entry.size.size), f.frag_offset);
                     }
+
+                    break :blk rdr;
                 },
                 .ext_file => |f| blk: {
                     if (f.xattr_idx != 0xFFFFFFFF) xattr_idx = f.xattr_idx;
 
                     var rdr: DataReader = .init(alloc, data, decomp, super.block_size, f.blocks, f.size, f.block_start);
-                    rdr.addCache(cache);
+                    rdr.addCache(io, cache);
 
                     if (f.frag_idx == 0xFFFFFFFF) break :blk rdr;
 
                     const entry: Lookup.FragEntry = try frag_table.get(io, f.frag_idx);
                     if (entry.size.uncompressed) {
-                        rdr.addFrag(data[entry.block_start..][0..entry.size.size]);
+                        rdr.addFrag(data[entry.block_start..][0..entry.size.size], f.frag_offset);
                     } else {
-                        rdr.addFrag(try cache.get(io, entry.block_start, entry.size));
+                        rdr.addFrag(try cache.get(io, entry.block_start, entry.size.size), f.frag_offset);
                     }
+
+                    break :blk rdr;
                 },
                 else => unreachable,
             };
@@ -221,7 +225,7 @@ pub fn extractReal(
         defer xattr.deinit(alloc);
 
         for (xattr.kvs) |kv| {
-            const res = std.os.linux.fsetxattr(fil.handle, kv.key, kv.value, kv.value.len, 0);
+            const res = std.os.linux.fsetxattr(fil.handle, kv.key, kv.value.ptr, kv.value.len, 0);
             if (res != 0)
                 return error.SetXattrError;
         }

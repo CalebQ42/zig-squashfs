@@ -29,7 +29,7 @@ pub fn deinit(self: *Cache) void {
 }
 
 pub fn get(self: *Cache, io: Io, offset: u64, compressed_size: u32) Error![]u8 {
-    const res: CachedBlock = try self.cache.getOrPut(io, offset, .{ self.alloc, self.data, self.decomp, offset, compressed_size });
+    const res: *CachedBlock = try self.cache.getOrPut(io, offset, .{ self.alloc, self.data, self.decomp, offset, compressed_size });
     return res.block[0..res.size];
 }
 

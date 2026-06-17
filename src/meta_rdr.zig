@@ -43,7 +43,7 @@ fn advance(self: *MetadataReader) Reader.Error!void {
     self.interface.seek = 0;
     errdefer self.interface.end = 0;
 
-    const hdr: Header = @intCast(std.mem.readInt(u16, self.data[self.cur_offset..][0..2], .little));
+    const hdr: Header = @bitCast(std.mem.readInt(u16, self.data[self.cur_offset..][0..2], .little));
     defer self.cur_offset += hdr.size;
 
     const block = self.data[self.cur_offset + 2 ..][0..hdr.size];

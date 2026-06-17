@@ -40,13 +40,13 @@ pub fn initRef(alloc: std.mem.Allocator, data: []u8, decomp: Decomp.Fn, inode_st
     var meta: MetadataReader = .init(alloc, data, decomp, inode_start + ref.block_start);
     try meta.interface.discardAll(ref.block_offset);
 
-    return .init(alloc, &meta.interface, block_size);
+    return .init(alloc, block_size, &meta.interface);
 }
 pub fn initEntry(alloc: std.mem.Allocator, data: []u8, decomp: Decomp.Fn, inode_start: u64, block_size: u32, entry: Directory.Entry) !Inode {
     var meta: MetadataReader = .init(alloc, data, decomp, inode_start + entry.block_start);
     try meta.interface.discardAll(entry.block_offset);
 
-    return .init(alloc, &meta.interface, block_size);
+    return .init(alloc, block_size, &meta.interface);
 }
 pub fn deinit(self: Inode, alloc: std.mem.Allocator) void {
     switch (self.data) {
@@ -64,7 +64,7 @@ pub fn extract(self: Inode, alloc: std.mem.Allocator, io: Io, super: Superblock,
 
 // Types
 
-pub const Ref = packed struct {
+pub const Ref = packed struct(u64) {
     block_offset: u16,
     block_start: u32,
     _: u16,
@@ -191,7 +191,7 @@ pub const ExtFile = struct {
         var data: [40]u8 = undefined;
         try rdr.readSliceAll(&data);
 
-        const frag_idx = std.mem.readInt(u32, data[28..], .little);
+        const frag_idx = std.mem.readInt(u32, data[28..32], .little);
         const size = std.mem.readInt(u64, data[8..16], .little);
 
         var blocks_num = size / block_size;
@@ -238,7 +238,7 @@ pub const ExtSymlink = struct {
     xattr_idx: u32,
 
     fn init(alloc: std.mem.Allocator, rdr: *Reader) !ExtSymlink {
-        const sym: Symlink = .init(alloc, rdr);
+        const sym: Symlink = try .init(alloc, rdr);
 
         var xattr_idx: u32 = undefined;
         try rdr.readSliceEndian(u32, @ptrCast(&xattr_idx), .little);

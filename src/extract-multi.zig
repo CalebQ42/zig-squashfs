@@ -22,7 +22,7 @@ pub fn extract(
     ext_loc: []const u8,
     options: ExtractionOptions,
 ) !void {
-    const path = std.mem.trim(ext_loc, "/");
+    const path = std.mem.trim(u8, ext_loc, "/");
 
     var id_table: Lookup.Table(u16) = .init(alloc, data, decomp, super.id_start, super.id_count);
     defer id_table.deinit();
@@ -42,7 +42,7 @@ pub fn extract(
             else => {},
         };
 
-    var loop = io.async(io, finishLoop, .{ alloc, io, &sel, &id_table, &xattr_table, inode.hdr.num, options });
+    var loop = io.async(finishLoop, .{ alloc, io, &sel, &id_table, &xattr_table, inode.hdr.num, options });
 
     var cache: Cache = .init(alloc, data, decomp);
     defer cache.deinit();
@@ -51,22 +51,22 @@ pub fn extract(
     defer frag_table.deinit();
 
     switch (inode.hdr.type) {
-        .file, .ext_file => try sel.async(
+        .file, .ext_file => sel.async(
             .path,
             extractFile,
             .{ alloc, io, data, decomp, super.block_size, &cache, &frag_table, inode, path, true },
         ),
-        .dir, .ext_dir => try sel.async(
+        .dir, .ext_dir => sel.async(
             .path,
             extractDir,
             .{ alloc, io, super, data, decomp, &sel, &cache, &frag_table, inode, path, true },
         ),
-        .symlink, .ext_symlink => try sel.async(
+        .symlink, .ext_symlink => sel.async(
             .void,
             extractSymlink,
             .{ alloc, io, inode, path, true },
         ),
-        else => try sel.async(
+        else => sel.async(
             .path,
             extractNod,
             .{ alloc, inode, path, true },
@@ -76,7 +76,7 @@ pub fn extract(
     try loop.await(io);
 }
 
-fn dirOrder(a: PathReturn, b: PathReturn) std.math.Order {
+fn dirOrder(_: void, a: PathReturn, b: PathReturn) std.math.Order {
     return std.math.order(std.mem.count(u8, a.path, "/"), std.mem.count(u8, b.path, "/"));
 }
 fn finishLoop(alloc: std.mem.Allocator, io: Io, sel: *Io.Select(ReturnUnion), id_table: *Lookup.Table(u16), xattr_table: *XattrTable, start_num: u32, options: ExtractionOptions) !void {
@@ -88,12 +88,19 @@ fn finishLoop(alloc: std.mem.Allocator, io: Io, sel: *Io.Select(ReturnUnion), id
     while (true) {
         const value: ReturnUnion = try sel.await();
 
-        switch (value) {
-            .void => continue,
-            else => {},
-        }
+        const path_ret = switch (value) {
+            .void => {
+                _ = sel.group.token.load(.unordered) orelse break;
+                continue;
+            },
+            .path => |p| try p,
+        };
 
-        const path_ret: PathReturn = value.path;
+        if (options.ignore_permissions and (options.ignore_xattr or path_ret.xattr_idx == null)) {
+            if (path_ret.hdr.num != start_num)
+                alloc.free(path_ret.path);
+            continue;
+        }
 
         if (path_ret.hdr.type == .dir or path_ret.hdr.type == .ext_dir) {
             dirs.push(alloc, path_ret) catch |err| {
@@ -106,17 +113,43 @@ fn finishLoop(alloc: std.mem.Allocator, io: Io, sel: *Io.Select(ReturnUnion), id
         defer if (path_ret.hdr.num != start_num)
             alloc.free(path_ret.path);
 
-        if (options.ignore_permissions and (options.ignore_xattr or path_ret.xattr_idx == null)) continue;
-
         var file = try Io.Dir.cwd().openFile(io, path_ret.path, .{});
-        defer file.close();
+        defer file.close(io);
 
         if (!options.ignore_xattr and path_ret.xattr_idx != null) {
             const xattr = try xattr_table.get(alloc, io, path_ret.xattr_idx.?);
             defer xattr.deinit(alloc);
 
             for (xattr.kvs) |kv| {
-                const res = std.os.linux.fsetxattr(file.handle, kv.key, kv.value, kv.value.len, 0);
+                const res = std.os.linux.fsetxattr(file.handle, kv.key, kv.value.ptr, kv.value.len, 0);
+                if (res != 0)
+                    return error.SetXattrError;
+            }
+        }
+        if (!options.ignore_permissions) {
+            try file.setTimestamps(io, .{
+                .modify_timestamp = .init(Io.Timestamp.fromNanoseconds(@as(i96, @intCast(path_ret.hdr.mod_time)) * std.time.ns_per_s)),
+            });
+            try file.setPermissions(io, @enumFromInt(path_ret.hdr.permissions));
+            try file.setOwner(io, try id_table.get(io, path_ret.hdr.uid_idx), try id_table.get(io, path_ret.hdr.gid_idx));
+        }
+
+        _ = sel.group.token.load(.unordered) orelse break;
+    }
+
+    while (dirs.popMax()) |path_ret| {
+        if (path_ret.hdr.num != start_num)
+            alloc.free(path_ret.path);
+
+        var file = try Io.Dir.cwd().openFile(io, path_ret.path, .{});
+        defer file.close(io);
+
+        if (!options.ignore_xattr and path_ret.xattr_idx != null) {
+            const xattr = try xattr_table.get(alloc, io, path_ret.xattr_idx.?);
+            defer xattr.deinit(alloc);
+
+            for (xattr.kvs) |kv| {
+                const res = std.os.linux.fsetxattr(file.handle, kv.key, kv.value.ptr, kv.value.len, 0);
                 if (res != 0)
                     return error.SetXattrError;
             }
@@ -159,7 +192,7 @@ fn extractDir(
             var meta: MetadataReader = .init(alloc, data, decomp, d.block_start);
             try meta.interface.discardAll(d.block_offset);
 
-            break :blk Directory.init(alloc, &meta.interface, d.size);
+            break :blk try Directory.init(alloc, &meta.interface, d.size);
         },
         .ext_dir => |d| blk: {
             if (d.xattr_idx != 0xFFFFFFFF) ret.xattr_idx = d.xattr_idx;
@@ -167,7 +200,7 @@ fn extractDir(
             var meta: MetadataReader = .init(alloc, data, decomp, d.block_start);
             try meta.interface.discardAll(d.block_offset);
 
-            break :blk Directory.init(alloc, &meta.interface, d.size);
+            break :blk try Directory.init(alloc, &meta.interface, d.size);
         },
         else => unreachable,
     };
@@ -176,7 +209,7 @@ fn extractDir(
     for (dir.entries) |entry| {
         var new_inode: Inode = try .initEntry(alloc, data, decomp, super.inode_start, super.block_size, entry);
 
-        const new_path = std.mem.concat(alloc, &.{ path, "/", entry.name }) catch |err| {
+        const new_path = std.mem.concat(alloc, u8, &.{ path, "/", entry.name }) catch |err| {
             new_inode.deinit(alloc);
             return err;
         };
@@ -184,10 +217,12 @@ fn extractDir(
         switch (entry.type) {
             .dir => sel.async(.path, extractDir, .{ alloc, io, super, data, decomp, sel, cache, frag_table, new_inode, new_path, false }),
             .file => sel.async(.path, extractFile, .{ alloc, io, data, decomp, super.block_size, cache, frag_table, new_inode, new_path, false }),
-            .symlink => sel.async(.void, extractSymlink, .{ alloc, io, data, decomp, new_inode, new_path, false }),
-            else => sel.async(.path, extractNod, .{ alloc, data, decomp, new_inode, new_path, false }),
+            .symlink => sel.async(.void, extractSymlink, .{ alloc, io, new_inode, new_path, false }),
+            else => sel.async(.path, extractNod, .{ alloc, new_inode, new_path, false }),
         }
     }
+
+    return ret;
 }
 fn extractFile(
     alloc: std.mem.Allocator,
@@ -220,10 +255,12 @@ fn extractFile(
 
             const entry: Lookup.FragEntry = try frag_table.get(io, f.frag_idx);
             if (entry.size.uncompressed) {
-                rdr.addFrag(data[entry.block_start..][0..entry.size.size]);
+                rdr.addFrag(data[entry.block_start..][0..entry.size.size], f.frag_offset);
             } else {
-                rdr.addFrag(try cache.get(io, entry.block_start, entry.size));
+                rdr.addFrag(try cache.get(io, entry.block_start, entry.size.size), f.frag_offset);
             }
+
+            break :blk rdr;
         },
         .ext_file => |f| blk: {
             if (f.xattr_idx != 0xFFFFFFFF) ret.xattr_idx = f.xattr_idx;
@@ -235,10 +272,12 @@ fn extractFile(
 
             const entry: Lookup.FragEntry = try frag_table.get(io, f.frag_idx);
             if (entry.size.uncompressed) {
-                rdr.addFrag(data[entry.block_start..][0..entry.size.size]);
+                rdr.addFrag(data[entry.block_start..][0..entry.size.size], f.frag_offset);
             } else {
-                rdr.addFrag(try cache.get(io, entry.block_start, entry.size));
+                rdr.addFrag(try cache.get(io, entry.block_start, entry.size.size), f.frag_offset);
             }
+
+            break :blk rdr;
         },
         else => unreachable,
     };
@@ -329,11 +368,11 @@ fn extractNod(alloc: std.mem.Allocator, inode: Inode, path: []const u8, origin: 
 
 const ReturnUnion = union(enum) {
     path: Error!PathReturn,
-    dir: Error!PathReturn,
     void: Error!void,
 };
 
-const Error = error{} || Decomp.Error || Directory.Error || DataExtractor.Error;
+const Error = error{MknodError} || Decomp.Error || Directory.Error || DataExtractor.Error || Io.Dir.CreateDirPathError ||
+    Io.Dir.SymLinkError || Io.File.Atomic.LinkError;
 
 const PathReturn = struct {
     hdr: Inode.Header,

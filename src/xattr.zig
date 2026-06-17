@@ -28,7 +28,7 @@ pub fn deinit(self: *XattrTable) void {
 pub fn get(self: *XattrTable, alloc: std.mem.Allocator, io: Io, idx: u32) !Xattr {
     const entry: Entry = try self.table.get(io, idx);
 
-    const out: std.ArrayList(KeyValue) = try .initCapacity(alloc, entry.count);
+    var out: std.ArrayList(KeyValue) = try .initCapacity(alloc, entry.count);
     errdefer {
         for (out.items) |kv|
             kv.deinit(alloc);
@@ -75,6 +75,8 @@ pub fn get(self: *XattrTable, alloc: std.mem.Allocator, io: Io, idx: u32) !Xattr
             .value = value,
         };
     }
+
+    return .{ .kvs = try out.toOwnedSlice(alloc) };
 }
 
 fn readValue(alloc: std.mem.Allocator, rdr: *Io.Reader) ![]u8 {

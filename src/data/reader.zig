@@ -24,7 +24,8 @@ sparse_block: bool = false,
 frag_data: ?[]u8 = null,
 frag_offset: u32 = 0,
 
-cache: ?Cache = null,
+io: ?Io = null,
+cache: ?*Cache = null,
 
 block: [1024 * 1024]u8 = undefined,
 
@@ -58,7 +59,8 @@ pub fn addFrag(self: *Reader, frag_data: []u8, frag_offset: u32) void {
     self.frag_data = frag_data;
     self.frag_offset = frag_offset;
 }
-pub fn addCache(self: *Reader, cache: Cache) void {
+pub fn addCache(self: *Reader, io: Io, cache: *Cache) void {
+    self.io = io;
     self.cache = cache;
 }
 
@@ -92,7 +94,7 @@ fn advance(self: *Reader) Io.Reader.Error!void {
 
     if (block.size == 0) {
         self.sparse_block = true;
-        self.end = size;
+        self.interface.end = size;
         return;
     } else {
         self.sparse_block = false;
@@ -109,7 +111,7 @@ fn advance(self: *Reader) Io.Reader.Error!void {
         self.interface.buffer = self.block[0..size];
         self.interface.end = size;
     } else {
-        self.interface.buffer = self.cache.?.get(self.io, self.offset, block.size) catch return error.ReadFailed;
+        self.interface.buffer = self.cache.?.get(self.io.?, self.offset, block.size) catch return error.ReadFailed;
         self.interface.end = self.interface.buffer.len;
     }
 }
@@ -119,7 +121,7 @@ fn stream(r: *Io.Reader, w: *Io.Writer, limit: Io.Limit) Io.Reader.StreamError!u
     if (r.seek >= r.end)
         try self.advance();
 
-    if (limit == .nothing) return;
+    if (limit == .nothing) return 0;
 
     const to_write = @min(@intFromEnum(limit), r.end - r.seek);
 
@@ -136,7 +138,7 @@ fn discard(r: *Io.Reader, limit: Io.Limit) Io.Reader.Error!usize {
         const self: *Reader = @fieldParentPtr("interface", r);
         try self.advance();
     }
-    if (limit == .nothing) return;
+    if (limit == .nothing) return 0;
 
     const to_discard = @min(@intFromEnum(limit), r.end - r.seek);
 

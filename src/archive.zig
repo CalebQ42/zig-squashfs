@@ -67,7 +67,7 @@ pub fn extract(self: Archive, alloc: std.mem.Allocator, io: Io, location: []cons
     );
     defer root_inode.deinit(alloc);
 
-    root_inode.extract(alloc, io, self.super, self.map.memory, self.decomp, location, options);
+    return root_inode.extract(alloc, io, self.super, self.map.memory, self.decomp, location, options);
 }
 
 // Superblock

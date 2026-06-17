@@ -2,12 +2,14 @@ const std = @import("std");
 const Io = std.Io;
 
 pub fn ProtectedMap(comptime K: anytype, comptime T: anytype, comptime create_fn: anytype) type {
-    std.debug.assert(std.meta.activeTag(@typeInfo(create_fn)) == .@"fn");
+    const fn_info = @typeInfo(@TypeOf(create_fn));
+    std.debug.assert(std.meta.activeTag(fn_info) == .@"fn");
 
-    const ret_info = @typeInfo(create_fn).@"fn".return_type;
+    const ret_info = fn_info.@"fn".return_type;
 
+    std.debug.assert(ret_info != null);
     std.debug.assert(ret_info == T or
-        (std.meta.activeTag(@typeInfo(ret_info)) == .error_union and @typeInfo(ret_info).error_union.payload == T));
+        (std.meta.activeTag(@typeInfo(ret_info.?)) == .error_union and @typeInfo(ret_info.?).error_union.payload == T));
 
     return struct {
         const Map = @This();
@@ -28,7 +30,7 @@ pub fn ProtectedMap(comptime K: anytype, comptime T: anytype, comptime create_fn
             self.map.deinit();
         }
 
-        pub fn getOrPut(self: *Map, io: Io, key: K, create_fn_args: std.meta.ArgsTuple(create_fn)) Error!*T {
+        pub fn getOrPut(self: *Map, io: Io, key: K, create_fn_args: std.meta.ArgsTuple(@TypeOf(create_fn))) Error!*T {
             {
                 try self.mut.lockShared(io);
                 defer self.mut.unlockShared(io);
@@ -36,9 +38,9 @@ pub fn ProtectedMap(comptime K: anytype, comptime T: anytype, comptime create_fn
                 const value = self.map.getPtr(key);
                 if (value != null) {
                     if (!value.?.filled.isSet())
-                        value.?.filled.wait(io);
-                    if (value.?.err != null) return value.?.err != null;
-                    return value.?.value;
+                        try value.?.filled.wait(io);
+                    if (value.?.err != null) return value.?.err.?;
+                    return &value.?.value;
                 }
             }
             try self.mut.lock(io);
@@ -54,7 +56,7 @@ pub fn ProtectedMap(comptime K: anytype, comptime T: anytype, comptime create_fn
             res.value_ptr.* = .{};
             defer res.value_ptr.filled.set(io);
 
-            res.mut.unlock(io);
+            self.mut.unlock(io);
 
             self.mut.lockSharedUncancelable(io);
             defer self.mut.unlockShared(io);
@@ -64,8 +66,11 @@ pub fn ProtectedMap(comptime K: anytype, comptime T: anytype, comptime create_fn
             } else {
                 res.value_ptr.value = @call(.auto, create_fn, create_fn_args) catch |err| {
                     res.value_ptr.err = err;
+                    return err;
                 };
             }
+
+            return &res.value_ptr.value;
         }
 
         // Map Types
@@ -73,7 +78,7 @@ pub fn ProtectedMap(comptime K: anytype, comptime T: anytype, comptime create_fn
         pub const Error = error{ Canceled, OutOfMemory } ||
             if (@TypeOf(CreateError) == void) error{} else CreateError;
 
-        const CreateError: type = switch (@typeInfo(@typeInfo(create_fn).@"fn".return_type)) {
+        const CreateError: type = switch (@typeInfo(ret_info.?)) {
             .error_union => |e| e.error_set,
             else => void,
         };

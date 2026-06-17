@@ -40,7 +40,7 @@ pub fn initEntry(alloc: std.mem.Allocator, super: Superblock, data: []u8, decomp
     const inode: Inode = try .initEntry(alloc, data, decomp, super.inode_start, super.block_size, entry);
     errdefer inode.deinit(alloc);
 
-    const new_name = try alloc.dupe(entry.name);
+    const new_name = try alloc.dupe(u8, entry.name);
 
     return init(alloc, super, data, decomp, new_name, inode);
 }
@@ -49,22 +49,22 @@ pub fn initRef(alloc: std.mem.Allocator, super: Superblock, data: []u8, decomp: 
     const inode: Inode = try .initRef(alloc, data, decomp, super.inode_start, super.block_size, ref);
     errdefer inode.deinit(alloc);
 
-    const new_name = try alloc.dupe(name);
+    const new_name = try alloc.dupe(u8, name);
 
     return init(alloc, super, data, decomp, new_name, inode);
 }
 pub fn copy(self: File, alloc: std.mem.Allocator) !File {
-    const inode = self.inode;
+    var inode = self.inode;
     switch (inode.data) {
-        .file => |*f| f.blocks = try alloc.dupe(self.inode.data.file.blocks),
-        .ext_file => |*f| f.blocks = try alloc.dupe(self.inode.data.file.blocks),
-        .symlink => |*s| s.target = try alloc.dupe(self.inode.data.symlink.target),
-        .ext_symlink => |*s| s.target = try alloc.dupe(self.inode.data.symlink.target),
+        .file => |*f| f.blocks = try alloc.dupe(Inode.DataBlock, self.inode.data.file.blocks),
+        .ext_file => |*f| f.blocks = try alloc.dupe(Inode.DataBlock, self.inode.data.file.blocks),
+        .symlink => |*s| s.target = try alloc.dupe(u8, self.inode.data.symlink.target),
+        .ext_symlink => |*s| s.target = try alloc.dupe(u8, self.inode.data.symlink.target),
         else => {},
     }
     errdefer inode.deinit(alloc);
 
-    const new_name = try alloc.dupe(self.name);
+    const new_name = try alloc.dupe(u8, self.name);
 
     return init(alloc, self.super, self.data, self.decomp, new_name, inode);
 }
@@ -92,7 +92,7 @@ pub fn open(self: File, alloc: std.mem.Allocator, filepath: []const u8) !File {
             try meta.interface.discardAll(d.block_offset);
             break :blk meta;
         },
-        else => error.NotDirectory,
+        else => return error.NotDirectory,
     };
 
     const path = std.mem.trim(u8, filepath, "/");
@@ -100,7 +100,7 @@ pub fn open(self: File, alloc: std.mem.Allocator, filepath: []const u8) !File {
     if (path.len == 0 or (path.len == 1 and path[0] == '.'))
         return self.copy(alloc);
 
-    const first_element: []u8 = std.mem.sliceTo(path, '/');
+    const first_element: []const u8 = std.mem.sliceTo(path, '/');
 
     const file: File = blk: {
         var directory: Directory = try .init(alloc, &meta.interface, size);

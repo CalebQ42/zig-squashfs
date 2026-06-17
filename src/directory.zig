@@ -15,7 +15,7 @@ pub fn init(alloc: std.mem.Allocator, rdr: *Reader, size: u64) !Directory {
 
     var read: u64 = 3;
 
-    var out: std.ArrayList(Entry) = .initCapacity(alloc, 50);
+    var out: std.ArrayList(Entry) = try .initCapacity(alloc, 50);
     errdefer {
         for (out.items) |entry|
             entry.deinit(alloc);
@@ -29,13 +29,13 @@ pub fn init(alloc: std.mem.Allocator, rdr: *Reader, size: u64) !Directory {
         try out.ensureUnusedCapacity(alloc, hdr.count + 1);
 
         for (0..hdr.count + 1) |_| {
-            try rdr.readSliceEndian(Entry, @ptrCast(&raw), .little);
+            try rdr.readSliceEndian(RawEntry, @ptrCast(&raw), .little);
 
             const name = try alloc.alloc(u8, raw.name_size + 1);
 
             try rdr.readSliceEndian(u8, name, .little);
 
-            const entry = out.addOneAssumeCapacity(alloc);
+            const entry = out.addOneAssumeCapacity();
 
             entry.* = .{
                 .name = name,
@@ -48,7 +48,7 @@ pub fn init(alloc: std.mem.Allocator, rdr: *Reader, size: u64) !Directory {
         }
     }
 
-    return out.toOwnedSlice(alloc);
+    return .{ .entries = try out.toOwnedSlice(alloc) };
 }
 pub fn deinit(self: Directory, alloc: std.mem.Allocator) void {
     for (self.entries) |entry|
@@ -64,7 +64,7 @@ pub const Entry = struct {
     name: []const u8,
     block_start: u32,
     block_offset: u16,
-    type: Inode.type,
+    type: Inode.Type,
 
     pub fn deinit(self: Entry, alloc: std.mem.Allocator) void {
         alloc.free(self.name);
