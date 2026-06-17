@@ -13,6 +13,8 @@ const help_mgs =
     \\
     \\Options:
     \\  -d <location>   Extract to the given location instead of "squashfs-root"
+    \\  -f <filepath>   Extract the files at the given filepath instead of the entire archive
+    \\                     Can be given multiple times.
     \\
     \\  -o <offset>     Start reading the archive at the given offset.
     \\  -dx             Don't set xattr values
@@ -38,9 +40,12 @@ var verbose: bool = false;
 var ignore_xattrs: bool = false;
 var ignore_permissions: bool = false;
 var force: bool = false;
+var files: [][:0]const u8 = &[0][:0]const u8{};
+
+var limited: ?Io.Threaded = null;
 
 pub fn main(init: std.process.Init) !void {
-    const io = init.io;
+    var io = init.io;
     const alloc = init.gpa;
 
     var stdout = Io.File.stdout();
@@ -64,22 +69,43 @@ pub fn main(init: std.process.Init) !void {
         .ignore_xattr = ignore_xattrs,
         .ignore_permissions = ignore_permissions,
     };
-    if (force)
-        try Io.Dir.cwd().deleteTree(io, ext_loc);
+
     if (threads > 1) {
-        var limited_io = Io.Threaded.init(alloc, .{
+        limited = Io.Threaded.init(alloc, .{
             .argv0 = .init(init.minimal.args),
             .async_limit = @enumFromInt(threads),
             .concurrent_limit = @enumFromInt(threads),
             .environ = init.minimal.environ,
         });
-        try arc.extract(alloc, limited_io.io(), ext_loc, options); //TODO: Handle error gracefully.
+        io = limited.?.io();
+    }
+
+    if (force)
+        try Io.Dir.cwd().deleteTree(io, ext_loc);
+
+    if (files.len > 0) {
+        for (0..files.len) |i| {
+            var sfs_fil = try arc.open(alloc, files[i]);
+            defer sfs_fil.deinit();
+
+            const last_ind = std.mem.lastIndexOf(u8, files[i], "/");
+            const file_name = if (last_ind != null) files[i][last_ind..] else files[i];
+
+            const fil_ext_loc = if (ext_loc.len > 0)
+                try std.mem.concat(alloc, u8, &.{ ext_loc, "/", file_name })
+            else
+                file_name;
+
+            defer if (fil_ext_loc.len != file_name.len) alloc.free(fil_ext_loc);
+
+            try sfs_fil.extract(alloc, io, fil_ext_loc, options);
+        }
     } else {
         try arc.extract(alloc, io, ext_loc, options); //TODO: Handle error gracefully.
     }
 }
 
-fn handleArgs(main_args: std.process.Args, out: *Writer) !void {
+fn handleArgs(alloc: std.mem.Allocator, main_args: std.process.Args, out: *Writer) !void {
     var args = main_args.iterate();
     defer args.deinit();
     _ = args.next(); // args[0] is the application launch command.
@@ -95,13 +121,29 @@ fn handleArgs(main_args: std.process.Args, out: *Writer) !void {
                 return errors.InvalidArguments;
             };
             continue;
+        } else if (std.mem.eql(u8, arg, "-f")) {
+            const nxt = args.next();
+            if (nxt == null or nxt.?.len == 0) {
+                try out.print("-d must be followed by a location\n", .{});
+                return errors.InvalidArguments;
+            }
+            if (!alloc.resize(files, files.len + 1)) {
+                const new_alloc = alloc.alloc([]const u8, files.len + 1);
+                @memcpy(new_alloc[0..files.len], files);
+                alloc.free(files);
+                files = new_alloc;
+            } else {
+                files.len += 1;
+            }
+            files[files.len - 1] = nxt.?;
+            continue;
         } else if (std.mem.eql(u8, arg, "-d")) {
             const nxt = args.next();
             if (nxt == null or nxt.?.len == 0) {
                 try out.print("-d must be followed by a location\n", .{});
                 return errors.InvalidArguments;
             }
-            ext_loc = nxt.?;
+            ext_loc = std.mem.trim(u8, nxt.?, "/");
             continue;
         } else if (std.mem.eql(u8, arg, "-p")) {
             const nxt = args.next();

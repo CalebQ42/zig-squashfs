@@ -1,4 +1,5 @@
 pub const Archive = @import("archive.zig");
+pub const File = @import("file.zig");
 pub const ExtractionOptions = @import("options.zig");
 
 test {
