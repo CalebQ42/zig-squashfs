@@ -98,6 +98,7 @@ fn readVec(r: *Reader, vec: [][]u8) Reader.Error!usize {
         @memcpy(v[0..to_cpy], r.buffer[r.seek..][0..to_cpy]);
 
         wrote += to_cpy;
+        r.seek += to_cpy;
 
         if (r.seek >= r.end) break;
     }

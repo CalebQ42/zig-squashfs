@@ -67,7 +67,7 @@ test "ExtractCompleteArchiveSingleThreadedOption" {
     const io = testing.io;
     const alloc = testing.allocator;
 
-    Io.Dir.cwd().deleteFile(io, TestFullExtractLocationSTOption) catch {};
+    Io.Dir.cwd().deleteTree(io, TestFullExtractLocationSTOption) catch {};
 
     var archive_file = try Io.Dir.cwd().openFile(io, TestArchive, .{});
     defer archive_file.close(io);
@@ -84,7 +84,7 @@ test "ExtractCompleteArchiveMultiThreaded" {
     const io = testing.io;
     const alloc = testing.allocator;
 
-    Io.Dir.cwd().deleteFile(io, TestFullExtractLocationMT) catch {};
+    Io.Dir.cwd().deleteTree(io, TestFullExtractLocationMT) catch {};
 
     var archive_file = try Io.Dir.cwd().openFile(io, TestArchive, .{});
     defer archive_file.close(io);

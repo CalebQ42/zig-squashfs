@@ -92,9 +92,6 @@ fn extractDir(
     path: []const u8,
     options: ExtractionOptions,
 ) !void {
-    std.debug.print("starting extract dir: {s}\n", .{path});
-    defer std.debug.print("end extract dir: {s}\n", .{path});
-
     var xattr_idx: ?u32 = null;
 
     try Io.Dir.cwd().createDirPath(io, path);
@@ -149,8 +146,6 @@ fn extractFile(
     path: []const u8,
     options: ExtractionOptions,
 ) !void {
-    std.debug.print("starting extract file: {s}\n", .{path});
-    defer std.debug.print("end extract file: {s}\n", .{path});
     var xattr_idx: ?u32 = null;
 
     var rdr: DataReader = switch (inode.data) {
@@ -201,8 +196,6 @@ fn extractFile(
     try setMetadata(alloc, io, id_table, xattr_table, inode, path, options, xattr_idx);
 }
 fn extractSymlink(io: Io, inode: Inode, path: []const u8) !void {
-    std.debug.print("starting extract symlink: {s}\n", .{path});
-    defer std.debug.print("end extract symlink: {s}\n", .{path});
     return switch (inode.data) {
         .symlink => |s| Io.Dir.cwd().symLink(io, s.target, path, .{}),
         .ext_symlink => |s| Io.Dir.cwd().symLink(io, s.target, path, .{}),
@@ -218,8 +211,6 @@ fn extractNod(
     path: []const u8,
     options: ExtractionOptions,
 ) !void {
-    std.debug.print("starting extract nod: {s}\n", .{path});
-    defer std.debug.print("end extract nod: {s}\n", .{path});
     var dev: u32 = 0;
     var mode: u32 = undefined;
 
