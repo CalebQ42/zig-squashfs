@@ -74,7 +74,11 @@ pub fn extract(
         ),
     }
 
-    try loop.await(io);
+    // try loop.await(io);
+    loop.await(io) catch |err| {
+        std.debug.print("err: {}\n", .{err});
+        return err;
+    };
 }
 
 fn dirOrder(_: void, a: PathReturn, b: PathReturn) std.math.Order {
@@ -139,7 +143,7 @@ fn finishLoop(alloc: std.mem.Allocator, io: Io, sel: *Io.Select(ReturnUnion), id
     }
 
     while (dirs.popMax()) |path_ret| {
-        if (path_ret.hdr.num != start_num)
+        defer if (path_ret.hdr.num != start_num)
             alloc.free(path_ret.path);
 
         var file = try Io.Dir.cwd().openFile(io, path_ret.path, .{});

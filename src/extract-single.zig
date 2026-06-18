@@ -59,13 +59,6 @@ fn setMetadata(
     var fil: Io.File = try Io.Dir.cwd().openFile(io, path, .{});
     defer fil.close(io);
 
-    if (!options.ignore_permissions) {
-        try fil.setTimestamps(io, .{
-            .modify_timestamp = .init(Io.Timestamp.fromNanoseconds(@as(i96, @intCast(inode.hdr.mod_time)) * std.time.ns_per_s)),
-        });
-        try fil.setPermissions(io, @enumFromInt(inode.hdr.permissions));
-        try fil.setOwner(io, try id_table.get(io, inode.hdr.uid_idx), try id_table.get(io, inode.hdr.gid_idx));
-    }
     if (!options.ignore_xattr and xattr_idx != null) {
         const xattr = try xattr_table.get(alloc, io, xattr_idx.?);
         defer xattr.deinit(alloc);
@@ -75,6 +68,13 @@ fn setMetadata(
             if (res != 0)
                 return error.SetXattrError;
         }
+    }
+    if (!options.ignore_permissions) {
+        try fil.setTimestamps(io, .{
+            .modify_timestamp = .init(Io.Timestamp.fromNanoseconds(@as(i96, @intCast(inode.hdr.mod_time)) * std.time.ns_per_s)),
+        });
+        try fil.setPermissions(io, @enumFromInt(inode.hdr.permissions));
+        try fil.setOwner(io, try id_table.get(io, inode.hdr.uid_idx), try id_table.get(io, inode.hdr.gid_idx));
     }
 }
 
