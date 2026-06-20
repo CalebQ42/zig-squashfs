@@ -2,8 +2,8 @@ const std = @import("std");
 const Io = std.Io;
 const Writer = Io.Writer;
 const builtin = @import("builtin");
-const build = @import("build");
 
+const build = @import("build");
 const squashfs = @import("squashfs");
 
 //TODO: Add more options
@@ -52,14 +52,16 @@ pub fn main(init: std.process.Init) !void {
     var out = stdout.writer(io, &[0]u8{});
     defer out.interface.flush() catch {};
 
-    try handleArgs(init.minimal.args, &out.interface);
+    try handleArgs(alloc, init.minimal.args, &out.interface);
     if (archive.len == 0) {
         try out.interface.print("You must provide a squashfs archive\n", .{});
         try out.interface.print(help_mgs, .{});
         return;
     }
+
     var fil = try Io.Dir.cwd().openFile(io, archive, .{}); //TODO: Handle error gracefully.
     defer fil.close(io);
+
     var arc: squashfs.Archive = try .init(io, fil, offset); //TODO: Update when memory size matters. //TODO: Handle error gracefully.
     defer arc.deinit(io);
     const options: squashfs.ExtractionOptions = .{
@@ -89,7 +91,7 @@ pub fn main(init: std.process.Init) !void {
             defer sfs_fil.deinit();
 
             const last_ind = std.mem.lastIndexOf(u8, files[i], "/");
-            const file_name = if (last_ind != null) files[i][last_ind..] else files[i];
+            const file_name = if (last_ind != null) files[i][last_ind.?..] else files[i];
 
             const fil_ext_loc = if (ext_loc.len > 0)
                 try std.mem.concat(alloc, u8, &.{ ext_loc, "/", file_name })
@@ -128,7 +130,7 @@ fn handleArgs(alloc: std.mem.Allocator, main_args: std.process.Args, out: *Write
                 return errors.InvalidArguments;
             }
             if (!alloc.resize(files, files.len + 1)) {
-                const new_alloc = alloc.alloc([]const u8, files.len + 1);
+                const new_alloc = try alloc.alloc([:0]const u8, files.len + 1);
                 @memcpy(new_alloc[0..files.len], files);
                 alloc.free(files);
                 files = new_alloc;

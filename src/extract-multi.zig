@@ -74,11 +74,7 @@ pub fn extract(
         ),
     }
 
-    // try loop.await(io);
-    loop.await(io) catch |err| {
-        std.debug.print("err: {}\n", .{err});
-        return err;
-    };
+    try loop.await(io);
 }
 
 fn dirOrder(_: void, a: PathReturn, b: PathReturn) std.math.Order {

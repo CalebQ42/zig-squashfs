@@ -90,24 +90,36 @@ pub fn build(b: *std.Build) !void {
 
     b.installArtifact(exe);
 
-    const mod_tests = b.addTest(.{
+    const lib_tests = b.addTest(.{
         .root_module = lib.root_module,
         .use_llvm = debug,
     });
-    const run_mod_tests = b.addRunArtifact(mod_tests);
+    const run_lib_tests = b.addRunArtifact(lib_tests);
+    const exe_tests = b.addTest(.{
+        .root_module = exe.root_module,
+        .use_llvm = debug,
+    });
+    const run_exe_tests = b.addRunArtifact(exe_tests);
+
     const test_step = b.step("test", "Run tests");
-    test_step.dependOn(&run_mod_tests.step);
+    test_step.dependOn(&run_lib_tests.step);
+    test_step.dependOn(&run_exe_tests.step);
 
     // zls build check steps
     const lib_check = b.addLibrary(.{
         .name = "squashfs",
         .root_module = lib.root_module,
+        .use_llvm = debug,
     });
     const exe_check = b.addExecutable(.{
         .name = "unsquashfs",
         .root_module = exe.root_module,
+        .use_llvm = debug,
     });
     const check = b.step("check", "Check if unsquashfs compiles");
     check.dependOn(&lib_check.step);
     check.dependOn(&exe_check.step);
+
+    test_step.dependOn(&lib_check.step);
+    test_step.dependOn(&exe_check.step);
 }
