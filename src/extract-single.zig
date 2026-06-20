@@ -183,6 +183,7 @@ fn extractFile(
         },
         else => unreachable,
     };
+    defer rdr.deinit();
 
     var atomic = try Io.Dir.cwd().createFileAtomic(io, path, .{});
     defer atomic.deinit(io);

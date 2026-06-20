@@ -27,7 +27,7 @@ frag_offset: u32 = 0,
 io: ?Io = null,
 cache: ?*Cache = null,
 
-block: [1024 * 1024]u8 = undefined,
+block_alloc: bool = false,
 
 interface: Io.Reader = .{
     .buffer = &[0]u8{},
@@ -55,6 +55,10 @@ pub fn init(alloc: std.mem.Allocator, data: []u8, decomp: Decomp.Fn, block_size:
         .offset = data_start,
     };
 }
+pub fn deinit(self: *Reader) void {
+    if (self.block_alloc)
+        self.alloc.free(self.interface.buffer);
+}
 pub fn addFrag(self: *Reader, frag_data: []u8, frag_offset: u32) void {
     self.frag_data = frag_data;
     self.frag_offset = frag_offset;
@@ -65,6 +69,8 @@ pub fn addCache(self: *Reader, io: Io, cache: *Cache) void {
 }
 
 fn advance(self: *Reader) Io.Reader.Error!void {
+    if (self.block_alloc) self.alloc.free(self.interface.buffer);
+
     if (self.block_idx > self.blocks.len) return error.EndOfStream;
     defer self.block_idx += 1;
 
@@ -92,6 +98,8 @@ fn advance(self: *Reader) Io.Reader.Error!void {
     const block = self.blocks[self.block_idx];
     defer self.offset += block.size;
 
+    std.debug.print("offset: {} block: {any}\n", .{ self.offset, block });
+
     if (block.size == 0) {
         self.sparse_block = true;
         self.interface.end = size;
@@ -107,8 +115,14 @@ fn advance(self: *Reader) Io.Reader.Error!void {
     }
 
     if (self.cache == null) {
-        _ = self.decomp(self.alloc, self.data[self.offset..][0..block.size], self.block[0..size]) catch return error.ReadFailed;
-        self.interface.buffer = self.block[0..size];
+        self.block_alloc = true;
+        self.interface.buffer = self.alloc.alloc(u8, size) catch return error.ReadFailed;
+        errdefer {
+            self.alloc.free(self.interface.buffer);
+            self.interface.buffer = &[0]u8{};
+        }
+
+        _ = self.decomp(self.alloc, self.data[self.offset..][0..block.size], self.interface.buffer) catch return error.ReadFailed;
         self.interface.end = size;
     } else {
         self.interface.buffer = self.cache.?.get(self.io.?, self.offset, block.size) catch return error.ReadFailed;
