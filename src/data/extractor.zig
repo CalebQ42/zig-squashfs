@@ -44,11 +44,13 @@ pub fn addCache(self: *Extractor, cache: *Cache) void {
 pub fn extractAsync(self: Extractor, alloc: std.mem.Allocator, io: Io, file: Io.File) Error!void {
     if (self.size == 0) return;
 
-    try file.writePositionalAll(io, &[0]u8{}, self.size);
+    // We write to the last byte to make sure the file has the correct size.
+    try file.writePositionalAll(io, &[1]u8{0}, self.size - 1);
 
     var map = try file.createMemoryMap(io, .{
         .len = self.size,
         .protection = .{ .write = true },
+        .populate = false,
     });
     defer map.destroy(io);
 
@@ -72,7 +74,7 @@ pub fn extractAsync(self: Extractor, alloc: std.mem.Allocator, io: Io, file: Io.
 }
 
 fn blockThread(self: Extractor, alloc: std.mem.Allocator, io: Io, map_data: []u8, read_offset: u64, block_idx: u32, err: *?Error) error{Canceled}!void {
-    const size = if (self.frag_data == null and block_idx == (self.size - 1 / self.block_size))
+    const size = if (self.frag_data == null and block_idx == self.blocks.len - 1)
         self.size % self.block_size
     else
         self.block_size;
@@ -93,22 +95,17 @@ fn blockThread(self: Extractor, alloc: std.mem.Allocator, io: Io, map_data: []u8
         return;
     }
 
-    std.debug.print("offset: {} start: {} block: {any}\n", .{ read_offset, self.start, block });
-
     if (self.cache != null) {
         const decomp_block = self.cache.?.get(io, read_offset, block.size) catch |inner_err| {
-            std.debug.print("cache extractor err: {}\n", .{inner_err});
             switch (inner_err) {
                 error.Canceled => return error.Canceled,
                 else => |e| err.* = e,
             }
             return;
         };
-        std.debug.print("cached block size: {} should be {}\n", .{ decomp_block.len, size });
         @memcpy(map_data[offset..][0..size], decomp_block[0..size]);
     } else {
         _ = self.decomp(alloc, data, map_data[offset..][0..size]) catch |inner_err| {
-            std.debug.print("data decomp err: {}\n", .{inner_err});
             err.* = inner_err;
         };
     }

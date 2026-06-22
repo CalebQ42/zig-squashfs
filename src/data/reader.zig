@@ -98,8 +98,6 @@ fn advance(self: *Reader) Io.Reader.Error!void {
     const block = self.blocks[self.block_idx];
     defer self.offset += block.size;
 
-    std.debug.print("offset: {} block: {any}\n", .{ self.offset, block });
-
     if (block.size == 0) {
         self.sparse_block = true;
         self.interface.end = size;
