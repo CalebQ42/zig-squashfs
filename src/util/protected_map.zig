@@ -33,43 +33,40 @@ pub fn ProtectedMap(comptime K: anytype, comptime T: anytype, comptime create_fn
         pub fn getOrPut(self: *Map, io: Io, key: K, create_fn_args: std.meta.ArgsTuple(@TypeOf(create_fn))) Error!*T {
             {
                 try self.mut.lockShared(io);
-                defer self.mut.unlockShared(io);
-
                 const value = self.map.getPtr(key);
+                self.mut.unlockShared(io);
                 if (value != null) {
-                    if (!value.?.filled.isSet())
+                    if (!value.?.filled.isSet()) {
+                        self.mut.unlockShared(io);
+                        defer self.mut.lockShared(io);
+
                         try value.?.filled.wait(io);
+                    }
                     if (value.?.err != null) return value.?.err.?;
                     return &value.?.value;
                 }
             }
-            try self.mut.lock(io);
+            var value: *ProtectedValue = blk: {
+                try self.mut.lock(io);
+                defer self.mut.unlock(io);
 
-            const res = self.map.getOrPut(key) catch |err| {
-                self.mut.unlock(io);
-                return err;
+                const res = try self.map.getOrPut(key);
+                if (res.found_existing)
+                    return self.getOrPut(io, key, create_fn_args);
+                res.value_ptr.* = .{};
+                break :blk res.value_ptr;
             };
-            if (res.found_existing) {
-                self.mut.unlock(io);
-                return self.getOrPut(io, key, create_fn_args);
-            }
-            res.value_ptr.* = .{};
-            defer res.value_ptr.filled.set(io);
+            defer value.filled.set(io);
 
-            self.mut.unlock(io);
-
-            self.mut.lockSharedUncancelable(io);
-            defer self.mut.unlockShared(io);
-
-            res.value_ptr.value = if (@TypeOf(CreateError) == void)
+            value.value = if (@TypeOf(CreateError) == void)
                 @call(.auto, create_fn, create_fn_args)
             else
                 @call(.auto, create_fn, create_fn_args) catch |err| {
-                    res.value_ptr.err = err;
+                    value.err = err;
                     return err;
                 };
 
-            return &res.value_ptr.value;
+            return &value.value;
         }
 
         // Map Types

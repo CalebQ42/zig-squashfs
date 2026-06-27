@@ -44,54 +44,50 @@ pub fn addCache(self: *Extractor, cache: *Cache) void {
 pub fn extractAsync(self: Extractor, alloc: std.mem.Allocator, io: Io, file: Io.File) Error!void {
     if (self.size == 0) return;
 
-    // We write to the last byte to make sure the file has the correct size.
-    try file.writePositionalAll(io, &[1]u8{0}, self.size - 1);
-
-    var map = try file.createMemoryMap(io, .{
-        .len = self.size,
-        .protection = .{ .write = true },
-        .populate = false,
-    });
-    defer map.destroy(io);
-
     var err: ?Error = null;
     var group: Io.Group = .init;
 
     var read_offset: u64 = self.start;
     for (0.., self.blocks) |i, block| {
-        group.async(io, blockThread, .{ self, alloc, io, map.memory, read_offset, @truncate(i), &err });
+        group.async(io, blockThread, .{ self, alloc, io, file, read_offset, @truncate(i), &err });
         read_offset += block.size;
     }
     if (self.frag_data != null)
-        group.async(io, fragThread, .{ self, map.memory });
+        group.async(io, fragThread, .{ self, io, file, &err });
 
     try group.await(io);
 
     if (err != null)
         return err.?;
-
-    try map.write(io);
 }
 
-fn blockThread(self: Extractor, alloc: std.mem.Allocator, io: Io, map_data: []u8, read_offset: u64, block_idx: u32, err: *?Error) error{Canceled}!void {
+fn blockThread(self: Extractor, alloc: std.mem.Allocator, io: Io, file: Io.File, read_offset: u64, block_idx: u32, err: *?Error) error{Canceled}!void {
     const size = if (self.frag_data == null and block_idx == self.blocks.len - 1)
         self.size % self.block_size
     else
         self.block_size;
 
-    const offset = block_idx * self.block_size;
-
     const block = self.blocks[block_idx];
 
+    var wrt = file.writer(io, &[0]u8{});
+    wrt.seekTo(block_idx * self.block_size) catch |inner_err| {
+        err.* = inner_err;
+        return;
+    };
+
     if (block.size == 0) {
-        @memset(map_data[offset..][0..size], 0);
+        wrt.interface.splatByteAll(0, size) catch |inner_err| {
+            err.* = inner_err;
+        };
         return;
     }
 
     const data = self.data[read_offset..][0..block.size];
 
     if (block.uncompressed) {
-        @memcpy(map_data[offset..][0..block.size], data);
+        wrt.interface.writeAll(data) catch |inner_err| {
+            err.* = inner_err;
+        };
         return;
     }
 
@@ -103,20 +99,39 @@ fn blockThread(self: Extractor, alloc: std.mem.Allocator, io: Io, map_data: []u8
             }
             return;
         };
-        @memcpy(map_data[offset..][0..size], decomp_block[0..size]);
+        wrt.interface.writeAll(decomp_block) catch |inner_err| {
+            err.* = inner_err;
+        };
     } else {
-        _ = self.decomp(alloc, data, map_data[offset..][0..size]) catch |inner_err| {
+        const tmp = alloc.alloc(u8, size) catch |inner_err| {
+            err.* = inner_err;
+            return;
+        };
+        defer alloc.free(tmp);
+
+        _ = self.decomp(alloc, data, tmp) catch |inner_err| {
+            err.* = inner_err;
+            return;
+        };
+        wrt.interface.writeAll(tmp) catch |inner_err| {
             err.* = inner_err;
         };
     }
 }
-fn fragThread(self: Extractor, map_data: []u8) error{Canceled}!void {
+fn fragThread(self: Extractor, io: Io, file: Io.File, err: *?Error) error{Canceled}!void {
     const size = self.size % self.block_size;
-    const offset = self.blocks.len * self.block_size;
 
-    @memcpy(map_data[offset..][0..size], self.frag_data.?[self.frag_offset..][0..size]);
+    var wrt = file.writer(io, &[0]u8{});
+    wrt.seekTo(self.blocks.len * self.block_size) catch |inner_err| {
+        err.* = inner_err;
+        return;
+    };
+
+    wrt.interface.writeAll(self.frag_data.?[self.frag_offset..][0..size]) catch |inner_err| {
+        err.* = inner_err;
+    };
 }
 
 // Types
 
-pub const Error = Io.File.WritePositionalError || Io.File.MemoryMap.CreateError || Decomp.Error || Cache.Error;
+pub const Error = Io.File.WritePositionalError || Io.File.MemoryMap.CreateError || Decomp.Error || Cache.Error || Io.File.SeekError || Io.Writer.Error;
