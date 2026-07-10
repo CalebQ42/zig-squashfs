@@ -2,6 +2,7 @@ const std = @import("std");
 const Io = std.Io;
 
 const Decomp = @import("../decomp.zig");
+const Finish = @import("../extract-multi.zig").Finish;
 const DataBlock = @import("../inode.zig").DataBlock;
 const Cache = @import("../util/cache.zig");
 
@@ -41,27 +42,28 @@ pub fn addCache(self: *Extractor, cache: *Cache) void {
     self.cache = cache;
 }
 
-pub fn extractAsync(self: Extractor, alloc: std.mem.Allocator, io: Io, file: Io.File) Error!void {
+pub fn extractAsync(self: Extractor, alloc: std.mem.Allocator, io: Io, file: Io.File, group: *Io.Group, err: *?Error, finish: *Finish) Error!void {
     if (self.size == 0) return;
-
-    var err: ?Error = null;
-    var group: Io.Group = .init;
 
     var read_offset: u64 = self.start;
     for (0.., self.blocks) |i, block| {
-        group.async(io, blockThread, .{ self, alloc, io, file, read_offset, @truncate(i), &err });
+        group.async(io, blockThread, .{ self, alloc, io, file, read_offset, @truncate(i), err, finish });
         read_offset += block.size;
     }
     if (self.frag_data != null)
-        group.async(io, fragThread, .{ self, io, file, &err });
-
-    try group.await(io);
-
-    if (err != null)
-        return err.?;
+        group.async(io, fragThread, .{ self, io, file, err, finish });
 }
 
-fn blockThread(self: Extractor, alloc: std.mem.Allocator, io: Io, file: Io.File, read_offset: u64, block_idx: u32, err: *?Error) error{Canceled}!void {
+fn blockThread(
+    self: Extractor,
+    alloc: std.mem.Allocator,
+    io: Io,
+    file: Io.File,
+    read_offset: u64,
+    block_idx: u32,
+    err: *?Error,
+    finish: *Finish,
+) error{Canceled}!void {
     const size = if (self.frag_data == null and block_idx == self.blocks.len - 1)
         self.size % self.block_size
     else
@@ -78,6 +80,10 @@ fn blockThread(self: Extractor, alloc: std.mem.Allocator, io: Io, file: Io.File,
     if (block.size == 0) {
         wrt.interface.splatByteAll(0, size) catch |inner_err| {
             err.* = inner_err;
+            return;
+        };
+        finish.finish(io) catch |inner_err| {
+            err.* = inner_err;
         };
         return;
     }
@@ -86,6 +92,10 @@ fn blockThread(self: Extractor, alloc: std.mem.Allocator, io: Io, file: Io.File,
 
     if (block.uncompressed) {
         wrt.interface.writeAll(data) catch |inner_err| {
+            err.* = inner_err;
+            return;
+        };
+        finish.finish(io) catch |inner_err| {
             err.* = inner_err;
         };
         return;
@@ -117,8 +127,17 @@ fn blockThread(self: Extractor, alloc: std.mem.Allocator, io: Io, file: Io.File,
             err.* = inner_err;
         };
     }
+    finish.finish(io) catch |inner_err| {
+        err.* = inner_err;
+    };
 }
-fn fragThread(self: Extractor, io: Io, file: Io.File, err: *?Error) error{Canceled}!void {
+fn fragThread(
+    self: Extractor,
+    io: Io,
+    file: Io.File,
+    err: *?Error,
+    finish: *Finish,
+) error{Canceled}!void {
     const size = self.size % self.block_size;
 
     var wrt = file.writer(io, &[0]u8{});
@@ -128,6 +147,10 @@ fn fragThread(self: Extractor, io: Io, file: Io.File, err: *?Error) error{Cancel
     };
 
     wrt.interface.writeAll(self.frag_data.?[self.frag_offset..][0..size]) catch |inner_err| {
+        err.* = inner_err;
+        return;
+    };
+    finish.finish(io) catch |inner_err| {
         err.* = inner_err;
     };
 }
