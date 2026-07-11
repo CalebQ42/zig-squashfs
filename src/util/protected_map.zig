@@ -38,7 +38,7 @@ pub fn ProtectedMap(comptime K: anytype, comptime T: anytype, comptime create_fn
                 if (value != null) {
                     if (!value.?.filled.isSet()) {
                         self.mut.unlockShared(io);
-                        defer self.mut.lockShared(io);
+                        defer self.mut.lockSharedUncancelable(io);
 
                         try value.?.filled.wait(io);
                     }

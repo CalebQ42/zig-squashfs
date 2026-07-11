@@ -1,6 +1,8 @@
 const std = @import("std");
 const Io = std.Io;
 
+const Archive = @import("archive.zig");
+const Superblock = Archive.Superblock;
 const DataReader = @import("data/reader.zig");
 const Decomp = @import("decomp.zig");
 const Directory = @import("directory.zig");
@@ -8,7 +10,6 @@ const ExtractionOptions = @import("options.zig");
 const Inode = @import("inode.zig");
 const Lookup = @import("lookup.zig");
 const MetadaReader = @import("meta_rdr.zig");
-const Superblock = @import("archive.zig").Superblock;
 const Cache = @import("util/cache.zig");
 const XattrTable = @import("xattr.zig");
 

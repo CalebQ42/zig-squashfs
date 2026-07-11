@@ -2,7 +2,8 @@ const std = @import("std");
 const Io = std.Io;
 
 const Decomp = @import("../decomp.zig");
-const Finish = @import("../extract-multi.zig").Finish;
+const FileFinish = @import("../extract-multi.zig").FileFinish;
+const ExtractError = @import("../extract-multi.zig").Error;
 const DataBlock = @import("../inode.zig").DataBlock;
 const Cache = @import("../util/cache.zig");
 
@@ -42,16 +43,16 @@ pub fn addCache(self: *Extractor, cache: *Cache) void {
     self.cache = cache;
 }
 
-pub fn extractAsync(self: Extractor, alloc: std.mem.Allocator, io: Io, file: Io.File, group: *Io.Group, err: *?Error, finish: *Finish) Error!void {
+pub fn extractAsync(self: Extractor, alloc: std.mem.Allocator, io: Io, group: *Io.Group, err: *?ExtractError, finish: *FileFinish) void {
     if (self.size == 0) return;
 
     var read_offset: u64 = self.start;
     for (0.., self.blocks) |i, block| {
-        group.async(io, blockThread, .{ self, alloc, io, file, read_offset, @truncate(i), err, finish });
+        group.async(io, blockThread, .{ self, alloc, io, finish.file.file, read_offset, @truncate(i), err, finish });
         read_offset += block.size;
     }
     if (self.frag_data != null)
-        group.async(io, fragThread, .{ self, io, file, err, finish });
+        group.async(io, fragThread, .{ self, io, finish.file.file, err, finish });
 }
 
 fn blockThread(
@@ -61,8 +62,8 @@ fn blockThread(
     file: Io.File,
     read_offset: u64,
     block_idx: u32,
-    err: *?Error,
-    finish: *Finish,
+    err: *?ExtractError,
+    finish: *FileFinish,
 ) error{Canceled}!void {
     const size = if (self.frag_data == null and block_idx == self.blocks.len - 1)
         self.size % self.block_size
@@ -135,8 +136,8 @@ fn fragThread(
     self: Extractor,
     io: Io,
     file: Io.File,
-    err: *?Error,
-    finish: *Finish,
+    err: *?ExtractError,
+    finish: *FileFinish,
 ) error{Canceled}!void {
     const size = self.size % self.block_size;
 

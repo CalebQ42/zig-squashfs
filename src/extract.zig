@@ -1,12 +1,12 @@
 const std = @import("std");
 const Io = std.Io;
 
-const Superblock = @import("archive.zig").Superblock;
 const Decomp = @import("decomp.zig");
-const Inode = @import("inode.zig");
 const ExtractionOptions = @import("options.zig");
-const Single = @import("extract-single.zig");
+const Inode = @import("inode.zig");
 const Multi = @import("extract-multi.zig");
+const Single = @import("extract-single.zig");
+const Superblock = @import("archive.zig").Superblock;
 
 pub fn extract(
     alloc: std.mem.Allocator,
