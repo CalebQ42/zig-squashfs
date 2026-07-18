@@ -3,7 +3,7 @@ const Io = std.Io;
 
 const Decomp = @import("../decomp.zig");
 const FileFinish = @import("../extract-multi.zig").FileFinish;
-const ExtractError = @import("../extract-multi.zig").Error;
+const Multi = @import("../extract-multi.zig");
 const DataBlock = @import("../inode.zig").DataBlock;
 const Cache = @import("../util/cache.zig");
 
@@ -43,16 +43,16 @@ pub fn addCache(self: *Extractor, cache: *Cache) void {
     self.cache = cache;
 }
 
-pub fn extractAsync(self: Extractor, alloc: std.mem.Allocator, io: Io, group: *Io.Group, err: *?ExtractError, finish: *FileFinish) void {
+pub fn extractAsync(self: Extractor, alloc: std.mem.Allocator, io: Io, select: *Io.Select(Multi.SelectUnion), finish: *FileFinish) void {
     if (self.size == 0) return;
 
     var read_offset: u64 = self.start;
     for (0.., self.blocks) |i, block| {
-        group.async(io, blockThread, .{ self, alloc, io, finish.file.file, read_offset, @truncate(i), err, finish });
+        select.async(.reg, blockThread, .{ self, alloc, io, finish.file.file, read_offset, @truncate(i), finish });
         read_offset += block.size;
     }
     if (self.frag_data != null)
-        group.async(io, fragThread, .{ self, io, finish.file.file, err, finish });
+        select.async(.reg, fragThread, .{ self, io, finish.file.file, finish });
 }
 
 fn blockThread(
@@ -62,9 +62,8 @@ fn blockThread(
     file: Io.File,
     read_offset: u64,
     block_idx: u32,
-    err: *?ExtractError,
     finish: *FileFinish,
-) error{Canceled}!void {
+) Multi.Error!void {
     const size = if (self.frag_data == null and block_idx == self.blocks.len - 1)
         self.size % self.block_size
     else
@@ -73,89 +72,45 @@ fn blockThread(
     const block = self.blocks[block_idx];
 
     var wrt = file.writer(io, &[0]u8{});
-    wrt.seekTo(block_idx * self.block_size) catch |inner_err| {
-        err.* = inner_err;
-        return;
-    };
+    try wrt.seekTo(block_idx * self.block_size);
 
     if (block.size == 0) {
-        wrt.interface.splatByteAll(0, size) catch |inner_err| {
-            err.* = inner_err;
-            return;
-        };
-        finish.finish(io) catch |inner_err| {
-            err.* = inner_err;
-        };
+        try wrt.interface.splatByteAll(0, size);
+        try finish.finish(io);
         return;
     }
 
     const data = self.data[read_offset..][0..block.size];
 
     if (block.uncompressed) {
-        wrt.interface.writeAll(data) catch |inner_err| {
-            err.* = inner_err;
-            return;
-        };
-        finish.finish(io) catch |inner_err| {
-            err.* = inner_err;
-        };
+        try wrt.interface.writeAll(data);
+        try finish.finish(io);
         return;
     }
 
     if (self.cache != null) {
-        const decomp_block = self.cache.?.get(io, read_offset, block.size) catch |inner_err| {
-            switch (inner_err) {
-                error.Canceled => return error.Canceled,
-                else => |e| err.* = e,
-            }
-            return;
-        };
-        wrt.interface.writeAll(decomp_block) catch |inner_err| {
-            err.* = inner_err;
-        };
+        const decomp_block = try self.cache.?.get(io, read_offset, block.size);
+        try wrt.interface.writeAll(decomp_block);
     } else {
-        const tmp = alloc.alloc(u8, size) catch |inner_err| {
-            err.* = inner_err;
-            return;
-        };
+        const tmp = try alloc.alloc(u8, size);
         defer alloc.free(tmp);
 
-        _ = self.decomp(alloc, data, tmp) catch |inner_err| {
-            err.* = inner_err;
-            return;
-        };
-        wrt.interface.writeAll(tmp) catch |inner_err| {
-            err.* = inner_err;
-        };
+        _ = try self.decomp(alloc, data, tmp);
+        try wrt.interface.writeAll(tmp);
     }
-    finish.finish(io) catch |inner_err| {
-        err.* = inner_err;
-    };
+    try finish.finish(io);
 }
 fn fragThread(
     self: Extractor,
     io: Io,
     file: Io.File,
-    err: *?ExtractError,
     finish: *FileFinish,
-) error{Canceled}!void {
+) Multi.Error!void {
     const size = self.size % self.block_size;
 
     var wrt = file.writer(io, &[0]u8{});
-    wrt.seekTo(self.blocks.len * self.block_size) catch |inner_err| {
-        err.* = inner_err;
-        return;
-    };
+    try wrt.seekTo(self.blocks.len * self.block_size);
 
-    wrt.interface.writeAll(self.frag_data.?[self.frag_offset..][0..size]) catch |inner_err| {
-        err.* = inner_err;
-        return;
-    };
-    finish.finish(io) catch |inner_err| {
-        err.* = inner_err;
-    };
+    try wrt.interface.writeAll(self.frag_data.?[self.frag_offset..][0..size]);
+    try finish.finish(io);
 }
-
-// Types
-
-pub const Error = Io.File.WritePositionalError || Io.File.MemoryMap.CreateError || Decomp.Error || Cache.Error || Io.File.SeekError || Io.Writer.Error;

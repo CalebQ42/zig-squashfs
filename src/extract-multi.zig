@@ -16,48 +16,21 @@ const XattrTable = @import("xattr.zig");
 pub fn extract(alloc: std.mem.Allocator, io: Io, super: Superblock, data: []u8, decomp: Decomp.Fn, inode: Inode, filepath: []const u8, options: ExtractionOption) !void {
     const path = std.mem.trim(u8, filepath, "/");
 
-    var common: Common = .init(alloc, super, data, decomp, options);
+    var common: Common = try .init(alloc, io, super, data, decomp, options);
     defer common.deinit();
 
-    common.group.async(io, extractAsync, .{ &common, io, inode, path, null });
+    common.start(io, inode, path, null);
 
-    try common.group.await(io);
+    var buf: [5]SelectUnion = undefined;
+
+    while (common.select.group.token.load(.unordered)) |_| {
+        const num = try common.select.awaitMany(&buf, 1);
+        for (buf[0..num]) |res|
+            try res.reg;
+    }
 
     if (common.err != null)
         return common.err.?;
-}
-
-fn extractAsync(common: *Common, io: Io, inode: Inode, path: []const u8, parent: ?*Parent) error{Canceled}!void {
-    switch (inode.hdr.type) {
-        .dir, .ext_dir => extractDir(common, io, inode, path, parent) catch |err| switch (err) {
-            error.Canceled => {
-                io.recancel();
-                return error.Canceled;
-            },
-            else => common.err = err,
-        },
-        .file, .ext_file => extractReg(common, io, inode, path, parent) catch |err| switch (err) {
-            error.Canceled => {
-                io.recancel();
-                return error.Canceled;
-            },
-            else => common.err = err,
-        },
-        .symlink, .ext_symlink => extractReg(common, io, inode, path, parent) catch |err| switch (err) {
-            error.Canceled => {
-                io.recancel();
-                return error.Canceled;
-            },
-            else => common.err = err,
-        },
-        else => extractNod(common, io, inode, path, parent) catch |err| switch (err) {
-            error.Canceled => {
-                io.recancel();
-                return error.Canceled;
-            },
-            else => common.err = err,
-        },
-    }
 }
 fn extractDir(common: *Common, io: Io, inode: Inode, path: []const u8, parent: ?*Parent) Error!void {
     var xattr_idx: u32 = 0xFFFFFFFF;
@@ -102,7 +75,7 @@ fn extractDir(common: *Common, io: Io, inode: Inode, path: []const u8, parent: ?
             return err;
         };
 
-        common.group.async(io, extractAsync, .{ common, io, new_inode, new_path, cur_dir });
+        common.start(io, new_inode, new_path, cur_dir);
     }
 }
 fn extractReg(common: *Common, io: Io, inode: Inode, path: []const u8, parent: ?*Parent) Error!void {
@@ -149,7 +122,7 @@ fn extractReg(common: *Common, io: Io, inode: Inode, path: []const u8, parent: ?
 
     const fin: *FileFinish = try .init(common, io, blocks, inode.hdr, path, xattr_idx, parent);
 
-    ext.extractAsync(common.alloc, io, &common.group, @ptrCast(&common.err), fin);
+    ext.extractAsync(common.alloc, io, &common.select, fin);
 }
 fn extractSymlink(common: *Common, io: Io, inode: Inode, path: []const u8, parent: ?*Parent) Error!void {
     defer if (parent != null) {
@@ -259,7 +232,7 @@ fn setMetadata(common: *Common, io: Io, hdr: Inode.Header, file: Io.File, xattr_
 // Types
 
 pub const Error = error{ Mknod, SetXattr } || std.mem.Allocator.Error || Io.Cancelable || Io.Reader.Error || Io.Dir.CreateDirPathError || Cache.Error ||
-    Io.File.SetPermissionsError || DataExtractor.Error;
+    Io.File.SetPermissionsError || Io.Dir.SymLinkError || Io.File.SeekError || Io.Writer.Error;
 
 pub const Parent = struct {
     common: *Common,
@@ -342,11 +315,14 @@ pub const FileFinish = struct {
     }
 };
 
+pub const SelectUnion = union { reg: Error!void };
+
 const Common = struct {
     alloc: std.mem.Allocator,
     arena: std.heap.ArenaAllocator,
 
-    group: Io.Group = .init,
+    sel_buf: []SelectUnion,
+    select: Io.Select(SelectUnion),
     err: ?Error = null,
 
     data: []u8,
@@ -363,10 +339,14 @@ const Common = struct {
 
     options: ExtractionOption,
 
-    fn init(alloc: std.mem.Allocator, super: Superblock, data: []u8, decomp: Decomp.Fn, options: ExtractionOption) Common {
+    fn init(alloc: std.mem.Allocator, io: Io, super: Superblock, data: []u8, decomp: Decomp.Fn, options: ExtractionOption) !Common {
+        const sel_buf = try alloc.alloc(SelectUnion, 50);
         return .{
             .alloc = alloc,
             .arena = .init(alloc),
+
+            .sel_buf = sel_buf,
+            .select = .init(io, sel_buf),
 
             .data = data,
             .decomp = decomp,
@@ -384,7 +364,10 @@ const Common = struct {
         };
     }
     fn deinit(self: *Common) void {
+        self.select.cancelDiscard();
         self.arena.deinit();
+
+        self.alloc.free(self.sel_buf);
 
         self.id_table.deinit();
         self.frag_table.deinit();
@@ -394,5 +377,14 @@ const Common = struct {
 
     fn arenaAlloc(self: *Common) std.mem.Allocator {
         return self.arena.allocator();
+    }
+
+    fn start(self: *Common, io: Io, inode: Inode, path: []const u8, parent: ?*Parent) void {
+        switch (inode.hdr.type) {
+            .dir, .ext_dir => self.select.async(.reg, extractDir, .{ self, io, inode, path, parent }),
+            .file, .ext_file => self.select.async(.reg, extractReg, .{ self, io, inode, path, parent }),
+            .symlink, .ext_symlink => self.select.async(.reg, extractSymlink, .{ self, io, inode, path, parent }),
+            else => self.select.async(.reg, extractNod, .{ self, io, inode, path, parent }),
+        }
     }
 };
