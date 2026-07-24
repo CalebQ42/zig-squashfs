@@ -37,7 +37,7 @@ fn extractDir(common: *Common, io: Io, inode: Inode, path: []const u8, parent: ?
 
     const dir: Directory = switch (inode.data) {
         .dir => |d| blk: {
-            var meta: MetadataReader = .init(common.alloc, common.data, common.decomp, d.block_start);
+            var meta: MetadataReader = .init(common.alloc, common.data, common.decomp, common.dir_start + d.block_start);
             try meta.interface.discardAll(d.block_offset);
 
             break :blk try .init(common.alloc, &meta.interface, d.size);
@@ -45,7 +45,7 @@ fn extractDir(common: *Common, io: Io, inode: Inode, path: []const u8, parent: ?
         .ext_dir => |d| blk: {
             xattr_idx = d.xattr_idx;
 
-            var meta: MetadataReader = .init(common.alloc, common.data, common.decomp, d.block_start);
+            var meta: MetadataReader = .init(common.alloc, common.data, common.decomp, common.dir_start + d.block_start);
             try meta.interface.discardAll(d.block_offset);
 
             break :blk try .init(common.alloc, &meta.interface, d.size);
@@ -79,6 +79,9 @@ fn extractDir(common: *Common, io: Io, inode: Inode, path: []const u8, parent: ?
     }
 }
 fn extractReg(common: *Common, io: Io, inode: Inode, path: []const u8, parent: ?*Parent) Error!void {
+    defer if (parent != null)
+        common.alloc.free(path);
+
     var blocks: usize = 0;
     var xattr_idx: u32 = 0xFFFFFFFF;
 
@@ -91,7 +94,7 @@ fn extractReg(common: *Common, io: Io, inode: Inode, path: []const u8, parent: ?
                 blocks += 1;
                 const frag: Lookup.FragEntry = try common.frag_table.get(io, f.frag_idx);
                 if (frag.size.uncompressed) {
-                    ext.addFrag(common.data[frag.block_start..][0 .. f.size % common.block_size], f.frag_offset);
+                    ext.addFrag(common.data[frag.block_start..][0..frag.size.size], f.frag_offset);
                 } else {
                     const frag_block = try common.cache.get(io, frag.block_start, frag.size.size);
                     ext.addFrag(frag_block, f.frag_offset);
@@ -109,7 +112,7 @@ fn extractReg(common: *Common, io: Io, inode: Inode, path: []const u8, parent: ?
                 blocks += 1;
                 const frag: Lookup.FragEntry = try common.frag_table.get(io, f.frag_idx);
                 if (frag.size.uncompressed) {
-                    ext.addFrag(common.data[frag.block_start..][0 .. f.size % common.block_size], f.frag_offset);
+                    ext.addFrag(common.data[frag.block_start..][0..frag.size.size], f.frag_offset);
                 } else {
                     const frag_block = try common.cache.get(io, frag.block_start, frag.size.size);
                     ext.addFrag(frag_block, f.frag_offset);
@@ -120,7 +123,7 @@ fn extractReg(common: *Common, io: Io, inode: Inode, path: []const u8, parent: ?
         else => unreachable,
     };
 
-    const fin: *FileFinish = try .init(common, io, blocks, inode.hdr, path, xattr_idx, parent);
+    const fin: *FileFinish = try .init(common, io, blocks, inode, path, xattr_idx, parent);
 
     ext.extractAsync(common.alloc, io, &common.select, fin);
 }
@@ -142,7 +145,8 @@ fn extractSymlink(common: *Common, io: Io, inode: Inode, path: []const u8, paren
         try parent.?.finish(io);
 }
 fn extractNod(common: *Common, io: Io, inode: Inode, path: []const u8, parent: ?*Parent) Error!void {
-    defer if (parent != null) {};
+    defer if (parent != null)
+        common.alloc.free(path);
     var xattr_idx: u32 = 0xFFFFFFFF;
     var device: u32 = 0;
     var mode: u32 = undefined;
@@ -223,7 +227,7 @@ fn setMetadata(common: *Common, io: Io, hdr: Inode.Header, file: Io.File, xattr_
     if (common.options.ignore_permissions) return;
 
     try file.setTimestamps(io, .{
-        .modify_timestamp = .init(Io.Timestamp.fromNanoseconds(hdr.mod_time * std.time.ns_per_s)),
+        .modify_timestamp = .init(Io.Timestamp.fromNanoseconds(@as(i96, @intCast(hdr.mod_time)) * std.time.ns_per_s)),
     });
     try file.setPermissions(io, @enumFromInt(hdr.permissions));
     try file.setOwner(io, try common.id_table.get(io, hdr.uid_idx), try common.id_table.get(io, hdr.gid_idx));
@@ -232,7 +236,7 @@ fn setMetadata(common: *Common, io: Io, hdr: Inode.Header, file: Io.File, xattr_
 // Types
 
 pub const Error = error{ Mknod, SetXattr } || std.mem.Allocator.Error || Io.Cancelable || Io.Reader.Error || Io.Dir.CreateDirPathError || Cache.Error ||
-    Io.File.SetPermissionsError || Io.Dir.SymLinkError || Io.File.SeekError || Io.Writer.Error;
+    Io.File.SetPermissionsError || Io.Dir.SymLinkError || Io.File.SeekError || Io.Writer.Error || Io.File.Atomic.LinkError;
 
 pub const Parent = struct {
     common: *Common,
@@ -261,13 +265,12 @@ pub const Parent = struct {
     }
 
     pub fn finish(self: *Parent, io: Io) Error!void {
-        if (self.atomic.fetchSub(1, .release) >= 0) return;
+        if (self.atomic.fetchSub(1, .release) > 0) return;
 
         try setMetadataPath(self.common, io, self.hdr, self.path, self.xattr_idx);
 
         if (self.parent != null) {
-            if (self.hdr.type != .dir and self.hdr.type != .ext_dir)
-                self.common.alloc.free(self.path);
+            self.common.alloc.free(self.path);
             try self.parent.?.finish(io);
         }
     }
@@ -276,20 +279,20 @@ pub const FileFinish = struct {
     common: *Common,
 
     atomic: Atomic(usize),
-    hdr: Inode.Header,
+    inode: Inode,
     file: Io.File.Atomic,
     xattr_idx: u32,
 
     parent: ?*Parent,
 
-    fn init(common: *Common, io: Io, len: usize, hdr: Inode.Header, path: []const u8, xattr_idx: u32, parent: ?*Parent) !*FileFinish {
+    fn init(common: *Common, io: Io, len: usize, inode: Inode, path: []const u8, xattr_idx: u32, parent: ?*Parent) !*FileFinish {
         const out = try common.arenaAlloc().create(FileFinish);
 
         out.* = .{
             .common = common,
 
             .atomic = .init(len),
-            .hdr = hdr,
+            .inode = inode,
             .file = try Io.Dir.cwd().createFileAtomic(io, path, .{}),
             .xattr_idx = xattr_idx,
 
@@ -299,17 +302,16 @@ pub const FileFinish = struct {
     }
 
     pub fn finish(self: *FileFinish, io: Io) Error!void {
-        if (self.atomic.fetchSub(1, .release) >= 0) return;
+        if (self.atomic.fetchSub(1, .release) > 0) return;
 
         defer self.file.deinit(io);
 
-        try setMetadata(self.common, io, self.hdr, self.file.file, self.xattr_idx);
+        try setMetadata(self.common, io, self.inode.hdr, self.file.file, self.xattr_idx);
 
         try self.file.link(io);
 
         if (self.parent != null) {
-            if (self.hdr.type != .dir and self.hdr.type != .ext_dir)
-                self.common.alloc.free(self.path);
+            self.inode.deinit(self.common.alloc);
             try self.parent.?.finish(io);
         }
     }

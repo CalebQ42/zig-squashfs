@@ -36,12 +36,9 @@ pub fn ProtectedMap(comptime K: anytype, comptime T: anytype, comptime create_fn
                 const value = self.map.getPtr(key);
                 self.mut.unlockShared(io);
                 if (value != null) {
-                    if (!value.?.filled.isSet()) {
-                        self.mut.unlockShared(io);
-                        defer self.mut.lockSharedUncancelable(io);
-
+                    if (!value.?.filled.isSet())
                         try value.?.filled.wait(io);
-                    }
+
                     if (value.?.err != null) return value.?.err.?;
                     return &value.?.value;
                 }
