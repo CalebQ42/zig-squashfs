@@ -43,16 +43,16 @@ pub fn addCache(self: *Extractor, cache: *Cache) void {
     self.cache = cache;
 }
 
-pub fn extractAsync(self: Extractor, alloc: std.mem.Allocator, io: Io, select: *Io.Select(Multi.SelectUnion), finish: *FileFinish) void {
+pub fn extractAsync(self: Extractor, alloc: std.mem.Allocator, io: Io, select: *Io.Select(Multi.SelectUnion), finish: *FileFinish) !void {
     if (self.size == 0) return;
 
     var read_offset: u64 = self.start;
     for (0.., self.blocks) |i, block| {
-        select.async(.reg, blockThread, .{ self, alloc, io, finish.file.file, read_offset, @truncate(i), finish });
+        try select.concurrent(.reg, blockThread, .{ self, alloc, io, finish.file.file, read_offset, @truncate(i), finish });
         read_offset += block.size;
     }
     if (self.frag_data != null)
-        select.async(.reg, fragThread, .{ self, io, finish.file.file, finish });
+        try select.concurrent(.reg, fragThread, .{ self, io, finish.file.file, finish });
 }
 
 fn blockThread(
