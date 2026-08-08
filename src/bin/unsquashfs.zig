@@ -1,9 +1,9 @@
 const std = @import("std");
-const Writer = std.Io.Writer;
-const builtin = @import("builtin");
+const Io = std.Io;
+const Writer = Io.Writer;
 
-const config = @import("config");
-const squashfs = @import("zig_squashfs");
+const config = @import("build_config");
+const squashfs = @import("squashfs");
 
 //TODO: Add more options
 const help_mgs =
@@ -27,107 +27,32 @@ const help_mgs =
     \\
 ;
 
-const errors = error{InvalidArguments};
+var arc_loc: []const u8 = "";
+var ext_loc: []const u8 = "squashfs-root";
 
-var archive: []const u8 = "";
-var extLoc: []const u8 = "squashfs-root";
 var offset: u64 = 0;
-var threads: u32 = 0;
-var verbose: bool = false;
-var ignore_xattrs: bool = false;
-var ignore_permissions: bool = false;
+var threads: usize = 0;
 var force: bool = false;
 
-pub fn main() !void {
-    const alloc = std.heap.smp_allocator;
-    var stdout = std.fs.File.stdout();
-    var out = stdout.writer(&[0]u8{});
-    defer out.interface.flush() catch {};
-    try handleArgs(alloc, &out.interface);
-    if (archive.len == 0) {
-        try out.interface.print("You must provide a squashfs archive\n", .{});
-        try out.interface.print(help_mgs, .{});
-        return;
-    }
-    var fil: std.fs.File = try std.fs.cwd().openFile(archive, .{}); //TODO: Handle error gracefully.
-    defer fil.close();
-    var arc: squashfs.Archive = try .init(alloc, fil, offset); //TODO: Update when memory size matters. //TODO: Handle error gracefully.
-    defer arc.deinit();
-    const options: squashfs.ExtractionOptions = .{
-        .threads = if (threads == 0) try std.Thread.getCpuCount() else threads,
-        .verbose = verbose,
-        .verbose_writer = if (verbose) &out.interface else null,
-        .ignore_xattr = ignore_xattrs,
-        .ignore_permissions = ignore_permissions,
-    };
-    if (force)
-        try std.fs.cwd().deleteTree(extLoc);
-    try arc.extract(alloc, extLoc, options); //TODO: Handle error gracefully.
-}
+var options: squashfs.Options = .default;
 
-fn handleArgs(alloc: std.mem.Allocator, out: *Writer) !void {
-    var args = try std.process.argsWithAllocator(alloc);
-    defer args.deinit();
-    _ = args.next(); // args[0] is the application launch command.
-    while (args.next()) |arg| {
-        if (std.mem.eql(u8, arg, "-o")) {
-            const nxt = args.next();
-            if (nxt == null or nxt.?.len == 0) {
-                try out.print("-o must be followed by a number\n", .{});
-                return errors.InvalidArguments;
-            }
-            offset = std.fmt.parseInt(u64, nxt.?, 10) catch {
-                try out.print("-o must be followed by a number\n", .{});
-                return errors.InvalidArguments;
-            };
-            continue;
-        } else if (std.mem.eql(u8, arg, "-d")) {
-            const nxt = args.next();
-            if (nxt == null or nxt.?.len == 0) {
-                try out.print("-d must be followed by a location\n", .{});
-                return errors.InvalidArguments;
-            }
-            extLoc = nxt.?;
-            continue;
-        } else if (std.mem.eql(u8, arg, "-p")) {
-            const nxt = args.next();
-            if (nxt == null or nxt.?.len == 0) {
-                try out.print("-p must be followed by a number\n", .{});
-                return errors.InvalidArguments;
-            }
-            threads = std.fmt.parseInt(u32, nxt.?, 10) catch {
-                try out.print("-p must be followed by a number\n", .{});
-                return errors.InvalidArguments;
-            };
-            continue;
-        } else if (std.mem.eql(u8, arg, "-v")) {
-            verbose = true;
-            continue;
-        } else if (std.mem.eql(u8, arg, "-dx")) {
-            ignore_xattrs = true;
-            continue;
-        } else if (std.mem.eql(u8, arg, "-dp")) {
-            ignore_permissions = true;
-            continue;
-        } else if (std.mem.eql(u8, arg, "--force")) {
-            force = true;
-            continue;
-        } else if (std.mem.eql(u8, arg, "--version")) {
-            try out.print("zig-unsquashfs v", .{});
-            try config.version.format(out);
-            try out.print("\nBuilt using Zig {s} in {} mode\n", .{ builtin.zig_version_string, builtin.mode });
-            std.process.exit(0);
-            return;
-        } else if (std.mem.eql(u8, arg, "--help")) {
-            try out.print(help_mgs, .{});
-            std.process.exit(0);
-            return;
-        }
-        if (archive.len > 0) {
-            try out.print("you can only provide one file at a time\n", .{});
-            try out.print(help_mgs, .{});
-            return errors.InvalidArguments;
-        }
-        archive = arg;
+pub fn main(init: std.process.Init) !void {
+    var io = init.io;
+    const alloc = init.gpa;
+
+    // TODO: process args
+
+    var limited_io: Io.Threaded = undefined;
+    if (threads != 0) {
+        limited_io = if (threads == 1)
+            Io.Threaded.init_single_threaded
+        else
+            Io.Threaded.init(alloc, .{
+                .async_limit = .limited(threads),
+                .concurrent_limit = .limited(threads),
+                .argv0 = .init(init.minimal.args),
+                .environ = init.minimal.environ,
+            });
+        io = limited_io.io();
     }
 }
