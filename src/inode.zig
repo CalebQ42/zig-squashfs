@@ -19,9 +19,9 @@ pub fn deinit(self: Inode, alloc: std.mem.Allocator) void {
 // Types
 
 pub const Reference = packed struct(u64) {
-    _: u16,
-    block: u32,
     offset: u16,
+    block: u32,
+    _: u16,
 };
 
 pub const Type = enum(u16) {

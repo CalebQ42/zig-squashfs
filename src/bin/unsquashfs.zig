@@ -4,6 +4,8 @@ const Writer = Io.Writer;
 
 const config = @import("build_config");
 const squashfs = @import("squashfs");
+const Archive = squashfs.Archive;
+const Options = squashfs.Options;
 
 //TODO: Add more options
 const help_mgs =
@@ -34,7 +36,7 @@ var offset: u64 = 0;
 var threads: usize = 0;
 var force: bool = false;
 
-var options: squashfs.Options = .default;
+var options: Options = .default;
 
 pub fn main(init: std.process.Init) !void {
     var io = init.io;
@@ -55,4 +57,12 @@ pub fn main(init: std.process.Init) !void {
             });
         io = limited_io.io();
     }
+
+    var fil = try Io.Dir.cwd().openFile(io, arc_loc, .{});
+    defer fil.close(io);
+
+    var arc: Archive = try .open(io, fil, offset);
+    defer arc.close(io);
+
+    try arc.extract(alloc, io, ext_loc, options);
 }

@@ -15,6 +15,8 @@ test "Open" {
     var arc: Archive = try .open(io, archive_file, 0);
     defer arc.close(io);
 
+    std.debug.print("{}\n", .{arc.super});
+
     var root = try arc.root();
     defer root.close();
 }
