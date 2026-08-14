@@ -6,6 +6,16 @@ const Inode = @This();
 header: Header,
 data: Data,
 
+pub fn deinit(self: Inode, alloc: std.mem.Allocator) void {
+    switch (self.data) {
+        .file => |f| alloc.free(f.blocks),
+        .ext_file => |f| alloc.free(f.blocks),
+        .symlink => |s| alloc.free(s.target),
+        .ext_symlink => |s| alloc.free(s.target),
+        else => {},
+    }
+}
+
 // Types
 
 pub const Reference = packed struct(u64) {
@@ -76,11 +86,19 @@ pub const ExtDir = extern struct {
     xattr_idx: u32,
 };
 
-pub const File = struct {};
-pub const ExtFile = struct {};
+pub const File = struct {
+    blocks: []u64,
+};
+pub const ExtFile = struct {
+    blocks: []u64,
+};
 
-pub const Symlink = struct {};
-pub const ExtSymlink = struct {};
+pub const Symlink = struct {
+    target: []const u8,
+};
+pub const ExtSymlink = struct {
+    target: []const u8,
+};
 
 pub const Dev = extern struct {};
 pub const ExtDev = extern struct {};

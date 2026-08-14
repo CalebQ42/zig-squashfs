@@ -1,6 +1,10 @@
 const std = @import("std");
 const Io = std.Io;
 
+const File = @import("file.zig");
+const Inode = @import("inode.zig");
+const Util = @import("util.zig");
+
 const Archive = @This();
 
 map: Io.File.MemoryMap,
@@ -14,7 +18,7 @@ pub fn open(io: Io, file: Io.File, offset: u64) !Archive {
         .protection = .{ .read = true },
     });
 
-    var super: Superblock = std.mem.bytesToValue(Superblock, map.memory[0..@sizeOf(Superblock)]);
+    var super = Util.readValue(Superblock, map.memory[0..@sizeOf(Superblock)]);
     try super.check();
 
     return .{
@@ -22,6 +26,18 @@ pub fn open(io: Io, file: Io.File, offset: u64) !Archive {
 
         .super = super,
     };
+}
+pub fn close(self: *Archive, io: Io) void {
+    self.map.destroy(io);
+}
+
+pub fn root(self: *Archive) !File {
+    _ = self;
+    return error.TODO;
+}
+pub fn extract(self: *Archive) !void {
+    _ = self;
+    return error.TODO;
 }
 
 // Superblock
@@ -40,7 +56,7 @@ pub const Superblock = extern struct {
     id_count: u16,
     version_major: u16,
     version_minor: u16,
-    root_inode_ref: u64, // TODO: Change to inode reference packed struct.
+    root_inode_ref: Inode.Reference, // TODO: Change to inode reference packed struct.
     size: u64,
     id_table_start: u64,
     xattr_table_start: u64,
