@@ -20,3 +20,9 @@ pub fn readValue(comptime T: type, bytes: []u8) T {
     }
     return res;
 }
+pub fn readValueRdr(comptime T: type, rdr: *std.Io.Reader) !T {
+    var tmp: [@sizeOf(T)]u8 = undefined;
+    try rdr.readSliceAll(&tmp);
+
+    return readValue(T, &tmp);
+}

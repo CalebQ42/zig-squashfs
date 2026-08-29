@@ -17,6 +17,6 @@ test "Open" {
 
     std.debug.print("{}\n", .{arc.super});
 
-    var root = try arc.root();
+    var root = try arc.root(alloc);
     defer root.close();
 }
