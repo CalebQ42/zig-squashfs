@@ -6,7 +6,6 @@ const util = @import("utils/util.zig");
 const File = @import("file.zig");
 const Inode = @import("inode.zig");
 const Decomp = @import("decomp.zig");
-
 const Options = @import("options.zig");
 
 const Archive = @This();
@@ -16,7 +15,7 @@ map: Io.File.MemoryMap,
 super: Super,
 root_inode_ref: Inode.Reference,
 
-pub fn open(io: Io, file: Io.File, offset: u64) !Archive {
+pub fn init(io: Io, file: Io.File, offset: u64) !Archive {
     var map = try file.createMemoryMap(io, .{
         .len = try file.length(io) - offset,
         .offset = offset,
@@ -33,7 +32,7 @@ pub fn open(io: Io, file: Io.File, offset: u64) !Archive {
         .root_inode_ref = superblock.root_inode_ref,
     };
 }
-pub fn close(self: *Archive, io: Io) void {
+pub fn deinit(self: *Archive, io: Io) void {
     self.map.destroy(io);
 }
 
@@ -53,7 +52,7 @@ pub fn root(self: *Archive, alloc: std.mem.Allocator) !File {
         .name = "",
     };
 }
-pub fn openFile(self: *Archive, alloc: std.mem.Allocator, filepath: []const u8) !File {
+pub fn open(self: *Archive, alloc: std.mem.Allocator, filepath: []const u8) !File {
     var root_file = try self.root(alloc);
     defer root_file.deinit();
 

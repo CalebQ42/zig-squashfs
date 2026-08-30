@@ -12,11 +12,11 @@ test "Open" {
     var archive_file = try Io.Dir.cwd().openFile(io, TEST_ARCHIVE, .{});
     defer archive_file.close(io);
 
-    var arc: Archive = try .open(io, archive_file, 0);
-    defer arc.close(io);
+    var arc: Archive = try .init(io, archive_file, 0);
+    defer arc.deinit(io);
 
     std.debug.print("{}\n", .{arc.super});
 
     var root = try arc.root(alloc);
-    defer root.close();
+    defer root.deinit();
 }

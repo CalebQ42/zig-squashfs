@@ -246,7 +246,7 @@ pub const ExtDev = extern struct {
     xattr_idx: u32,
 
     pub fn read(rdr: *Io.Reader) !ExtDev {
-        return util.readValue(ExtDev, rdr);
+        return util.readValueRdr(ExtDev, rdr);
     }
 };
 

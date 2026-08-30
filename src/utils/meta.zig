@@ -15,7 +15,7 @@ decomp: Decomp.Fn,
 decomp_block: [8192]u8 = undefined,
 
 interface: Io.Reader = .{
-    .buffer = &[0]u8,
+    .buffer = &[0]u8{},
     .end = 0,
     .seek = 0,
     .vtable = &.{
