@@ -31,11 +31,11 @@ interface: Io.Reader = .{
     },
 },
 
-pub fn init(alloc: std.mem.Allocator, data: []u8, decomp: Decomp.Fn, block_size: u32, start: u64, size: u64, blocks: []BlockSize) DataReader {
+pub fn init(alloc: std.mem.Allocator, data: []u8, decomp: Decomp.Fn, block_size: u32, size: u64, blocks: []BlockSize) DataReader {
     return .{
         .alloc = alloc,
 
-        .data = data[start..],
+        .data = data,
         .decomp = decomp,
         .block_size = block_size,
 

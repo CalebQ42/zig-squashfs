@@ -43,10 +43,11 @@ pub fn root(self: *Archive, alloc: std.mem.Allocator) !File {
         .data = self.map.memory,
         .super = self.super,
 
-        .inode = try .fromRef(
+        .inode = try .readLocation(
             alloc,
             self.map.memory,
-            self.root_inode_ref,
+            self.root_inode_ref.start,
+            self.root_inode_ref.offset,
             self.super,
         ),
         .name = "",
