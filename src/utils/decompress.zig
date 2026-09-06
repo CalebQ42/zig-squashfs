@@ -7,12 +7,17 @@ const Decomp = @import("../decomp.zig");
 const Directory = @import("../dir.zig");
 const MetadataReader = @import("meta.zig");
 const DataReader = @import("data_reader.zig");
+const Table = @import("../table.zig");
 const Super = @import("../archive.zig").Super;
 
 pub fn single(alloc: std.mem.Allocator, io: Io, data: []const u8, decomp: Decomp.Fn, super: Super, inode: Inode, filepath: []const u8, options: Options) !void {
     const path = std.mem.trim(u8, filepath, "/");
 
-    var pool: std.ArrayList(InodeAndPath) = .initBuffer(&.{.{ .inode = inode, .path = path }});
+    var pool: std.ArrayList(InodeAndPath) = .initBuffer(&.{.{
+        .inode = inode,
+        .path = path,
+        .root = true,
+    }});
     defer {
         while (pool.pop()) |in|
             in.deinit(in);
@@ -55,7 +60,11 @@ pub fn single(alloc: std.mem.Allocator, io: Io, data: []const u8, decomp: Decomp
                         return err;
                     };
 
-                    try pool.append(alloc, .{ .inode = new_inode, .path = new_path });
+                    try pool.append(alloc, .{
+                        .inode = new_inode,
+                        .path = new_path,
+                        .root = false,
+                    });
                 }
 
                 try dirs.append(alloc, in);
@@ -136,13 +145,20 @@ pub fn single(alloc: std.mem.Allocator, io: Io, data: []const u8, decomp: Decomp
         // TODO: apply permissions & xattrs
     }
 }
+pub fn multi() !void {}
+
+// Utils
+
 const InodeAndPath = struct {
     inode: Inode,
     path: []const u8,
+    root: bool,
 
     fn deinit(self: InodeAndPath, alloc: std.mem.Allocator) void {
+        if (self.root) return;
         self.inode.deinit(alloc);
         alloc.free(self.path);
     }
 };
-pub fn multi() !void {}
+
+inline fn applyPermissions(alloc: std.mem.Allocator, io: Io, id_table: Table.Lookup(u16), xattr_table: Table.Xattr, inode: Inode, path: []const u8, options: Options) !void {}
