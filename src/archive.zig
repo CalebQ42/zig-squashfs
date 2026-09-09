@@ -7,6 +7,7 @@ const File = @import("file.zig");
 const Inode = @import("inode.zig");
 const Decomp = @import("decomp.zig");
 const Options = @import("options.zig");
+const Decompress = @import("utils/decompress.zig");
 
 const Archive = @This();
 
@@ -60,12 +61,17 @@ pub fn open(self: *Archive, alloc: std.mem.Allocator, filepath: []const u8) !Fil
     return root.open(alloc, filepath);
 }
 pub fn extract(self: *Archive, alloc: std.mem.Allocator, io: Io, ext_loc: []const u8, options: Options) !void {
-    _ = self;
-    _ = alloc;
-    _ = io;
-    _ = ext_loc;
-    _ = options;
-    return error.TODO;
+    const root_inode: Inode = try .readLocation(
+        alloc,
+        self.map.memory,
+        self.root_inode_ref.start,
+        self.root_inode_ref.offset,
+        self.super,
+    );
+
+    // TODO: use single & multi respectively.
+
+    return Decompress.single(alloc, io, self.map.memory, self.super, root_inode, ext_loc, options);
 }
 
 // Superblock

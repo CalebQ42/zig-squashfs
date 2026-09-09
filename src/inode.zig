@@ -40,9 +40,7 @@ pub fn copy(self: Inode, alloc: std.mem.Allocator) !Inode {
 
     switch (new_inode.data) {
         .file => |*f| f.blocks = try alloc.dupe(BlockSize, f.blocks),
-        .ext_file => |*f| f.blocks = try alloc.dupe(BlockSize, f.blocks),
         .symlink => |*f| f.target = try alloc.dupe(u8, f.target),
-        .ext_symlink => |*f| f.target = try alloc.dupe(u8, f.target),
         else => {},
     }
 
@@ -71,7 +69,7 @@ pub const BlockSize = packed struct(u32) {
 };
 
 pub const Type = enum(u16) {
-    dir,
+    dir = 1,
     file,
     symlink,
     block_dev,

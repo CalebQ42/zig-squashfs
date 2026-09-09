@@ -73,27 +73,13 @@ pub fn open(self: File, alloc: std.mem.Allocator, filepath: []const u8) !File {
     if (path.len == 0 or (path.len == 1 and path[0] == '.'))
         return self.copy(alloc);
 
-    const first_element: []u8 = std.mem.sliceTo(path, '/');
+    const first_element: []const u8 = std.mem.sliceTo(path, '/');
     const final = first_element.len == path.len;
 
-    var dir_size: u32 = undefined;
-    var dir_rdr: MetadataReader = undefined;
+    var dir_rdr: MetadataReader = .init(alloc, self.data[self.inode.data.dir.start + self.super.dir_table_start ..], self.super.decomp_fn);
+    try dir_rdr.interface.discardAll(self.inode.data.dir.offset);
 
-    switch (self.inode.data) {
-        .dir => |d| {
-            dir_rdr = .init(alloc, self.data[d.block..], self.super.decomp_fn);
-            try dir_rdr.interface.discardAll(d.offset);
-
-            dir_size = d.size;
-        },
-        .ext_dir => |d| {
-            dir_rdr = .init(alloc, self.data[d.block..], self.super.decomp_fn);
-            try dir_rdr.interface.discardAll(d.offset);
-
-            dir_size = d.size;
-        },
-        else => unreachable,
-    }
+    const dir_size = self.inode.data.dir.size;
 
     const entry: Directory.Entry = blk: {
         var dir: Directory = try .read(alloc, &dir_rdr.interface, dir_size);
@@ -101,17 +87,18 @@ pub fn open(self: File, alloc: std.mem.Allocator, filepath: []const u8) !File {
 
         var entries = dir.entries;
 
-        while (entries.len > 0) {
+        while (entries.len > 1) {
             const idx = entries.len / 2;
             const val = entries[idx];
 
             switch (std.mem.order(u8, first_element, val.name)) {
                 .eq => {
                     if (final) {
-                        const inode: Inode = try .fromRef(
+                        const inode: Inode = try .readLocation(
                             alloc,
                             self.data,
-                            .{ .start = val.start, .offset = val.offset },
+                            val.start,
+                            val.offset,
                             self.super,
                         );
                         errdefer inode.deinit(alloc);
@@ -144,10 +131,11 @@ pub fn open(self: File, alloc: std.mem.Allocator, filepath: []const u8) !File {
         .data = self.data,
         .super = self.super,
 
-        .inode = try .fromRef(
+        .inode = try .readLocation(
             alloc,
             self.data,
-            .{ .start = entry.start, .offset = entry.offset },
+            entry.start,
+            entry.offset,
             self.super,
         ),
         .name = "",

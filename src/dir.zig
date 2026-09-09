@@ -21,7 +21,7 @@ pub fn read(alloc: std.mem.Allocator, rdr: *Io.Reader, size: u32) !Directory {
 
         try out.ensureUnusedCapacity(alloc, hdr.count + 1);
 
-        for (hdr.count + 1) |_| {
+        for (0..hdr.count + 1) |_| {
             const raw: RawEntry = try utils.readValueRdr(RawEntry, rdr);
 
             const name = try alloc.alloc(u8, raw.name_size + 1);
@@ -36,11 +36,11 @@ pub fn read(alloc: std.mem.Allocator, rdr: *Io.Reader, size: u32) !Directory {
                 .name = name,
             };
 
-            red += @sizeOf(RawEntry + raw.name_size + 1);
+            red += @sizeOf(RawEntry) + raw.name_size + 1;
         }
     }
 
-    return out.toOwnedSlice(alloc);
+    return .{ .entries = try out.toOwnedSlice(alloc) };
 }
 pub fn deinit(self: Directory, alloc: std.mem.Allocator) void {
     for (self.entries) |entry|
