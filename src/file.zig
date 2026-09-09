@@ -119,7 +119,8 @@ pub fn open(self: File, alloc: std.mem.Allocator, filepath: []const u8) !File {
                 .gt => entries = entries[idx..],
             }
         }
-        return error.NotFound;
+        if (entries[0])
+            return error.NotFound;
     };
 
     if (entry.type != .dir)
