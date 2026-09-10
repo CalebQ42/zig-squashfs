@@ -6,6 +6,7 @@ const Directory = @import("dir.zig");
 const MetadataReader = @import("utils/meta.zig");
 const Options = @import("options.zig");
 const DataReader = @import("utils/data_reader.zig");
+const Decompress = @import("utils/decompress.zig");
 const Super = @import("archive.zig").Super;
 
 const File = @This();
@@ -86,41 +87,43 @@ pub fn open(self: File, alloc: std.mem.Allocator, filepath: []const u8) !File {
         defer dir.deinit(alloc);
 
         var entries = dir.entries;
+        var idx: usize = undefined;
 
         while (entries.len > 1) {
-            const idx = entries.len / 2;
+            idx = entries.len / 2;
             const val = entries[idx];
 
             switch (std.mem.order(u8, first_element, val.name)) {
-                .eq => {
-                    if (final) {
-                        const inode: Inode = try .readLocation(
-                            alloc,
-                            self.data,
-                            val.start,
-                            val.offset,
-                            self.super,
-                        );
-                        errdefer inode.deinit(alloc);
-
-                        return .{
-                            .alloc = alloc,
-
-                            .data = self.data,
-                            .super = self.super,
-
-                            .inode = inode,
-                            .name = try alloc.dupe(u8, val.name),
-                        };
-                    }
-                    break :blk val;
-                },
+                .eq => break,
                 .lt => entries = entries[0..idx],
                 .gt => entries = entries[idx..],
             }
+        } else {
+            if (!std.mem.eql(u8, first_element, entries[0].name))
+                return error.NotFound;
+            idx = 0;
         }
-        if (entries[0])
-            return error.NotFound;
+
+        if (!final) break :blk entries[idx];
+
+        const inode: Inode = try .readLocation(
+            alloc,
+            self.data,
+            entries[idx].start,
+            entries[idx].offset,
+            self.super,
+        );
+        errdefer inode.deinit(alloc);
+
+        return .{
+            .alloc = alloc,
+
+            .data = self.data,
+            .super = self.super,
+
+            .inode = inode,
+            .name = try alloc.dupe(u8, entries[idx].name),
+        };
     };
 
     if (entry.type != .dir)
@@ -140,17 +143,16 @@ pub fn open(self: File, alloc: std.mem.Allocator, filepath: []const u8) !File {
             self.super,
         ),
         .name = "",
-    };
+    }; // We don't care about deiniting this file since dir inodes don't need to be deinited and we don't have an allocd name.
 
-    return transient_file.open(alloc, filepath[first_element.len..]);
+    return transient_file.open(alloc, path[first_element.len + 1 ..]);
 }
 
 /// Extract the given File to the location.
 pub fn extract(self: File, alloc: std.mem.Allocator, io: Io, ext_loc: []const u8, options: Options) !void {
-    _ = self;
-    _ = alloc;
-    _ = io;
-    _ = ext_loc;
-    _ = options;
-    return error.TODO;
+    // TODO: do some basic processing to check if ext_loc is a folder & if self is regular file and adjust accordingly.
+
+    if (options.single_threaded)
+        return Decompress.single(alloc, io, self.map.memory, self.super, self.inode, ext_loc, options);
+    return Decompress.multi(alloc, io, self.map.memory, self.super, self.inode, ext_loc, options);
 }

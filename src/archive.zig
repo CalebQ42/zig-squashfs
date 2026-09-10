@@ -69,9 +69,9 @@ pub fn extract(self: *Archive, alloc: std.mem.Allocator, io: Io, ext_loc: []cons
         self.super,
     );
 
-    // TODO: use single & multi respectively.
-
-    return Decompress.single(alloc, io, self.map.memory, self.super, root_inode, ext_loc, options);
+    if (options.single_threaded)
+        return Decompress.single(alloc, io, self.map.memory, self.super, root_inode, ext_loc, options);
+    return Decompress.multi(alloc, io, self.map.memory, self.super, root_inode, ext_loc, options);
 }
 
 // Superblock
