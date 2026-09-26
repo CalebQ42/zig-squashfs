@@ -24,10 +24,10 @@ test "Open" {
     defer test_open.deinit();
 }
 
-const FULL_EXTRACT_LOCATION = "testing/TestExtractST";
+const FULL_EXTRACT_LOCATION_ST = "testing/TestExtractST";
 
 test "FullExtractSingleThreaded" {
-    Io.Dir.cwd().deleteTree(io, FULL_EXTRACT_LOCATION) catch {};
+    Io.Dir.cwd().deleteTree(io, FULL_EXTRACT_LOCATION_ST) catch {};
 
     var archive_file = try Io.Dir.cwd().openFile(io, TEST_ARCHIVE, .{});
     defer archive_file.close(io);
@@ -35,5 +35,19 @@ test "FullExtractSingleThreaded" {
     var arc: Archive = try .init(io, archive_file, 0);
     defer arc.deinit(io);
 
-    try arc.extract(alloc, io, FULL_EXTRACT_LOCATION, .default);
+    try arc.extract(alloc, io, FULL_EXTRACT_LOCATION_ST, .single_threaded_default);
+}
+
+const FULL_EXTRACT_LOCATION_MT = "testing/TestExtractMT";
+
+test "FullExtractMultiThreaded" {
+    Io.Dir.cwd().deleteTree(io, FULL_EXTRACT_LOCATION_MT) catch {};
+
+    var archive_file = try Io.Dir.cwd().openFile(io, TEST_ARCHIVE, .{});
+    defer archive_file.close(io);
+
+    var arc: Archive = try .init(io, archive_file, 0);
+    defer arc.deinit(io);
+
+    try arc.extract(alloc, io, FULL_EXTRACT_LOCATION_MT, .default);
 }

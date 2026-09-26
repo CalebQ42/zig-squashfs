@@ -63,9 +63,9 @@ pub const Reference = packed struct(u64) {
 };
 
 pub const BlockSize = packed struct(u32) {
-    size: u23,
+    size: u24,
     uncompressed: bool,
-    _: u8,
+    _: u7,
 };
 
 pub const Type = enum(u16) {
@@ -143,12 +143,14 @@ pub const Dir = struct {
         var raw: [24]u8 = undefined;
         try rdr.readSliceAll(&raw);
 
+        const xattr_idx = util.readValue(u32, raw[20..24]);
+
         return .{
             .hard_links = util.readValue(u32, raw[0..4]),
             .size = util.readValue(u32, raw[4..8]),
             .start = util.readValue(u32, raw[8..12]),
             .offset = util.readValue(u16, raw[18..20]),
-            .xattr_idx = util.readValue(u32, raw[20..24]),
+            .xattr_idx = if (xattr_idx == 0xFFFFFFFF) null else xattr_idx,
         };
     }
 };
@@ -216,13 +218,15 @@ pub const File = struct {
         const sizes = try alloc.alloc(BlockSize, block_num);
         try rdr.readSliceEndian(BlockSize, sizes, .little);
 
+        const xattr_idx = util.readValue(u32, raw[36..40]);
+
         return .{
             .start = util.readValue(u64, raw[0..8]),
             .size = size,
             .frag_idx = frag_idx,
             .frag_offset = util.readValue(u32, raw[32..36]),
             .blocks = sizes,
-            .xattr_idx = util.readValue(u32, raw[36..40]),
+            .xattr_idx = if (xattr_idx == 0xFFFFFFFF) null else xattr_idx,
         };
     }
 };
@@ -251,7 +255,7 @@ pub const Symlink = struct {
 pub const Dev = struct {
     hard_links: u32,
     device: u32,
-    // xattr_idx omitted on basic device inodes.
+    // xattr_idx: u32 omitted on basic device inodes.
     xattr_idx: ?u32,
 
     pub fn readBasic(rdr: *Io.Reader) !Dev {
@@ -268,10 +272,12 @@ pub const Dev = struct {
         var raw: [12]u8 = undefined;
         try rdr.readSliceAll(&raw);
 
+        const xattr_idx = util.readValue(u32, raw[8..12]);
+
         return .{
             .hard_links = util.readValue(u32, raw[0..4]),
             .device = util.readValue(u32, raw[4..8]),
-            .xattr_idx = util.readValue(u32, raw[8..12]),
+            .xattr_idx = if (xattr_idx == 0xFFFFFFFF) null else xattr_idx,
         };
     }
 };
@@ -294,9 +300,11 @@ pub const Fifo = struct {
         var raw: [8]u8 = undefined;
         try rdr.readSliceAll(&raw);
 
+        const xattr_idx = util.readValue(u32, raw[4..8]);
+
         return .{
             .hard_links = util.readValue(u32, raw[0..4]),
-            .xattr_idx = util.readValue(u32, raw[4..8]),
+            .xattr_idx = if (xattr_idx == 0xFFFFFFFF) null else xattr_idx,
         };
     }
 };

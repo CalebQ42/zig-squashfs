@@ -31,20 +31,21 @@ pub fn single(alloc: std.mem.Allocator, io: Io, data: []u8, super: Super, inode:
     });
     defer {
         while (pool.pop()) |in|
-            in.deinit(alloc);
+            if (in.path.len != path.len) in.deinit(alloc);
         pool.deinit(alloc);
     }
 
     var dirs: std.ArrayList(InodeAndPath) = .empty;
     defer {
         while (dirs.pop()) |dir|
-            alloc.free(dir.path);
+            if (dir.path.len != path.len) alloc.free(dir.path);
         dirs.deinit(alloc);
     }
 
     var cwd = Io.Dir.cwd();
 
     while (pool.pop()) |in| {
+        std.debug.print("{s}: {}\n", .{ in.path, in.inode });
         switch (in.inode.data) {
             .dir => |d| {
                 try cwd.createDirPath(io, in.path);
@@ -60,7 +61,7 @@ pub fn single(alloc: std.mem.Allocator, io: Io, data: []u8, super: Super, inode:
                     continue;
                 }
 
-                var meta: MetadataReader = .init(alloc, data[d.start..], super.decomp_fn);
+                var meta: MetadataReader = .init(alloc, data[d.start + super.dir_table_start ..], super.decomp_fn);
                 try meta.interface.discardAll(d.offset);
 
                 var dir: Directory = try .read(alloc, &meta.interface, d.size);
@@ -95,11 +96,13 @@ pub fn single(alloc: std.mem.Allocator, io: Io, data: []u8, super: Super, inode:
 
                 if (f.frag_idx != 0xFFFFFFFF) {
                     const frag = try frag_cache.get(alloc, io, f.frag_idx);
-                    rdr.addFrag(frag);
+                    rdr.addFrag(frag[f.frag_offset..][0 .. f.size % super.block_size]);
                 }
+
                 var buf: [1024 * 50]u8 = undefined; // TODO: find a resonable buffer size.
                 var writer = atomic.file.writer(io, &buf);
                 _ = try rdr.interface.streamRemaining(&writer.interface);
+                try writer.flush();
 
                 try applyPermissions(alloc, io, &id_table, &xattr_table, in.inode.header, f.xattr_idx, atomic.file, options);
 
