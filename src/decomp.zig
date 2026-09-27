@@ -141,6 +141,10 @@ fn zigZstd(alloc: std.mem.Allocator, in: []u8, out: []u8) Error!usize {
 fn cZstd(_: std.mem.Allocator, in: []u8, out: []u8) Error!usize {
     const res = c.ZSTD_decompress(out.ptr, out.len, in.ptr, in.len);
     if (c.ZSTD_isError(res) == 1) {
+        if (c.ZSTD_getErrorCode(res) == c.ZSTD_error_dstSize_tooSmall) {
+            const size = c.ZSTD_getDecompressedSize(in.ptr, in.len);
+            std.debug.print("expected: {} is: {}\n", .{ size, out.len });
+        }
         std.debug.print("{s}\n", .{c.ZSTD_getErrorName(res)});
         return Error.ReadFailed;
     }
