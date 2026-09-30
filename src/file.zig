@@ -6,8 +6,9 @@ const Directory = @import("dir.zig");
 const MetadataReader = @import("utils/meta.zig");
 const Options = @import("options.zig");
 const DataReader = @import("utils/data_reader.zig");
-const Decompress = @import("utils/decompress.zig");
 const Super = @import("archive.zig").Super;
+
+const extractFn = @import("extract.zig").extract;
 
 const File = @This();
 
@@ -152,7 +153,5 @@ pub fn open(self: File, alloc: std.mem.Allocator, filepath: []const u8) !File {
 pub fn extract(self: File, alloc: std.mem.Allocator, io: Io, ext_loc: []const u8, options: Options) !void {
     // TODO: do some basic processing to check if ext_loc is a folder & if self is regular file and adjust accordingly.
 
-    if (options.single_threaded)
-        return Decompress.single(alloc, io, self.map.memory, self.super, self.inode, ext_loc, options);
-    return Decompress.multi(alloc, io, self.map.memory, self.super, self.inode, ext_loc, options);
+    return extractFn(alloc, io, self.map.memory, self.super, self.inode, ext_loc, options);
 }

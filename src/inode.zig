@@ -229,6 +229,10 @@ pub const File = struct {
             .xattr_idx = if (xattr_idx == 0xFFFFFFFF) null else xattr_idx,
         };
     }
+
+    pub fn deinit(self: File, alloc: std.mem.Allocator) void {
+        alloc.free(self.blocks);
+    }
 };
 
 pub const Symlink = struct {
@@ -249,6 +253,10 @@ pub const Symlink = struct {
             .hard_links = std.mem.readInt(u32, raw[0..4], .little),
             .target = target,
         };
+    }
+
+    pub fn deinit(self: Symlink, alloc: std.mem.Allocator) void {
+        alloc.free(self.target);
     }
 };
 

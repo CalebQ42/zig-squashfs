@@ -7,7 +7,8 @@ const File = @import("file.zig");
 const Inode = @import("inode.zig");
 const Decomp = @import("decomp.zig");
 const Options = @import("options.zig");
-const Decompress = @import("utils/decompress.zig");
+
+const extractFn = @import("extract.zig").extract;
 
 const Archive = @This();
 
@@ -69,9 +70,7 @@ pub fn extract(self: *Archive, alloc: std.mem.Allocator, io: Io, ext_loc: []cons
         self.super,
     );
 
-    if (options.single_threaded)
-        return Decompress.single(alloc, io, self.map.memory, self.super, root_inode, ext_loc, options);
-    return Decompress.multi(alloc, io, self.map.memory, self.super, root_inode, ext_loc, options);
+    return extractFn(alloc, io, self.map.memory, self.super, root_inode, ext_loc, options);
 }
 
 // Superblock

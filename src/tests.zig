@@ -51,3 +51,19 @@ test "FullExtractMultiThreaded" {
 
     try arc.extract(alloc, io, FULL_EXTRACT_LOCATION_MT, .default);
 }
+
+const FULL_EXTRACT_LOCATION_ST_IO = "testing/TestExtractST_Io";
+
+test "FullExtractSingleThreadedIo" {
+    Io.Dir.cwd().deleteTree(io, FULL_EXTRACT_LOCATION_ST_IO) catch {};
+
+    const st_io = Io.Threaded.global_single_threaded.io();
+
+    var archive_file = try Io.Dir.cwd().openFile(st_io, TEST_ARCHIVE, .{});
+    defer archive_file.close(st_io);
+
+    var arc: Archive = try .init(st_io, archive_file, 0);
+    defer arc.deinit(st_io);
+
+    try arc.extract(alloc, st_io, FULL_EXTRACT_LOCATION_ST_IO, .default);
+}
