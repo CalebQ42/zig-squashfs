@@ -33,7 +33,7 @@ pub fn Table(comptime T: type) type {
         count: u32,
         block_count: u32,
 
-        table: std.hash_map.AutoHashMapUnmanaged(u32, []T) = .empty,
+        table: std.AutoHashMapUnmanaged(u32, cache) = .empty,
         mut: Io.Mutex = .init,
 
         pub fn init(data: []u8, decomp: Decomp.Fn, start: u64, count: u32) !Self {
@@ -49,7 +49,7 @@ pub fn Table(comptime T: type) type {
         pub fn deinit(self: *Self, alloc: std.mem.Allocator) void {
             var iter = self.table.valueIterator();
             while (iter.next()) |block|
-                alloc.free(block.*);
+                alloc.free(block.cache);
 
             self.table.deinit(alloc);
         }
@@ -60,27 +60,42 @@ pub fn Table(comptime T: type) type {
             const block_idx = idx / ITEMS_PER_BLOCK;
             const value_idx = idx % ITEMS_PER_BLOCK;
 
-            const init_get = self.table.get(block_idx);
-            if (init_get != null) return init_get.?[value_idx];
-
             try self.mut.lock(io);
-            defer self.mut.unlock(io);
+            const block = try self.table.getOrPut(alloc, block_idx);
+            if (!block.found_existing) {
+                block.value_ptr.* = .{};
+                self.mut.unlock(io);
+            } else {
+                self.mut.unlock(io);
+                try block.value_ptr.set.wait(io);
+                if (block.value_ptr.cache.len == 0)
+                    return error.BadBlock;
+                return block.value_ptr.cache[value_idx];
+            }
+
+            defer block.value_ptr.set.set(io);
 
             const start = util.readValue(u64, self.data[self.start + (block_idx * 8) ..][0..8]);
 
             const len = if (block_idx == self.block_count - 1) self.count % ITEMS_PER_BLOCK else ITEMS_PER_BLOCK;
 
-            const new_block = try alloc.alloc(T, len);
-            errdefer alloc.free(new_block);
+            block.value_ptr.cache = try alloc.alloc(T, len);
+            errdefer {
+                alloc.free(block.value_ptr.cache);
+                block.value_ptr.cache = &[0]T{};
+            }
 
             var meta: MetadataReader = .init(alloc, self.data[start..], self.decomp);
 
-            try meta.interface.readSliceEndian(T, new_block, .little);
+            try meta.interface.readSliceEndian(T, block.value_ptr.cache, .little);
 
-            try self.table.put(alloc, block_idx, new_block);
-
-            return new_block[value_idx];
+            return block.value_ptr.cache[value_idx];
         }
+
+        const cache = struct {
+            cache: []T = &[0]T{},
+            set: Io.Event = .unset,
+        };
     };
 }
 

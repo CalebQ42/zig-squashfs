@@ -153,5 +153,5 @@ pub fn open(self: File, alloc: std.mem.Allocator, filepath: []const u8) !File {
 pub fn extract(self: File, alloc: std.mem.Allocator, io: Io, ext_loc: []const u8, options: Options) !void {
     // TODO: do some basic processing to check if ext_loc is a folder & if self is regular file and adjust accordingly.
 
-    return extractFn(alloc, io, self.map.memory, self.super, self.inode, ext_loc, options);
+    return extractFn(alloc, io, self.data, self.super, self.inode, ext_loc, options);
 }

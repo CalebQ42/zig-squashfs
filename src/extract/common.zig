@@ -85,7 +85,7 @@ pub fn applyPermissions(alloc: std.mem.Allocator, io: Io, id_table: *Lookup.Tabl
     if (!options.ignore_permissions) {
         try fil.setPermissions(io, @fromBackingInt(@intCast(header.permission)));
 
-        try fil.setTimestamps(io, .{ .modify_timestamp = .{ .new = .fromNanoseconds(@as(i96, @intCast(header.mod_time)) * std.time.ns_per_ms) } });
+        try fil.setTimestamps(io, .{ .modify_timestamp = .{ .new = .fromNanoseconds(@as(i96, @intCast(header.mod_time)) * std.time.ns_per_s) } });
 
         try fil.setOwner(io, try id_table.get(alloc, io, header.uid_idx), try id_table.get(alloc, io, header.gid_idx));
     }

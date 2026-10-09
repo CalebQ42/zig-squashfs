@@ -114,6 +114,9 @@ pub fn extract(alloc: std.mem.Allocator, io: Io, data: []u8, super: Super, inode
 
     try group.await(io);
 
+    if (res_err != null)
+        return res_err.?;
+
     while (dirs.pop()) |dir| {
         defer dir.deinit(alloc);
 
@@ -143,7 +146,7 @@ fn groupFn(
         inode.deinit(alloc);
         alloc.free(path);
     };
-    if (res_err.* == null)
+    if (res_err.* != null)
         return;
     try io.checkCancel();
     workFn(alloc, io, cwd, data, super, id_table, xattr_table, frag_cache, inode, path, options, root) catch |err| {

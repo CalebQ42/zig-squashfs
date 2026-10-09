@@ -54,6 +54,7 @@ pub fn extract(self: DataReader, alloc: std.mem.Allocator, io: Io, out: Io.File)
 
 fn groupFn(self: DataReader, alloc: std.mem.Allocator, io: Io, idx: usize, offset: u64, out: Io.File, res_err: *?Error) Io.Cancelable!void {
     if (res_err.* != null) return;
+    try io.checkCancel();
     self.threadFn(alloc, io, idx, offset, out) catch |err| {
         res_err.* = err;
     };
@@ -62,7 +63,7 @@ fn groupFn(self: DataReader, alloc: std.mem.Allocator, io: Io, idx: usize, offse
 fn threadFn(self: DataReader, alloc: std.mem.Allocator, io: Io, idx: usize, offset: u64, out: Io.File) Error!void {
     var buf: [512]u8 = undefined;
     var wrt = out.writer(io, &buf);
-    try wrt.seekToUnbuffered(offset);
+    try wrt.seekToUnbuffered(self.block_size * idx);
 
     if (self.frag != null and idx == self.blocks.len) {
         try wrt.interface.writeAll(self.frag.?);
@@ -93,7 +94,8 @@ fn threadFn(self: DataReader, alloc: std.mem.Allocator, io: Io, idx: usize, offs
     const data_buf = try alloc.alloc(u8, size);
     defer alloc.free(data_buf);
 
-    _ = try self.decomp(alloc, data, data_buf);
+    const decomp_siz = try self.decomp(alloc, data, data_buf);
+    std.debug.assert(decomp_siz == size);
     try wrt.interface.writeAll(data_buf);
     try wrt.flush();
     return;
