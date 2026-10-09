@@ -97,7 +97,7 @@ pub fn open(self: File, alloc: std.mem.Allocator, filepath: []const u8) !File {
             switch (std.mem.order(u8, first_element, val.name)) {
                 .eq => break,
                 .lt => entries = entries[0..idx],
-                .gt => entries = entries[idx..],
+                .gt => entries = entries[idx + 1 ..],
             }
         } else {
             if (!std.mem.eql(u8, first_element, entries[0].name))

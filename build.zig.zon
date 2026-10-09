@@ -2,12 +2,8 @@
     .name = .squashfs,
     .version = "0.0.6",
     .fingerprint = 0x37ba29474b87f145, // Changing this has security and trust implications.
-    .minimum_zig_version = "0.16.0",
+    .minimum_zig_version = "0.17.0",
     .dependencies = .{
-        .zlib_ng = .{
-            .url = "git+https://github.com/CalebQ42/zig-zlib-ng#915db2dbd4a540d8a933336d67520b786f168f01",
-            .hash = "zlib_ng-2.3.3-pre1-2HYS4MlFAADc-eSZv4_xjkxZRCdGUVOYZKdtqhybstgk",
-        },
         .zstd = .{
             .url = "git+https://github.com/allyourcodebase/zstd.git?ref=1.5.7-2#4ccb01e6fceae86fb9fe36c60b8a103cdc058155",
             .hash = "zstd-1.5.7-2-KEItkAMwAADNhCbGaImKrjXjnSA51jcqEbGCA3RasVZ9",
@@ -16,9 +12,17 @@
             .url = "git+https://github.com/allyourcodebase/lz4.git?ref=1.10.0-6#41f52ab227caf9d48cf88c89a4d2946caa12b102",
             .hash = "lz4-1.10.0-6-ewyzw-4NAAAWDpY4xpiqr4LQhZQAC0x_rGnW2iPh6jk2",
         },
+        .translate_c = .{
+            .url = "git+https://codeberg.org/ziglang/translate-c#875969d3493e245e01bf5d7860f792d8f3eb9ef5",
+            .hash = "translate_c-0.0.0-Q_BUWoFOBwAhz77Zd15HCVuhTKzdUKc94kezmCeJ7IC_",
+        },
+        .zlib_ng = .{
+            .url = "git+https://git.darkstorm.tech/Belac/zig-zlib-ng?ref=2.3.3-pre2#4826a509e8b478f6d135890f9d7e7ba40e18e2fa",
+            .hash = "zlib_ng-2.3.3-pre2-2HYS4LRFAABc7cYGeI0076qPdBOjYvcqDGfq88vEAmk6",
+        },
         .minilzo = .{
-            .url = "git+https://github.com/CalebQ42/zig-minilzo.git#f72a0e20a30fad38cd10104f393c8f3440478697",
-            .hash = "minilzo-2.10.0-Ij7BO7YLAABd6oK2YdimXwvFTOC8wD1sNm0PHGoRNEwR",
+            .url = "git+https://git.darkstorm.tech/Belac/zig-minilzo?ref=2.10.0-pre1#dd6436f44b5ecf04757b6375b8158e44caee9173",
+            .hash = "minilzo-2.10.0-pre1-Ij7BO78LAAB0uzKp9cimeehnOExcahXftt1CPUVH4Klx",
         },
     },
     .paths = .{

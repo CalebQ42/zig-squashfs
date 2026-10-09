@@ -89,7 +89,7 @@ pub fn extract(alloc: std.mem.Allocator, io: Io, data: []u8, super: Super, inode
                 defer if (!in.root)
                     in.deinit(alloc);
 
-                var atomic = try cwd.createFileAtomic(io, in.path, .{});
+                var atomic = try cwd.createFileAtomic(io, in.path, .{ .replace = options.overwrite });
                 defer atomic.deinit(io);
 
                 var ext: DataReader = try .init(alloc, data[f.start..], super.decomp_fn, super.block_size, f.size, f.blocks);

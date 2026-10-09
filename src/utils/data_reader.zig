@@ -100,7 +100,7 @@ fn stream(rdr: *Io.Reader, wrt: *Io.Writer, limit: Io.Limit) Io.Reader.StreamErr
     }
     if (limit == .nothing) return 0;
 
-    const size = @min(@intFromEnum(limit), rdr.end - rdr.seek);
+    const size = @min(@backingInt(limit), rdr.end - rdr.seek);
 
     const wrote = try wrt.write(rdr.buffer[rdr.seek..][0..size]);
     rdr.seek += wrote;
@@ -114,7 +114,7 @@ fn discard(rdr: *Io.Reader, limit: Io.Limit) Io.Reader.Error!usize {
     }
     if (limit == .nothing) return 0;
 
-    const size = @min(@intFromEnum(limit), rdr.end - rdr.seek);
+    const size = @min(@backingInt(limit), rdr.end - rdr.seek);
     rdr.seek += size;
 
     return size;

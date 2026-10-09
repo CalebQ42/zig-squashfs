@@ -1,4 +1,5 @@
 const std = @import("std");
+const Translator = @import("translate_c").Translator;
 
 pub fn build(b: *std.Build) !void {
     const zig_decomp = b.option(bool, "zig_decomp", "Use zig standard library for decompression.") orelse false;
@@ -8,7 +9,7 @@ pub fn build(b: *std.Build) !void {
     const version_string_option = b.option([]const u8, "version", "Version of the library/binary") orelse "0.0.0-testing";
 
     const target = b.standardTargetOptions(.{});
-    const optimize: std.builtin.OptimizeMode = if (debug) .Debug else b.standardOptimizeOption(.{});
+    const optimize: std.lang.Optimize = if (debug) .debug else b.standardOptimizeOption(.{});
 
     const version: std.SemanticVersion = try .parse(if (version_string_option[0] == 'v') version_string_option[1..] else version_string_option);
 
@@ -17,14 +18,18 @@ pub fn build(b: *std.Build) !void {
     build_config.addOption(bool, "allow_lzo", allow_lzo);
     build_config.addOption(bool, "debug", debug);
     build_config.addOption(std.SemanticVersion, "version", version);
+    const build_config_mod = build_config.createModule();
 
-    const c_h = b.addTranslateC(.{
+    const translate_c = b.dependency("translate_c", .{});
+
+    const c_h: Translator = .init(translate_c, .{
         .target = target,
         .optimize = optimize,
-        .root_source_file = b.path("src/c.h"),
+        .c_source_file = b.path("src/c.h"),
+        .default_init = true,
     });
     if (allow_lzo) c_h.defineCMacro("ALLOW_LZO", null);
-    const c = c_h.createModule();
+    const c = c_h.mod;
 
     if (static) {
         const zng = b.dependency("zlib_ng", .{
@@ -65,7 +70,7 @@ pub fn build(b: *std.Build) !void {
             .valgrind = debug,
             .imports = &.{
                 .{ .name = "c", .module = c },
-                .{ .name = "build_config", .module = build_config.createModule() },
+                .{ .name = "build_config", .module = build_config_mod },
             },
         }),
         .use_llvm = debug,
@@ -80,7 +85,7 @@ pub fn build(b: *std.Build) !void {
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "squashfs", .module = lib.root_module },
-                .{ .name = "build_config", .module = build_config.createModule() },
+                .{ .name = "build_config", .module = build_config_mod },
             },
             .valgrind = debug,
         }),

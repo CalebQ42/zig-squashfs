@@ -49,15 +49,16 @@ pub fn extract(alloc: std.mem.Allocator, io: Io, data: []u8, super: Super, inode
 
         defer i += 1;
 
-        std.debug.print("YO: {s}\n", .{dirs.items[i].path});
-
         const in = dirs.items[i];
         const d = in.inode.data.dir;
         try cwd.createDirPath(io, in.path);
 
         if (d.size <= 3) {
-            defer if (!in.root)
+            defer {
                 in.deinit(alloc);
+                _ = dirs.swapRemove(i);
+                i -= 1;
+            }
 
             var fil = try cwd.openFile(io, in.path, .{});
             defer fil.close(io);
@@ -109,16 +110,12 @@ pub fn extract(alloc: std.mem.Allocator, io: Io, data: []u8, super: Super, inode
                 &res_err,
             });
         }
-
-        try dirs.append(alloc, in);
     }
-    std.debug.print("end\n", .{});
 
     try group.await(io);
 
     while (dirs.pop()) |dir| {
-        defer if (dir.path.len != path.len)
-            alloc.free(dir.path);
+        defer dir.deinit(alloc);
 
         var fil = try cwd.openFile(io, dir.path, .{});
         defer fil.close(io);
@@ -142,8 +139,13 @@ fn groupFn(
     root: bool,
     res_err: *?anyerror,
 ) Io.Cancelable!void {
+    defer if (!root) {
+        inode.deinit(alloc);
+        alloc.free(path);
+    };
     if (res_err.* == null)
         return;
+    try io.checkCancel();
     workFn(alloc, io, cwd, data, super, id_table, xattr_table, frag_cache, inode, path, options, root) catch |err| {
         res_err.* = err;
         return;
@@ -165,37 +167,17 @@ fn workFn(
 ) !void {
     switch (inode.data) {
         .file => |f| {
-            defer if (!root) {
-                inode.deinit(alloc);
-                alloc.free(path);
-            };
-
-            var atomic = try cwd.createFileAtomic(io, path, .{});
+            var atomic = try cwd.createFileAtomic(io, path, .{ .replace = options.overwrite });
             defer atomic.deinit(io);
 
-            // var ext: DataExtractor = try .init(alloc, data[f.start..], super.decomp_fn, super.block_size, f.size, f.blocks);
-
-            // if (f.frag_idx != 0xFFFFFFFF) {
-            //     const frag = try frag_cache.get(alloc, io, f.frag_idx);
-            //     ext.addFrag(frag[f.frag_offset..][0 .. f.size % super.block_size]);
-            // }
-
-            // try ext.extract(alloc, io, atomic.file);
-
-            const DataReader = @import("../utils/data_reader.zig");
-
-            var ext: DataReader = try .init(alloc, data[f.start..], super.decomp_fn, super.block_size, f.size, f.blocks);
-            defer ext.deinit();
+            var ext: DataExtractor = try .init(alloc, data[f.start..], super.decomp_fn, super.block_size, f.size, f.blocks);
 
             if (f.frag_idx != 0xFFFFFFFF) {
                 const frag = try frag_cache.get(alloc, io, f.frag_idx);
                 ext.addFrag(frag[f.frag_offset..][0 .. f.size % super.block_size]);
             }
 
-            var buf: [512]u8 = undefined;
-            var wrt = atomic.file.writer(io, &buf);
-            _ = try ext.interface.streamRemaining(&wrt.interface);
-            try wrt.flush();
+            try ext.extract(alloc, io, atomic.file);
 
             try Common.applyPermissions(alloc, io, id_table, xattr_table, inode.header, f.xattr_idx, atomic.file, options);
 

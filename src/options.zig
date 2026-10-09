@@ -11,6 +11,8 @@ ignore_xattr: bool = false,
 
 dereference_symlink: bool = false,
 
+overwrite: bool = false,
+
 single_threaded: bool = false,
 
 pub const default: Options = .{};

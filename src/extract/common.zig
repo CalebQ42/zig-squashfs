@@ -83,7 +83,7 @@ pub fn fifo(
 
 pub fn applyPermissions(alloc: std.mem.Allocator, io: Io, id_table: *Lookup.Table(u16), xattr_table: *Lookup.Xattr, header: Inode.Header, xattr_idx: ?u32, fil: Io.File, options: Options) !void {
     if (!options.ignore_permissions) {
-        try fil.setPermissions(io, @enumFromInt(header.permission));
+        try fil.setPermissions(io, @fromBackingInt(@intCast(header.permission)));
 
         try fil.setTimestamps(io, .{ .modify_timestamp = .{ .new = .fromNanoseconds(@as(i96, @intCast(header.mod_time)) * std.time.ns_per_ms) } });
 
