@@ -23,6 +23,10 @@ const help_msg =
     \\  -p <threads>    Specify how many threads to use. If no present or zero, the system's logical cores count is used.
     \\  -v              Verbose
     \\
+    \\  -l              List files instead of extracting.
+    \\  -ll             List files with attributes.
+    \\  -lln            List files with attributes, using numeric uid & gids.
+    \\
     \\  --force         Force extraction. If the destination already exists, it will be deleted.
     \\
     \\  --help          Display this messages
@@ -36,6 +40,7 @@ var ext_loc: [:0]const u8 = "squashfs-root";
 var offset: u64 = 0;
 var threads: usize = 0;
 var force: bool = false;
+var list: ListTypes = .none;
 
 var options: Options = .default;
 
@@ -50,6 +55,7 @@ pub fn main(init: std.process.Init) !void {
     try processArgs(init.minimal.args, &stdout.interface);
 
     var limited_io: Io.Threaded = undefined;
+    defer if (threads != 0) limited_io.deinit();
     if (threads != 0) {
         if (threads == 1) {
             limited_io = Io.Threaded.init_single_threaded;
@@ -154,6 +160,18 @@ fn processArgs(args: std.process.Args, stdout: *Io.Writer) !void {
                 options.verbose = true;
                 options.verbose_writer = stdout;
             },
+            'l' => {
+                if (flag.len == 1) {
+                    list = .list;
+                } else if (flag.len == 2 and flag[1] == 'l') {
+                    list = .attributes;
+                } else if (flag.len == 3 and flag[1] == 'l' and flag[2] == 'n') {
+                    list = .numeric;
+                } else {
+                    try stdout.print("Invalid argument: {s}\n", .{arg});
+                    return error.InvalidArgument;
+                }
+            },
             else => {
                 try stdout.print("Invalid argument: {s}\n", .{arg});
                 return error.InvalidArgument;
@@ -161,3 +179,12 @@ fn processArgs(args: std.process.Args, stdout: *Io.Writer) !void {
         }
     }
 }
+
+// Types
+
+const ListTypes = enum {
+    none,
+    list,
+    attributes,
+    numeric,
+};

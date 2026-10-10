@@ -51,7 +51,8 @@ fn cZlib(_: std.mem.Allocator, in: []u8, out: []u8) Error!usize {
 fn zigLzma(alloc: std.mem.Allocator, in: []u8, out: []u8) Error!usize {
     var rdr: Io.Reader = .fixed(in);
 
-    var decomp: std.compress.lzma.Decompress = .initOptions(&rdr, alloc, &[0]u8{}, .{}, 0);
+    var decomp = std.compress.lzma.Decompress.initOptions(&rdr, alloc, &[0]u8{}, .{}, 0) catch
+        return Error.ReadFailed;
     defer decomp.deinit();
 
     return decomp.reader.readSliceShort(out);
@@ -93,7 +94,7 @@ fn cLzo(_: std.mem.Allocator, in: []u8, out: []u8) Error!usize {
 fn zigXz(alloc: std.mem.Allocator, in: []u8, out: []u8) Error!usize {
     var rdr: Io.Reader = .fixed(in);
 
-    var decomp: std.compress.xz.Decompress = .init(&rdr, alloc, &[0]u8{});
+    var decomp = std.compress.xz.Decompress.init(&rdr, alloc, &[0]u8{}) catch return Error.ReadFailed;
     defer decomp.deinit();
 
     return decomp.reader.readSliceShort(out);
