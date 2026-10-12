@@ -1,105 +1,150 @@
-//! A squashfs archive read from a file.
-//! Can be used to directly access File's contents or extract to the filesystem.
-
 const std = @import("std");
-const File = std.fs.File;
-const builtin = @import("builtin");
+const Io = std.Io;
 
-const config = @import("config");
+const util = @import("utils/util.zig");
 
-const cDecomp = @import("decomp/misc_c.zig");
-const Decomp = @import("decomp/zig_decomp.zig");
-const ExtractionOptions = @import("options.zig");
+const File = @import("file.zig");
 const Inode = @import("inode.zig");
-const InodeRef = Inode.Ref;
-const BlockSize = @import("inode_data/file.zig").BlockSize;
-const SfsFile = @import("file.zig");
-const Superblock = @import("super.zig").Superblock;
-const Tables = @import("tables.zig");
-const MetadataReader = @import("util/metadata.zig");
-const OffsetFile = @import("util/offset_file.zig");
-const XattrTable = @import("xattr.zig");
+const Decomp = @import("decomp.zig");
+const Options = @import("options.zig");
+
+const extractFn = @import("extract.zig").extract;
 
 const Archive = @This();
 
-alloc: std.mem.Allocator,
+map: Io.File.MemoryMap,
 
-fil: OffsetFile,
+super: Super,
+root_inode_ref: Inode.Reference,
 
-super: Superblock,
+pub fn init(io: Io, file: Io.File, offset: u64) !Archive {
+    var map = try file.createMemoryMap(io, .{
+        .len = try file.length(io) - offset,
+        .offset = offset,
+        .protection = .{ .read = true },
+    });
 
-tables: ?Tables = null,
+    var superblock = util.readValue(Superblock, map.memory[0..@sizeOf(Superblock)]);
+    const super = try superblock.checkAndMinimize();
 
-decomp: @import("decomp/types.zig").Decomp,
-
-/// Default settings using std.Thread.getCpuCount() threads and the minimum of 4gb or half of system memory for memory usage.
-pub fn init(alloc: std.mem.Allocator, fil: File, offset: u64) !Archive {
-    var super: Superblock = undefined;
-    const red = try fil.pread(@ptrCast(&super), offset);
-    std.debug.assert(red == @sizeOf(Superblock));
-    try super.validate();
-    const off_fil: OffsetFile = .init(fil, offset);
     return .{
-        .alloc = alloc,
-        .fil = off_fil,
-        .decomp = if (config.use_zig_decomp)
-            switch (super.compression) {
-                .lz4 => return error.Lz4Unsupported,
-                .lzo => return error.LzoUnsupported,
-                .gzip => .{ .gzip = .{} },
-                .lzma => .{ .lzma = .{} },
-                .xz => .{ .xz = .{} },
-                .zstd => .{ .zstd = .{} },
-            }
-        else switch (super.compression) {
-            .gzip => .{ .gzip = .init(alloc) },
-            .zstd => .{ .zstd = .init(alloc) },
-            .xz => .{ .xz = .init(alloc) },
-            .lzma => .{ .lzma = .init(alloc) },
-            .lzo => .{ .lzo = .{} },
-            .lz4 => .{ .lz4 = .{} },
-        },
+        .map = map,
+
         .super = super,
+        .root_inode_ref = superblock.root_inode_ref,
     };
 }
-pub fn deinit(self: *Archive) void {
-    if (self.tables != null)
-        self.tables.?.deinit();
-    self.decomp.deinit();
+pub fn deinit(self: *Archive, io: Io) void {
+    self.map.destroy(io);
 }
 
-pub fn inode(self: *Archive, alloc: std.mem.Allocator, num: u32) !Inode {
-    if (self.tables == null)
-        self.tables = try .init(alloc, self);
-    const ref = try self.export_table.get(num - 1);
-    var rdr = try self.fil.readerAt(ref.block_start + self.super.inode_start, &[0]u8{});
-    var meta: MetadataReader = .init(alloc, &rdr.interface, &self.decomp);
-    try meta.interface.discardAll(ref.block_offset);
-    return try .read(alloc, &meta.interface, self.super.block_size);
+pub fn root(self: *Archive, alloc: std.mem.Allocator) !File {
+    return .{
+        .alloc = alloc,
+
+        .data = self.map.memory,
+        .super = self.super,
+
+        .inode = try .readLocation(
+            alloc,
+            self.map.memory,
+            self.root_inode_ref.start,
+            self.root_inode_ref.offset,
+            self.super,
+        ),
+        .name = "",
+    };
+}
+pub fn open(self: *Archive, alloc: std.mem.Allocator, filepath: []const u8) !File {
+    var root_file = try self.root(alloc);
+    defer root_file.deinit();
+
+    return root.open(alloc, filepath);
+}
+pub fn extract(self: *Archive, alloc: std.mem.Allocator, io: Io, ext_loc: []const u8, options: Options) !void {
+    const root_inode: Inode = try .readLocation(
+        alloc,
+        self.map.memory,
+        self.root_inode_ref.start,
+        self.root_inode_ref.offset,
+        self.super,
+    );
+
+    return extractFn(alloc, io, self.map.memory, self.super, root_inode, ext_loc, options);
 }
 
-pub fn root(self: *Archive, alloc: std.mem.Allocator) !SfsFile {
-    if (self.tables == null)
-        self.tables = try .init(alloc, self);
-    var rdr = try self.fil.readerAt(self.super.root_ref.block_start + self.super.inode_start, &[0]u8{});
-    var meta: MetadataReader = .init(alloc, &rdr.interface, self.decomp);
-    try meta.interface.discardAll(self.super.root_ref.block_offset);
-    const in: Inode = try .read(alloc, &meta.interface, self.super.block_size);
-    return .init(self, in, "");
-}
+// Superblock
 
-pub fn open(self: *Archive, alloc: std.mem.Allocator, path: []const u8) !SfsFile {
-    if (self.tables == null)
-        self.tables = try .init(alloc, self);
-    var root_fil = try self.root(alloc);
-    defer if (!SfsFile.pathIsSelf(path)) root_fil.deinit();
-    return root_fil.open(path);
-}
+const Superblock = extern struct {
+    pub const MAGIC: u32 = 0x73717368;
 
-pub fn extract(self: Archive, alloc: std.mem.Allocator, path: []const u8, options: ExtractionOptions) !void {
-    var rdr = try self.fil.readerAt(self.super.root_ref.block_start + self.super.inode_start, &[0]u8{});
-    var meta: MetadataReader = .init(self.alloc, &rdr.interface, self.decomp);
-    try meta.interface.discardAll(self.super.root_ref.block_offset);
-    const in: Inode = try .read(self.alloc, &meta.interface, self.super.block_size);
-    try in.extractTo(alloc, self, path, options);
-}
+    magic: u32,
+    inode_count: u32,
+    mod_time: u32,
+    block_size: u32,
+    frag_count: u32,
+    compression: Decomp.Enum,
+    block_log: u16,
+    flags: packed struct(u16) {
+        inode_uncompressed: bool,
+        data_uncompressed: bool,
+        check: bool,
+        fragment_uncompressed: bool,
+        fragment_never: bool,
+        fragment_always: bool,
+        de_duplicate: bool,
+        exportable: bool,
+        xattr_uncompressed: bool,
+        xattr_never: bool,
+        compression_options: bool,
+        id_uncompressed: bool,
+        _: u4,
+    },
+    id_count: u16,
+    version_major: u16,
+    version_minor: u16,
+    root_inode_ref: Inode.Reference,
+    size: u64,
+    id_table_start: u64,
+    xattr_table_start: u64,
+    inode_table_start: u64,
+    dir_table_start: u64,
+    frag_table_start: u64,
+    export_table_start: u64,
+
+    fn checkAndMinimize(self: Superblock) !Super {
+        if (self.magic != MAGIC)
+            return error.InvalidMagic;
+        if (self.version_major != 4 or self.version_minor != 0)
+            return error.IncompatibleVersion;
+        if (std.math.log2(self.block_size) != self.block_log)
+            return error.BadBlockLog;
+        if (self.flags.check)
+            return error.BadCheckFlag;
+
+        return .{
+            .block_size = self.block_size,
+            .frag_count = self.frag_count,
+            .decomp_fn = try self.compression.func(),
+            .id_count = self.id_count,
+            .id_table_start = self.id_table_start,
+            .xattr_table_start = self.xattr_table_start,
+            .inode_table_start = self.inode_table_start,
+            .dir_table_start = self.dir_table_start,
+            .frag_table_start = self.frag_table_start,
+            .export_table_start = self.export_table_start,
+        };
+    }
+};
+pub const Super = struct {
+    block_size: u32,
+    frag_count: u32,
+    decomp_fn: Decomp.Fn,
+    id_count: u16,
+    id_table_start: u64,
+    xattr_table_start: u64,
+    inode_table_start: u64,
+    dir_table_start: u64,
+    frag_table_start: u64,
+    export_table_start: u64,
+};
