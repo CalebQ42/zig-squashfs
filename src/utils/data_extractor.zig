@@ -35,6 +35,13 @@ pub fn addFrag(self: *DataReader, frag: []u8) void {
 }
 
 pub fn extract(self: DataReader, alloc: std.mem.Allocator, io: Io, out: Io.File) !void {
+    if (self.size == 0) return;
+
+    if (self.blocks.len == 0 or (self.blocks.len == 1 and self.frag == null)) {
+        try self.threadFn(alloc, io, 0, 0, out);
+        return;
+    }
+
     var group: Io.Group = .init;
     var err: ?Error = null;
 
@@ -61,13 +68,10 @@ fn groupFn(self: DataReader, alloc: std.mem.Allocator, io: Io, idx: usize, offse
 }
 
 fn threadFn(self: DataReader, alloc: std.mem.Allocator, io: Io, idx: usize, offset: u64, out: Io.File) Error!void {
-    var buf: [512]u8 = undefined;
-    var wrt = out.writer(io, &buf);
-    try wrt.seekToUnbuffered(self.block_size * idx);
+    const wrt_offset = self.block_size * idx;
 
     if (self.frag != null and idx == self.blocks.len) {
-        try wrt.interface.writeAll(self.frag.?);
-        try wrt.flush();
+        try out.writePositionalAll(io, self.frag.?, wrt_offset);
         return;
     }
 
@@ -78,6 +82,9 @@ fn threadFn(self: DataReader, alloc: std.mem.Allocator, io: Io, idx: usize, offs
     const block = self.blocks[idx];
 
     if (block.size == 0) {
+        var buf: [1024]u8 = undefined;
+        var wrt = out.writer(io, &buf);
+        try wrt.seekToUnbuffered(wrt_offset);
         try wrt.interface.splatByteAll(0, size);
         try wrt.flush();
         return;
@@ -86,8 +93,7 @@ fn threadFn(self: DataReader, alloc: std.mem.Allocator, io: Io, idx: usize, offs
     const data = self.data[offset..][0..block.size];
 
     if (block.uncompressed) {
-        try wrt.interface.writeAll(data);
-        try wrt.flush();
+        try out.writePositionalAll(io, data, wrt_offset);
         return;
     }
 
@@ -96,8 +102,7 @@ fn threadFn(self: DataReader, alloc: std.mem.Allocator, io: Io, idx: usize, offs
 
     const decomp_siz = try self.decomp(alloc, data, data_buf);
     std.debug.assert(decomp_siz == size);
-    try wrt.interface.writeAll(data_buf);
-    try wrt.flush();
+    try out.writePositionalAll(io, data_buf, wrt_offset);
     return;
 }
 

@@ -46,6 +46,8 @@ pub fn extract(alloc: std.mem.Allocator, io: Io, data: []u8, super: Super, inode
 
     var cwd = Io.Dir.cwd();
 
+    var write_buf: [1024]u8 = undefined;
+
     while (pool.pop()) |in| {
         switch (in.inode.data) {
             .dir => |d| {
@@ -100,8 +102,7 @@ pub fn extract(alloc: std.mem.Allocator, io: Io, data: []u8, super: Super, inode
                     ext.addFrag(frag[f.frag_offset..][0 .. f.size % super.block_size]);
                 }
 
-                var buf: [512]u8 = undefined;
-                var wrt = atomic.file.writer(io, &buf);
+                var wrt = atomic.file.writer(io, &write_buf);
                 _ = try ext.interface.streamRemaining(&wrt.interface);
                 try wrt.flush();
 
