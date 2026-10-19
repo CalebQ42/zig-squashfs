@@ -16,17 +16,17 @@
             .url = "git+https://github.com/allyourcodebase/lz4.git?ref=1.10.0-6#41f52ab227caf9d48cf88c89a4d2946caa12b102",
             .hash = "lz4-1.10.0-6-ewyzw-4NAAAWDpY4xpiqr4LQhZQAC0x_rGnW2iPh6jk2",
         },
-        .zlib_ng = .{
-            .url = "git+https://git.darkstorm.tech/Belac/zig-zlib-ng?ref=2.3.3-pre2#4826a509e8b478f6d135890f9d7e7ba40e18e2fa",
-            .hash = "zlib_ng-2.3.3-pre2-2HYS4LRFAABc7cYGeI0076qPdBOjYvcqDGfq88vEAmk6",
-        },
-        .minilzo = .{
-            .url = "git+https://git.darkstorm.tech/Belac/zig-minilzo?ref=2.10.0-pre1#dd6436f44b5ecf04757b6375b8158e44caee9173",
-            .hash = "minilzo-2.10.0-pre1-Ij7BO78LAAB0uzKp9cimeehnOExcahXftt1CPUVH4Klx",
-        },
         .xz = .{
             .url = "git+https://github.com/akunaakwei/zig-xz.git#e2d389262c8291907e3e4c6fb119819141c16c0f",
             .hash = "xz-5.8.2-6v47_JYeAABSL-jonprpL5-E_YaaGc4B5xrbe93WsJ3G",
+        },
+        .minilzo = .{
+            .url = "git+https://git.darkstorm.tech/BelacDarkstorm/zig-minilzo.git#8ad04b7babd0c413504d4b47f4ad8f715f4131cc",
+            .hash = "minilzo-2.10.0-pre1-Ij7BO8gLAADKBuBZNqtxmDpneDI2wzxkKRKqfm2uxeam",
+        },
+        .zlib_ng = .{
+            .url = "git+https://git.darkstorm.tech/BelacDarkstorm/zig-zlib-ng.git#5867bc58a190e0d8d17230889d7d12776c41c86d",
+            .hash = "zlib_ng-2.3.3-pre2-2HYS4L1FAABw4gHJ_DP2n02YqPrGcZ45sjCeJ2nP_iz0",
         },
     },
     .paths = .{
