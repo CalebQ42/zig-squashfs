@@ -7,7 +7,7 @@ const Options = @import("../options.zig");
 const Lookup = @import("../lookup.zig");
 const FragCache = @import("../frag_cache.zig");
 const MetadataReader = @import("../utils/meta.zig");
-const Directory = @import("../dir.zig");
+const DirIter = @import("../dir.zig");
 const DataExtractor = @import("../utils/data_extractor.zig");
 const Common = @import("common.zig");
 
@@ -70,11 +70,15 @@ pub fn extract(alloc: std.mem.Allocator, io: Io, data: []u8, super: Super, inode
         var meta: MetadataReader = .init(alloc, data[d.start + super.dir_table_start ..], super.decomp_fn);
         try meta.interface.discardAll(d.offset);
 
-        var dir: Directory = try .read(alloc, &meta.interface, d.size);
-        defer dir.deinit(alloc);
+        var name_buf: [100]u8 = undefined;
 
-        for (dir.entries) |entry| {
-            const new_inode: Inode = try .readLocation(alloc, data, entry.start, entry.offset, super);
+        var dir: DirIter = .init(alloc, &meta.interface, &name_buf, d.size);
+
+        while (try dir.next()) |entry| {
+            defer if (entry.name.len > name_buf.len)
+                alloc.free(entry.name);
+
+            const new_inode: Inode = try .readLocation(alloc, data, super, dir.hdr.start, entry.offset);
 
             const new_path = std.mem.concat(alloc, u8, &.{ in.path, "/", entry.name }) catch |err| {
                 new_inode.deinit(alloc);

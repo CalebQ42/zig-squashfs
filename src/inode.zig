@@ -11,7 +11,7 @@ const Inode = @This();
 header: Header,
 data: Data,
 
-pub fn readLocation(alloc: std.mem.Allocator, data: []u8, start: u32, offset: u16, super: Super) !Inode {
+pub fn readLocation(alloc: std.mem.Allocator, data: []u8, super: Super, start: u32, offset: u16) !Inode {
     var meta: MetadataReader = .init(alloc, data[super.inode_table_start + start ..], super.decomp_fn);
     try meta.interface.discardAll(offset);
 

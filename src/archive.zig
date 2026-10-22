@@ -48,9 +48,9 @@ pub fn root(self: *Archive, alloc: std.mem.Allocator) !File {
         .inode = try .readLocation(
             alloc,
             self.map.memory,
+            self.super,
             self.root_inode_ref.start,
             self.root_inode_ref.offset,
-            self.super,
         ),
         .name = "",
     };
@@ -65,9 +65,9 @@ pub fn extract(self: *Archive, alloc: std.mem.Allocator, io: Io, ext_loc: []cons
     const root_inode: Inode = try .readLocation(
         alloc,
         self.map.memory,
+        self.super,
         self.root_inode_ref.start,
         self.root_inode_ref.offset,
-        self.super,
     );
 
     return extractFn(alloc, io, self.map.memory, self.super, root_inode, ext_loc, options);
