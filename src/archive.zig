@@ -1,14 +1,12 @@
 const std = @import("std");
 const Io = std.Io;
 
-const util = @import("utils/util.zig");
-
+const Decomp = @import("decomp.zig");
+const extractFn = @import("extract.zig").extract;
 const File = @import("file.zig");
 const Inode = @import("inode.zig");
-const Decomp = @import("decomp.zig");
 const Options = @import("options.zig");
-
-const extractFn = @import("extract.zig").extract;
+const util = @import("utils/util.zig");
 
 const Archive = @This();
 
@@ -16,6 +14,7 @@ map: Io.File.MemoryMap,
 
 super: Super,
 root_inode_ref: Inode.Reference,
+decomp: Decomp.Decompressor,
 
 pub fn init(io: Io, file: Io.File, offset: u64) !Archive {
     var map = try file.createMemoryMap(io, .{
@@ -32,10 +31,12 @@ pub fn init(io: Io, file: Io.File, offset: u64) !Archive {
 
         .super = super,
         .root_inode_ref = superblock.root_inode_ref,
+        .decomp = .init(super.decomp),
     };
 }
 pub fn deinit(self: *Archive, io: Io) void {
     self.map.destroy(io);
+    self.decomp.deinit();
 }
 
 pub fn root(self: *Archive, alloc: std.mem.Allocator) !File {
@@ -125,7 +126,7 @@ const Superblock = extern struct {
         return .{
             .block_size = self.block_size,
             .frag_count = self.frag_count,
-            .decomp_fn = try self.compression.func(),
+            .decomp = self.compression,
             .id_count = self.id_count,
             .id_table_start = self.id_table_start,
             .xattr_table_start = self.xattr_table_start,
@@ -139,7 +140,7 @@ const Superblock = extern struct {
 pub const Super = struct {
     block_size: u32,
     frag_count: u32,
-    decomp_fn: Decomp.Fn,
+    decomp: Decomp.Enum,
     id_count: u16,
     id_table_start: u64,
     xattr_table_start: u64,
