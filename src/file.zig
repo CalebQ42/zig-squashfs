@@ -7,6 +7,7 @@ const MetadataReader = @import("utils/meta.zig");
 const Options = @import("options.zig");
 const DataReader = @import("utils/data_reader.zig");
 const Super = @import("archive.zig").Super;
+const Decomp = @import("decomp.zig");
 
 const extractFn = @import("extract.zig").extract;
 
@@ -16,6 +17,7 @@ alloc: std.mem.Allocator,
 
 data: []u8,
 super: Super,
+decomp: *Decomp,
 
 name: []const u8,
 inode: Inode,
@@ -29,6 +31,7 @@ pub fn copy(self: File, alloc: std.mem.Allocator) !File {
 
         .data = self.data,
         .super = self.super,
+        .decomp = self.decomp,
 
         .name = new_name,
         .inode = try self.inode.copy(alloc),
@@ -41,20 +44,11 @@ pub fn deinit(self: File) void {
 
 /// Reader interface to read a regular file's contents.
 pub fn reader(self: File, alloc: std.mem.Allocator) !DataReader {
-    return switch (self.inode.header.type) {
+    return switch (self.inode.data) {
         .file => |f| .init(
             alloc,
             self.data,
-            self.super.decomp_fn,
-            self.super.block_size,
-            f.start,
-            f.size,
-            f.blocks,
-        ),
-        .ext_file => |f| .init(
-            alloc,
-            self.data,
-            self.super.decomp_fn,
+            self.decomp,
             self.super.block_size,
             f.start,
             f.size,
@@ -64,7 +58,7 @@ pub fn reader(self: File, alloc: std.mem.Allocator) !DataReader {
     };
 }
 
-pub fn open(self: File, alloc: std.mem.Allocator, filepath: []const u8) !File {
+pub fn open(self: File, alloc: std.mem.Allocator, io: Io, filepath: []const u8) !File {
     switch (self.inode.header.type) {
         .dir, .ext_dir => {},
         else => return error.NotDirectory,
@@ -78,7 +72,7 @@ pub fn open(self: File, alloc: std.mem.Allocator, filepath: []const u8) !File {
     const first_element: []const u8 = std.mem.sliceTo(path, '/');
     const final = first_element.len == path.len;
 
-    var dir_rdr: MetadataReader = .init(alloc, self.data[self.inode.data.dir.start + self.super.dir_table_start ..], self.super.decomp_fn);
+    var dir_rdr: MetadataReader = .init(io, self.data[self.inode.data.dir.start + self.super.dir_table_start ..], self.decomp);
     try dir_rdr.interface.discardAll(self.inode.data.dir.offset);
 
     const dir_size = self.inode.data.dir.size;
@@ -109,10 +103,12 @@ pub fn open(self: File, alloc: std.mem.Allocator, filepath: []const u8) !File {
 
         const inode: Inode = try .readLocation(
             alloc,
+            io,
             self.data,
             entries[idx].start,
             entries[idx].offset,
             self.super,
+            self.decomp,
         );
         errdefer inode.deinit(alloc);
 
@@ -121,6 +117,7 @@ pub fn open(self: File, alloc: std.mem.Allocator, filepath: []const u8) !File {
 
             .data = self.data,
             .super = self.super,
+            .decomp = self.decomp,
 
             .inode = inode,
             .name = try alloc.dupe(u8, entries[idx].name),
@@ -135,23 +132,26 @@ pub fn open(self: File, alloc: std.mem.Allocator, filepath: []const u8) !File {
 
         .data = self.data,
         .super = self.super,
+        .decomp = self.decomp,
 
         .inode = try .readLocation(
             alloc,
+            io,
             self.data,
             entry.start,
             entry.offset,
             self.super,
+            self.decomp,
         ),
         .name = "",
     }; // We don't care about deiniting this file since dir inodes don't need to be deinited and we don't have an allocd name.
 
-    return transient_file.open(alloc, path[first_element.len + 1 ..]);
+    return transient_file.open(alloc, io, path[first_element.len + 1 ..]);
 }
 
 /// Extract the given File to the location.
 pub fn extract(self: File, alloc: std.mem.Allocator, io: Io, ext_loc: []const u8, options: Options) !void {
     // TODO: do some basic processing to check if ext_loc is a folder & if self is regular file and adjust accordingly.
 
-    return extractFn(alloc, io, self.data, self.super, self.inode, ext_loc, options);
+    return extractFn(alloc, io, self.data, self.super, self.decomp, self.inode, ext_loc, options);
 }

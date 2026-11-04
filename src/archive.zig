@@ -14,9 +14,9 @@ map: Io.File.MemoryMap,
 
 super: Super,
 root_inode_ref: Inode.Reference,
-decomp: Decomp.Decompressor,
+decomp: Decomp.Union,
 
-pub fn init(io: Io, file: Io.File, offset: u64) !Archive {
+pub fn init(alloc: std.mem.Allocator, io: Io, file: Io.File, offset: u64) !Archive {
     var map = try file.createMemoryMap(io, .{
         .len = try file.length(io) - offset,
         .offset = offset,
@@ -31,27 +31,30 @@ pub fn init(io: Io, file: Io.File, offset: u64) !Archive {
 
         .super = super,
         .root_inode_ref = superblock.root_inode_ref,
-        .decomp = .init(super.decomp),
+        .decomp = try .init(alloc, super.decomp),
     };
 }
 pub fn deinit(self: *Archive, io: Io) void {
     self.map.destroy(io);
-    self.decomp.deinit();
+    self.decomp.deinit(io);
 }
 
-pub fn root(self: *Archive, alloc: std.mem.Allocator) !File {
+pub fn root(self: *Archive, alloc: std.mem.Allocator, io: Io) !File {
     return .{
         .alloc = alloc,
 
         .data = self.map.memory,
         .super = self.super,
+        .decomp = self.decomp.interface(),
 
         .inode = try .readLocation(
             alloc,
+            io,
             self.map.memory,
             self.root_inode_ref.start,
             self.root_inode_ref.offset,
             self.super,
+            self.decomp.interface(),
         ),
         .name = "",
     };
@@ -65,13 +68,15 @@ pub fn open(self: *Archive, alloc: std.mem.Allocator, filepath: []const u8) !Fil
 pub fn extract(self: *Archive, alloc: std.mem.Allocator, io: Io, ext_loc: []const u8, options: Options) !void {
     const root_inode: Inode = try .readLocation(
         alloc,
+        io,
         self.map.memory,
         self.root_inode_ref.start,
         self.root_inode_ref.offset,
         self.super,
+        self.decomp.interface(),
     );
 
-    return extractFn(alloc, io, self.map.memory, self.super, root_inode, ext_loc, options);
+    return extractFn(alloc, io, self.map.memory, self.super, self.decomp.interface(), root_inode, ext_loc, options);
 }
 
 // Superblock

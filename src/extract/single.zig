@@ -8,27 +8,27 @@ const FragCache = @import("../frag_cache.zig");
 const Inode = @import("../inode.zig");
 const Lookup = @import("../lookup.zig");
 const Options = @import("../options.zig");
-const DataReader = @import("../utils/data_reader.zig");
 const DataExtractor = @import("../utils/data_extractor.zig");
+const DataReader = @import("../utils/data_reader.zig");
 const MetadataReader = @import("../utils/meta.zig");
 const Common = @import("common.zig");
 
 // TODO: Add verbose logging.
 
-pub fn extract(alloc: std.mem.Allocator, io: Io, data: []u8, super: Super, inode: Inode, filepath: []const u8, options: Options) !void {
+pub fn extract(alloc: std.mem.Allocator, io: Io, data: []u8, super: Super, decomp: *Decomp, inode: Inode, filepath: []const u8, options: Options) !void {
     const path = std.mem.trim(u8, filepath, "/");
 
-    var id_table: Lookup.Table(u16) = try .init(data, super.decomp_fn, super.id_table_start, super.id_count);
+    var id_table: Lookup.Table(u16) = try .init(data, decomp, super.id_table_start, super.id_count);
     defer id_table.deinit(alloc);
-    var xattr_table: Lookup.Xattr = try .init(data, super.decomp_fn, super.xattr_table_start);
+    var xattr_table: Lookup.Xattr = try .init(data, decomp, super.xattr_table_start);
     defer xattr_table.deinit(alloc);
-    var frag_cache: FragCache = try .init(data, super.decomp_fn, super.block_size, super.frag_table_start, super.frag_count);
+    var frag_cache: FragCache = try .init(data, decomp, super.block_size, super.frag_table_start, super.frag_count);
     defer frag_cache.deinit(alloc);
 
     var cwd = Io.Dir.cwd();
 
     if (inode.header.type != .dir and inode.header.type != .ext_dir)
-        return inodeExtract(alloc, io, cwd, data, super, &id_table, &xattr_table, &frag_cache, inode, path, options, true);
+        return inodeExtract(alloc, io, cwd, data, super, decomp, &id_table, &xattr_table, &frag_cache, inode, path, options, true);
 
     var dirs: std.ArrayList(Common.InodeAndPath) = try .initCapacity(alloc, 50);
     defer {
@@ -65,14 +65,14 @@ pub fn extract(alloc: std.mem.Allocator, io: Io, data: []u8, super: Super, inode
             continue;
         }
 
-        var meta: MetadataReader = .init(alloc, data[d.start + super.dir_table_start ..], super.decomp_fn);
+        var meta: MetadataReader = .init(io, data[d.start + super.dir_table_start ..], decomp);
         try meta.interface.discardAll(d.offset);
 
         var dir: Directory = try .read(alloc, &meta.interface, d.size);
         defer dir.deinit(alloc);
 
         for (dir.entries) |entry| {
-            const new_inode: Inode = try .readLocation(alloc, data, entry.start, entry.offset, super);
+            const new_inode: Inode = try .readLocation(alloc, io, data, entry.start, entry.offset, super, decomp);
 
             const new_path = std.mem.concat(alloc, u8, &.{ in.path, "/", entry.name }) catch |err| {
                 new_inode.deinit(alloc);
@@ -94,6 +94,7 @@ pub fn extract(alloc: std.mem.Allocator, io: Io, data: []u8, super: Super, inode
                 cwd,
                 data,
                 super,
+                decomp,
                 &id_table,
                 &xattr_table,
                 &frag_cache,
@@ -121,6 +122,7 @@ fn inodeExtract(
     cwd: Io.Dir,
     data: []u8,
     super: Super,
+    decomp: *Decomp,
     id_table: *Lookup.Table(u16),
     xattr_table: *Lookup.Xattr,
     frag_cache: *FragCache,
@@ -139,7 +141,7 @@ fn inodeExtract(
             var atomic = try cwd.createFileAtomic(io, path, .{ .replace = options.overwrite });
             defer atomic.deinit(io);
 
-            var ext: DataReader = try .init(alloc, data[f.start..], super.decomp_fn, super.block_size, f.size, f.blocks);
+            var ext: DataReader = try .init(alloc, io, data[f.start..], decomp, super.block_size, f.size, f.blocks);
             defer ext.deinit();
 
             if (f.frag_idx != 0xFFFFFFFF) {
