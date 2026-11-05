@@ -14,13 +14,13 @@ test "Open" {
     var archive_file = try Io.Dir.cwd().openFile(io, TEST_ARCHIVE, .{});
     defer archive_file.close(io);
 
-    var arc: Archive = try .init(io, archive_file, 0);
+    var arc: Archive = try .init(alloc, io, archive_file, 0);
     defer arc.deinit(io);
 
-    var root = try arc.root(alloc);
+    var root = try arc.root(alloc, io);
     defer root.deinit();
 
-    var test_open = try root.open(alloc, TEST_FILE);
+    var test_open = try root.open(alloc, io, TEST_FILE);
     defer test_open.deinit();
 }
 
@@ -33,13 +33,13 @@ test "SingleFile" {
     var archive_file = try Io.Dir.cwd().openFile(io, TEST_ARCHIVE, .{});
     defer archive_file.close(io);
 
-    var arc: Archive = try .init(io, archive_file, 0);
+    var arc: Archive = try .init(alloc, io, archive_file, 0);
     defer arc.deinit(io);
 
-    var root = try arc.root(alloc);
+    var root = try arc.root(alloc, io);
     defer root.deinit();
 
-    var test_open = try root.open(alloc, TEST_FILE);
+    var test_open = try root.open(alloc, io, TEST_FILE);
     defer test_open.deinit();
 
     try test_open.extract(alloc, io, ext_path, .default);
@@ -56,7 +56,7 @@ test "ExtractSingleThreaded" {
     var archive_file = try Io.Dir.cwd().openFile(io, TEST_ARCHIVE, .{});
     defer archive_file.close(io);
 
-    var arc: Archive = try .init(io, archive_file, 0);
+    var arc: Archive = try .init(alloc, io, archive_file, 0);
     defer arc.deinit(io);
 
     try arc.extract(alloc, io, ext_path, .single_threaded_default);
@@ -73,7 +73,7 @@ test "ExtractMultiThreaded" {
     var archive_file = try Io.Dir.cwd().openFile(io, TEST_ARCHIVE, .{});
     defer archive_file.close(io);
 
-    var arc: Archive = try .init(io, archive_file, 0);
+    var arc: Archive = try .init(alloc, io, archive_file, 0);
     defer arc.deinit(io);
 
     try arc.extract(alloc, io, ext_path, .default);
@@ -92,7 +92,7 @@ test "ExtractSingleThreadedIo" {
     var archive_file = try Io.Dir.cwd().openFile(st_io, TEST_ARCHIVE, .{});
     defer archive_file.close(st_io);
 
-    var arc: Archive = try .init(st_io, archive_file, 0);
+    var arc: Archive = try .init(alloc, st_io, archive_file, 0);
     defer arc.deinit(st_io);
 
     try arc.extract(alloc, st_io, ext_path, .default);

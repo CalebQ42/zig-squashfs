@@ -5,14 +5,15 @@ const util = @import("utils/util.zig");
 
 const MetadataReader = @import("utils/meta.zig");
 const Super = @import("archive.zig").Super;
+const Decomp = @import("decomp.zig");
 
 const Inode = @This();
 
 header: Header,
 data: Data,
 
-pub fn readLocation(alloc: std.mem.Allocator, data: []u8, super: Super, start: u32, offset: u16) !Inode {
-    var meta: MetadataReader = .init(alloc, data[super.inode_table_start + start ..], super.decomp_fn);
+pub fn readLocation(alloc: std.mem.Allocator, io: Io, data: []u8, super: Super, decomp: *Decomp, start: u32, offset: u16) !Inode {
+    var meta: MetadataReader = .init(io, data[super.inode_table_start + start ..], decomp);
     try meta.interface.discardAll(offset);
 
     return read(alloc, &meta.interface, super.block_size);

@@ -7,10 +7,10 @@ const Decomp = @import("../decomp.zig");
 
 const MetadataReader = @This();
 
-alloc: std.mem.Allocator,
+io: Io,
 
 data: []u8,
-decomp: Decomp.Fn,
+decomp: *Decomp,
 
 decomp_block: [8192]u8 = undefined,
 
@@ -25,9 +25,9 @@ interface: Io.Reader = .{
     },
 },
 
-pub fn init(alloc: std.mem.Allocator, data: []u8, decomp: Decomp.Fn) MetadataReader {
+pub fn init(io: Io, data: []u8, decomp: *Decomp) MetadataReader {
     return .{
-        .alloc = alloc,
+        .io = io,
 
         .data = data,
         .decomp = decomp,
@@ -50,7 +50,7 @@ fn advance(self: *MetadataReader) Io.Reader.Error!void {
         return;
     }
 
-    self.interface.end = self.decomp(self.alloc, block, &self.decomp_block) catch return error.ReadFailed;
+    self.interface.end = self.decomp.decompress(self.io, block, &self.decomp_block) catch return error.ReadFailed;
     self.interface.buffer = self.decomp_block[0..self.interface.end];
 }
 

@@ -1,9 +1,9 @@
 const std = @import("std");
 const Io = std.Io;
 
-const Lookup = @import("lookup.zig");
-const Decomp = @import("decomp.zig");
 const BlockSize = @import("inode.zig").BlockSize;
+const Decomp = @import("decomp.zig");
+const Lookup = @import("lookup.zig");
 
 const FragCache = @This();
 
@@ -15,7 +15,7 @@ cache: std.AutoHashMapUnmanaged(u32, []u8) = .empty,
 
 mut: Io.RwLock = .init,
 
-pub fn init(data: []u8, decomp: Decomp.Fn, block_size: u32, start: u64, count: u32) !FragCache {
+pub fn init(data: []u8, decomp: *Decomp, block_size: u32, start: u64, count: u32) !FragCache {
     return .{
         .block_size = block_size,
 
@@ -57,7 +57,7 @@ pub fn get(self: *FragCache, alloc: std.mem.Allocator, io: Io, idx: u32) ![]u8 {
     new.value_ptr.* = try alloc.alloc(u8, self.block_size);
     errdefer alloc.free(new.value_ptr.*);
 
-    _ = try self.entries.decomp(alloc, data, new.value_ptr.*);
+    _ = try self.entries.decomp.decompress(io, data, new.value_ptr.*);
 
     return new.value_ptr.*;
 }

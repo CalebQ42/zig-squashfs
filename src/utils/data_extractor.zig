@@ -9,7 +9,7 @@ const DataReader = @This();
 alloc: std.mem.Allocator,
 
 data: []u8,
-decomp: Decomp.Fn,
+decomp: *Decomp,
 block_size: u32,
 
 size: u64,
@@ -17,7 +17,7 @@ blocks: []BlockSize,
 
 frag: ?[]u8 = null,
 
-pub fn init(alloc: std.mem.Allocator, data: []u8, decomp: Decomp.Fn, block_size: u32, size: u64, blocks: []BlockSize) !DataReader {
+pub fn init(alloc: std.mem.Allocator, data: []u8, decomp: *Decomp, block_size: u32, size: u64, blocks: []BlockSize) !DataReader {
     return .{
         .alloc = alloc,
 
@@ -94,7 +94,7 @@ fn threadFn(self: DataReader, alloc: std.mem.Allocator, io: Io, idx: usize, offs
     const data_buf = try alloc.alloc(u8, size);
     defer alloc.free(data_buf);
 
-    const decomp_siz = try self.decomp(alloc, data, data_buf);
+    const decomp_siz = try self.decomp.decompress(io, data, data_buf);
     std.debug.assert(decomp_siz == size);
     try wrt.interface.writeAll(data_buf);
     try wrt.flush();

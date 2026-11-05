@@ -7,9 +7,10 @@ const BlockSize = @import("../inode.zig").BlockSize;
 const DataReader = @This();
 
 alloc: std.mem.Allocator,
+io: Io,
 
 data: []u8,
-decomp: Decomp.Fn,
+decomp: *Decomp,
 block_size: u32,
 
 size: u64,
@@ -31,9 +32,10 @@ interface: Io.Reader = .{
     },
 },
 
-pub fn init(alloc: std.mem.Allocator, data: []u8, decomp: Decomp.Fn, block_size: u32, size: u64, blocks: []BlockSize) !DataReader {
+pub fn init(alloc: std.mem.Allocator, io: Io, data: []u8, decomp: *Decomp, block_size: u32, size: u64, blocks: []BlockSize) !DataReader {
     return .{
         .alloc = alloc,
+        .io = io,
 
         .data = data,
         .decomp = decomp,
@@ -86,7 +88,7 @@ fn advance(self: *DataReader) Io.Reader.Error!void {
         return;
     }
 
-    _ = self.decomp(self.alloc, self.data[0..block.size], self.buf[0..self.interface.end]) catch return error.ReadFailed;
+    _ = self.decomp.decompress(self.io, self.data[0..block.size], self.buf[0..self.interface.end]) catch return error.ReadFailed;
     self.data = self.data[block.size..];
 
     self.interface.buffer = self.buf;

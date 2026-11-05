@@ -1,14 +1,12 @@
 const std = @import("std");
 const Io = std.Io;
 
-const util = @import("utils/util.zig");
-
+const Decomp = @import("decomp.zig");
+const extractFn = @import("extract.zig").extract;
 const File = @import("file.zig");
 const Inode = @import("inode.zig");
-const Decomp = @import("decomp.zig");
 const Options = @import("options.zig");
-
-const extractFn = @import("extract.zig").extract;
+const util = @import("utils/util.zig");
 
 const Archive = @This();
 
@@ -16,8 +14,9 @@ map: Io.File.MemoryMap,
 
 super: Super,
 root_inode_ref: Inode.Reference,
+decomp: Decomp.Union,
 
-pub fn init(io: Io, file: Io.File, offset: u64) !Archive {
+pub fn init(alloc: std.mem.Allocator, io: Io, file: Io.File, offset: u64) !Archive {
     var map = try file.createMemoryMap(io, .{
         .len = try file.length(io) - offset,
         .offset = offset,
@@ -32,23 +31,28 @@ pub fn init(io: Io, file: Io.File, offset: u64) !Archive {
 
         .super = super,
         .root_inode_ref = superblock.root_inode_ref,
+        .decomp = try .init(alloc, super.decomp),
     };
 }
 pub fn deinit(self: *Archive, io: Io) void {
     self.map.destroy(io);
+    self.decomp.deinit(io);
 }
 
-pub fn root(self: *Archive, alloc: std.mem.Allocator) !File {
+pub fn root(self: *Archive, alloc: std.mem.Allocator, io: Io) !File {
     return .{
         .alloc = alloc,
 
         .data = self.map.memory,
         .super = self.super,
+        .decomp = self.decomp.interface(),
 
         .inode = try .readLocation(
             alloc,
+            io,
             self.map.memory,
             self.super,
+            self.decomp.interface(),
             self.root_inode_ref.start,
             self.root_inode_ref.offset,
         ),
@@ -64,13 +68,15 @@ pub fn open(self: *Archive, alloc: std.mem.Allocator, filepath: []const u8) !Fil
 pub fn extract(self: *Archive, alloc: std.mem.Allocator, io: Io, ext_loc: []const u8, options: Options) !void {
     const root_inode: Inode = try .readLocation(
         alloc,
+        io,
         self.map.memory,
         self.super,
+        self.decomp.interface(),
         self.root_inode_ref.start,
         self.root_inode_ref.offset,
     );
 
-    return extractFn(alloc, io, self.map.memory, self.super, root_inode, ext_loc, options);
+    return extractFn(alloc, io, self.map.memory, self.super, self.decomp.interface(), root_inode, ext_loc, options);
 }
 
 // Superblock
@@ -125,7 +131,7 @@ const Superblock = extern struct {
         return .{
             .block_size = self.block_size,
             .frag_count = self.frag_count,
-            .decomp_fn = try self.compression.func(),
+            .decomp = self.compression,
             .id_count = self.id_count,
             .id_table_start = self.id_table_start,
             .xattr_table_start = self.xattr_table_start,
@@ -139,7 +145,7 @@ const Superblock = extern struct {
 pub const Super = struct {
     block_size: u32,
     frag_count: u32,
-    decomp_fn: Decomp.Fn,
+    decomp: Decomp.Enum,
     id_count: u16,
     id_table_start: u64,
     xattr_table_start: u64,

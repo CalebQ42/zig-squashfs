@@ -74,7 +74,7 @@ pub fn main(init: std.process.Init) !void {
     var fil = try Io.Dir.cwd().openFile(io, arc_loc, .{});
     defer fil.close(io);
 
-    var arc: Archive = try .init(io, fil, offset);
+    var arc: Archive = try .init(alloc, io, fil, offset);
     defer arc.deinit(io);
 
     try arc.extract(alloc, io, ext_loc, options);

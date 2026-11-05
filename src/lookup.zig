@@ -6,7 +6,7 @@ const Reference = @import("inode.zig").Reference;
 const MetadataReader = @import("utils/meta.zig");
 const util = @import("utils/util.zig");
 
-pub fn Value(comptime T: type, alloc: std.mem.Allocator, data: []u8, decomp: Decomp.Fn, table_start: u64, idx: u32) !T {
+pub fn Value(comptime T: type, alloc: std.mem.Allocator, data: []u8, decomp: *Decomp, table_start: u64, idx: u32) !T {
     const ITEMS_PER_BLOCK = 8192 / @sizeOf(T);
 
     const block_idx = idx / ITEMS_PER_BLOCK;
@@ -27,7 +27,7 @@ pub fn Table(comptime T: type) type {
         const ITEMS_PER_BLOCK = 8192 / @sizeOf(T);
 
         data: []u8,
-        decomp: Decomp.Fn,
+        decomp: *Decomp,
 
         start: u64,
         count: u32,
@@ -36,7 +36,7 @@ pub fn Table(comptime T: type) type {
         table: std.AutoHashMapUnmanaged(u32, cache) = .empty,
         mut: Io.Mutex = .init,
 
-        pub fn init(data: []u8, decomp: Decomp.Fn, start: u64, count: u32) !Self {
+        pub fn init(data: []u8, decomp: *Decomp, start: u64, count: u32) !Self {
             return .{
                 .data = data,
                 .decomp = decomp,
@@ -85,7 +85,7 @@ pub fn Table(comptime T: type) type {
                 block.value_ptr.cache = &[0]T{};
             }
 
-            var meta: MetadataReader = .init(alloc, self.data[start..], self.decomp);
+            var meta: MetadataReader = .init(io, self.data[start..], self.decomp);
 
             try meta.interface.readSliceEndian(T, block.value_ptr.cache, .little);
 
@@ -103,7 +103,7 @@ pub const Xattr = struct {
     kv_start: u64,
     lookup: Table(XattrLookup),
 
-    pub fn init(data: []u8, decomp: Decomp.Fn, start: u64) !Xattr {
+    pub fn init(data: []u8, decomp: *Decomp, start: u64) !Xattr {
         const kv_start = util.readValue(u64, data[start..][0..8]);
         const count = util.readValue(u32, data[start..][8..12]);
 
@@ -119,7 +119,7 @@ pub const Xattr = struct {
     pub fn get(self: *Xattr, alloc: std.mem.Allocator, io: Io, idx: u32) ![]KV {
         const lookup = try self.lookup.get(alloc, io, idx);
 
-        var meta: MetadataReader = .init(alloc, self.lookup.data[self.kv_start + lookup.ref.start ..], self.lookup.decomp);
+        var meta: MetadataReader = .init(io, self.lookup.data[self.kv_start + lookup.ref.start ..], self.lookup.decomp);
         try meta.interface.discardAll(lookup.ref.offset);
 
         const kvs = try alloc.alloc(KV, lookup.count);
@@ -144,7 +144,7 @@ pub const Xattr = struct {
             var value_meta = if (entry.type.out_of_line) blk: {
                 const ool_ref = try util.readValueRdr(Reference, &meta.interface);
 
-                var ool_meta: MetadataReader = .init(alloc, self.lookup.data[self.kv_start + ool_ref.start ..], self.lookup.decomp);
+                var ool_meta: MetadataReader = .init(io, self.lookup.data[self.kv_start + ool_ref.start ..], self.lookup.decomp);
                 try ool_meta.interface.discardAll(ool_ref.offset);
 
                 break :blk ool_meta;
