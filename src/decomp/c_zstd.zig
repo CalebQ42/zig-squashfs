@@ -53,6 +53,7 @@ fn decompress(interface: *Decomp, io: Io, in: []u8, out: []u8) Decomp.Error!usiz
         break :blk self.queue.getOne(io) catch return Decomp.Error.ReadFailed;
     };
     defer self.queue.putOne(io, ctx) catch {};
+    _ = c.ZSTD_DCtx_reset(ctx, c.ZSTD_reset_session_only);
 
     const res = c.ZSTD_decompressDCtx(ctx, out.ptr, out.len, in.ptr, in.len);
     if (c.ZSTD_isError(res) > 0) {
