@@ -56,4 +56,4 @@ pub fn decompress(self: *Decomp, io: Io, in: []u8, out: []u8) Error!usize {
     return self.vtable.decomp(self, io, in, out);
 }
 
-pub const Error = Io.Reader.Error || std.mem.Allocator.Error;
+pub const Error = Io.Reader.Error || std.mem.Allocator.Error || Io.Cancelable;
