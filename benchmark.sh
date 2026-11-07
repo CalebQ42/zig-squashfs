@@ -2,13 +2,20 @@
 
 ARCHIVE="testing/LinuxPATest.sfs"
 
-REF_EXT_LOC="testing/LinuxPAReference"
-PROG_EXT_LOC="testing/LinuxPABinTest"
+if [ ! -z $1 ]; then
+	ARCHIVE=$1
+fi
 
+echo "Benchmarking on archive $ARCHIVE"
+
+REF_EXT_LOC="testing/BenchmarkReference"
+PROG_EXT_LOC="testing/BenchmarkBinTest"
+
+echo ""
 echo "Building with ReleaseFast"
 echo ""
 
-zig build -Doptimize=ReleaseFast
+zig build -Doptimize=fast
 
 echo ""
 echo "Testing Multi-threaded Performance"
@@ -26,7 +33,7 @@ echo ""
 echo "Building with ReleaseFast and zig_decomp"
 echo ""
 
-zig build -Doptimize=ReleaseFast -Dzig_decomp=true
+zig build -Doptimize=fast -Dzig_decomp=true
 
 echo ""
 echo "Testing Multi-threaded Performance"
