@@ -4,7 +4,7 @@ const Io = std.Io;
 const Decomp = @import("../decomp.zig");
 const ResourceQueue = @import("../utils/resource_queue.zig").ResourceQueue;
 
-const Zstd = @This();
+const Xz = @This();
 
 alloc: std.mem.Allocator,
 
@@ -16,14 +16,14 @@ interface: Decomp = .{
     },
 },
 
-pub fn init(alloc: std.mem.Allocator) !Zstd {
+pub fn init(alloc: std.mem.Allocator) !Xz {
     return .{
         .alloc = alloc,
 
         .queue = try .init(alloc, try std.Thread.getCpuCount()),
     };
 }
-pub fn deinit(self: *Zstd, io: Io) void {
+pub fn deinit(self: *Xz, io: Io) void {
     for (self.queue.queue.items) |buf| {
         if (buf != null)
             self.alloc.free(buf.?);
@@ -32,18 +32,23 @@ pub fn deinit(self: *Zstd, io: Io) void {
 }
 
 fn decompress(d: *Decomp, io: Io, in: []u8, out: []u8) Decomp.Error!usize {
-    const self: *Zstd = @fieldParentPtr("interface", d);
+    const self: *Xz = @fieldParentPtr("interface", d);
 
-    const buf = blk: {
+    var buf = blk: {
         const buf = try self.queue.get(io);
         if (buf == null)
-            break :blk try self.alloc.alloc(u8, (1024 * 1024) + std.compress.zstd.block_size_max);
+            break :blk try self.alloc.alloc(u8, 10 * 1024);
         break :blk buf.?;
     };
     defer self.queue.put(io, buf);
 
     var in_rdr: Io.Reader = .fixed(in);
 
-    var decomp: std.compress.zstd.Decompress = .init(&in_rdr, buf, .{ .window_len = 1024 * 1024 });
-    try decomp.reader.readSliceAll(out);
+    var decomp = std.compress.xz.Decompress.init(&in_rdr, self.alloc, buf) catch return error.ReadFailed;
+    defer {
+        buf = decomp.takeBuffer();
+        decomp.deinit();
+    }
+
+    return decomp.reader.readSliceShort(out);
 }

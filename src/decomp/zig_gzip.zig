@@ -37,7 +37,7 @@ fn decompress(d: *Decomp, io: Io, in: []u8, out: []u8) Decomp.Error!usize {
     const buf = blk: {
         const buf = try self.queue.get(io);
         if (buf == null)
-            break :blk try self.alloc.alloc(u8, 1024 * 1024);
+            break :blk try self.alloc.alloc(u8, std.compress.flate.max_window_len);
         break :blk buf.?;
     };
     defer self.queue.put(io, buf);

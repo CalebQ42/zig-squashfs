@@ -44,7 +44,7 @@ fn decompress(d: *Decomp, io: Io, in: []u8, out: []u8) Decomp.Error!usize {
 
     var in_rdr: Io.Reader = .fixed(in);
 
-    var decomp: std.compress.lzma.Decompress = try .initOptions(&in_rdr, self.alloc, buf, .{}, 0);
+    var decomp = std.compress.lzma.Decompress.initOptions(&in_rdr, self.alloc, buf, .{}, 10 * 1024 * 1024) catch return error.ReadFailed;
     defer {
         buf = decomp.takeBuffer();
         decomp.deinit();

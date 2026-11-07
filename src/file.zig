@@ -141,4 +141,6 @@ pub fn extract(self: File, alloc: std.mem.Allocator, io: Io, ext_loc: []const u8
 
         return extractFn(alloc, io, self.data, self.super, self.decomp, self.inode, new_loc, options);
     } else if (!options.overwrite) return error.FileExists;
+
+    return extractFn(alloc, io, self.data, self.super, self.decomp, self.inode, ext_loc, options);
 }
