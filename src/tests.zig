@@ -8,7 +8,7 @@ var io = std.testing.io;
 
 const Archive = @import("archive.zig");
 
-const TEST_ARCHIVES_ALL = .{
+const TEST_ARCHIVES_ALL: [7][]const u8 = .{
     "no-comp-test-image.sfs",
     "gzip-test-image.sfs",
     "lzo-test-image.sfs",
@@ -26,10 +26,10 @@ test "Open" {
     for (TEST_ARCHIVES_ALL) |TEST_ARCHIVE| {
         std.log.info("testing file opening on {s}\n", .{TEST_ARCHIVE});
 
-        var archive_file = Io.Dir.cwd().openFile(io, TEST_ARCHIVE, .{}) catch |err| switch (err) {
-            error.LzoUnsupported => if (build.zig_decomp or !build.allow_lzo) continue,
-            error.Lz4Unsupported => if (build.zig_decomp) continue,
-            else => return err,
+        var archive_file = Io.Dir.cwd().openFile(io, TEST_ARCHIVE, .{}) catch |err| {
+            if (err == error.LzoUnsupported and (build.zig_decomp or !build.allow_lzo)) continue;
+            if (err == error.Lz4Unsupported and build.zig_decomp) continue;
+            return err;
         };
         defer archive_file.close(io);
 
@@ -54,10 +54,10 @@ test "SingleFile" {
 
         const ext_path = ".zig-cache/tmp/" ++ tmp.sub_path[0..tmp.sub_path.len];
 
-        var archive_file = Io.Dir.cwd().openFile(io, TEST_ARCHIVE, .{}) catch |err| switch (err) {
-            error.LzoUnsupported => if (build.zig_decomp or !build.allow_lzo) continue,
-            error.Lz4Unsupported => if (build.zig_decomp) continue,
-            else => return err,
+        var archive_file = Io.Dir.cwd().openFile(io, TEST_ARCHIVE, .{}) catch |err| {
+            if (err == error.LzoUnsupported and (build.zig_decomp or !build.allow_lzo)) continue;
+            if (err == error.Lz4Unsupported and build.zig_decomp) continue;
+            return err;
         };
         defer archive_file.close(io);
 
@@ -86,10 +86,10 @@ test "ExtractSingleThreaded" {
 
         const ext_path = ".zig-cache/tmp/" ++ tmp.sub_path[0..tmp.sub_path.len];
 
-        var archive_file = Io.Dir.cwd().openFile(io, TEST_ARCHIVE, .{}) catch |err| switch (err) {
-            error.LzoUnsupported => if (build.zig_decomp or !build.allow_lzo) continue,
-            error.Lz4Unsupported => if (build.zig_decomp) continue,
-            else => return err,
+        var archive_file = Io.Dir.cwd().openFile(io, TEST_ARCHIVE, .{}) catch |err| {
+            if (err == error.LzoUnsupported and (build.zig_decomp or !build.allow_lzo)) continue;
+            if (err == error.Lz4Unsupported and build.zig_decomp) continue;
+            return err;
         };
         defer archive_file.close(io);
 
@@ -112,10 +112,10 @@ test "ExtractMultiThreaded" {
 
         const ext_path = ".zig-cache/tmp/" ++ tmp.sub_path[0..tmp.sub_path.len];
 
-        var archive_file = Io.Dir.cwd().openFile(io, TEST_ARCHIVE, .{}) catch |err| switch (err) {
-            error.LzoUnsupported => if (build.zig_decomp or !build.allow_lzo) continue,
-            error.Lz4Unsupported => if (build.zig_decomp) continue,
-            else => return err,
+        var archive_file = Io.Dir.cwd().openFile(io, TEST_ARCHIVE, .{}) catch |err| {
+            if (err == error.LzoUnsupported and (build.zig_decomp or !build.allow_lzo)) continue;
+            if (err == error.Lz4Unsupported and build.zig_decomp) continue;
+            return err;
         };
         defer archive_file.close(io);
 
@@ -138,10 +138,10 @@ test "ExtractSingleThreadedIo" {
 
         const ext_path = ".zig-cache/tmp/" ++ tmp.sub_path[0..tmp.sub_path.len];
 
-        var archive_file = Io.Dir.cwd().openFile(io, TEST_ARCHIVE, .{}) catch |err| switch (err) {
-            error.LzoUnsupported => if (build.zig_decomp or !build.allow_lzo) continue,
-            error.Lz4Unsupported => if (build.zig_decomp) continue,
-            else => return err,
+        var archive_file = Io.Dir.cwd().openFile(io, TEST_ARCHIVE, .{}) catch |err| {
+            if (err == error.LzoUnsupported and (build.zig_decomp or !build.allow_lzo)) continue;
+            if (err == error.Lz4Unsupported and build.zig_decomp) continue;
+            return err;
         };
         defer archive_file.close(io);
 
@@ -244,7 +244,7 @@ fn refDir() !Io.Dir {
         if (err != error.FileNotFound) return err;
 
         const res = try std.process.run(alloc, io, .{
-            .argv = &.{ "unsquashfs", "-f", "-d", "testing/Reference", TEST_ARCHIVE },
+            .argv = &.{ "unsquashfs", "-f", "-d", "testing/Reference", TEST_ARCHIVES_ALL[0] },
         });
         defer {
             alloc.free(res.stdout);

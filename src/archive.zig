@@ -45,7 +45,7 @@ pub fn root(self: *Archive, alloc: std.mem.Allocator, io: Io) !File {
 
         .data = self.map.memory,
         .super = self.super,
-        .decomp = self.decomp.interface(),
+        .decomp = try self.decomp.interface(),
 
         .inode = try .readLocation(
             alloc,
