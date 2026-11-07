@@ -1,103 +1,159 @@
 const std = @import("std");
 const Io = std.Io;
 
+const build = @import("build_config");
+
 var alloc = std.testing.allocator;
 var io = std.testing.io;
 
 const Archive = @import("archive.zig");
 
-const TEST_ARCHIVE = "testing/LinuxPATest.sfs";
+const TEST_ARCHIVES_ALL = .{
+    "no-comp-test-image.sfs",
+    "gzip-test-image.sfs",
+    "lzo-test-image.sfs",
+    "lz4-test-image.sfs",
+    "xz-test-image.sfs",
+    "zstd-test-image.sfs",
+    "lzma-test-image.sfs",
+};
 
 const TEST_FILE = "PortableApps/gVimPortable/GVim-v8.2.2965.glibc2.15-x86_64.AppImage";
 
 test "Open" {
-    var archive_file = try Io.Dir.cwd().openFile(io, TEST_ARCHIVE, .{});
-    defer archive_file.close(io);
+    std.testing.log_level = .info;
 
-    var arc: Archive = try .init(alloc, io, archive_file, 0);
-    defer arc.deinit(io);
+    for (TEST_ARCHIVES_ALL) |TEST_ARCHIVE| {
+        std.log.info("testing file opening on {s}\n", .{TEST_ARCHIVE});
 
-    var root = try arc.root(alloc, io);
-    defer root.deinit();
+        var archive_file = Io.Dir.cwd().openFile(io, TEST_ARCHIVE, .{}) catch |err| switch (err) {
+            error.LzoUnsupported => if (build.zig_decomp or !build.allow_lzo) continue,
+            error.Lz4Unsupported => if (build.zig_decomp) continue,
+            else => return err,
+        };
+        defer archive_file.close(io);
 
-    var test_open = try root.open(alloc, io, TEST_FILE);
-    defer test_open.deinit();
+        var arc: Archive = try .init(alloc, io, archive_file, 0);
+        defer arc.deinit(io);
+
+        var root = try arc.root(alloc, io);
+        defer root.deinit();
+
+        var test_open = try root.open(alloc, io, TEST_FILE);
+        defer test_open.deinit();
+    }
 }
 
 test "SingleFile" {
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
+    std.testing.log_level = .info;
 
-    const ext_path = ".zig-cache/tmp/" ++ tmp.sub_path[0..tmp.sub_path.len] ++ "/GVim-v8.2.2965.glibc2.15-x86_64.AppImage";
+    for (TEST_ARCHIVES_ALL) |TEST_ARCHIVE| {
+        std.log.info("testing single file extraction on {s}\n", .{TEST_ARCHIVE});
+        var tmp = std.testing.tmpDir(.{});
+        defer tmp.cleanup();
 
-    var archive_file = try Io.Dir.cwd().openFile(io, TEST_ARCHIVE, .{});
-    defer archive_file.close(io);
+        const ext_path = ".zig-cache/tmp/" ++ tmp.sub_path[0..tmp.sub_path.len];
 
-    var arc: Archive = try .init(alloc, io, archive_file, 0);
-    defer arc.deinit(io);
+        var archive_file = Io.Dir.cwd().openFile(io, TEST_ARCHIVE, .{}) catch |err| switch (err) {
+            error.LzoUnsupported => if (build.zig_decomp or !build.allow_lzo) continue,
+            error.Lz4Unsupported => if (build.zig_decomp) continue,
+            else => return err,
+        };
+        defer archive_file.close(io);
 
-    var root = try arc.root(alloc, io);
-    defer root.deinit();
+        var arc: Archive = try .init(alloc, io, archive_file, 0);
+        defer arc.deinit(io);
 
-    var test_open = try root.open(alloc, io, TEST_FILE);
-    defer test_open.deinit();
+        var root = try arc.root(alloc, io);
+        defer root.deinit();
 
-    try test_open.extract(alloc, io, ext_path, .default);
+        var test_open = try root.open(alloc, io, TEST_FILE);
+        defer test_open.deinit();
 
-    try verifyFile(tmp, TEST_FILE, "GVim-v8.2.2965.glibc2.15-x86_64.AppImage");
+        try test_open.extract(alloc, io, ext_path, .default);
+
+        try verifyFile(tmp, TEST_FILE, "GVim-v8.2.2965.glibc2.15-x86_64.AppImage");
+    }
 }
 
 test "ExtractSingleThreaded" {
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
+    std.testing.log_level = .info;
 
-    const ext_path = ".zig-cache/tmp/" ++ tmp.sub_path[0..tmp.sub_path.len];
+    for (TEST_ARCHIVES_ALL) |TEST_ARCHIVE| {
+        std.log.info("testing single threaded extraction on {s}\n", .{TEST_ARCHIVE});
+        var tmp = std.testing.tmpDir(.{});
+        defer tmp.cleanup();
 
-    var archive_file = try Io.Dir.cwd().openFile(io, TEST_ARCHIVE, .{});
-    defer archive_file.close(io);
+        const ext_path = ".zig-cache/tmp/" ++ tmp.sub_path[0..tmp.sub_path.len];
 
-    var arc: Archive = try .init(alloc, io, archive_file, 0);
-    defer arc.deinit(io);
+        var archive_file = Io.Dir.cwd().openFile(io, TEST_ARCHIVE, .{}) catch |err| switch (err) {
+            error.LzoUnsupported => if (build.zig_decomp or !build.allow_lzo) continue,
+            error.Lz4Unsupported => if (build.zig_decomp) continue,
+            else => return err,
+        };
+        defer archive_file.close(io);
 
-    try arc.extract(alloc, io, ext_path, .single_threaded_default);
+        var arc: Archive = try .init(alloc, io, archive_file, 0);
+        defer arc.deinit(io);
 
-    try verifyExtraction(tmp);
+        try arc.extract(alloc, io, ext_path, .single_threaded_default);
+
+        try verifyExtraction(tmp);
+    }
 }
 
 test "ExtractMultiThreaded" {
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
+    std.testing.log_level = .info;
 
-    const ext_path = ".zig-cache/tmp/" ++ tmp.sub_path[0..tmp.sub_path.len];
+    for (TEST_ARCHIVES_ALL) |TEST_ARCHIVE| {
+        std.log.info("testing multi-threaded extraction on {s}\n", .{TEST_ARCHIVE});
+        var tmp = std.testing.tmpDir(.{});
+        defer tmp.cleanup();
 
-    var archive_file = try Io.Dir.cwd().openFile(io, TEST_ARCHIVE, .{});
-    defer archive_file.close(io);
+        const ext_path = ".zig-cache/tmp/" ++ tmp.sub_path[0..tmp.sub_path.len];
 
-    var arc: Archive = try .init(alloc, io, archive_file, 0);
-    defer arc.deinit(io);
+        var archive_file = Io.Dir.cwd().openFile(io, TEST_ARCHIVE, .{}) catch |err| switch (err) {
+            error.LzoUnsupported => if (build.zig_decomp or !build.allow_lzo) continue,
+            error.Lz4Unsupported => if (build.zig_decomp) continue,
+            else => return err,
+        };
+        defer archive_file.close(io);
 
-    try arc.extract(alloc, io, ext_path, .default);
+        var arc: Archive = try .init(alloc, io, archive_file, 0);
+        defer arc.deinit(io);
 
-    try verifyExtraction(tmp);
+        try arc.extract(alloc, io, ext_path, .default);
+
+        try verifyExtraction(tmp);
+    }
 }
 
 test "ExtractSingleThreadedIo" {
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
+    std.testing.log_level = .info;
 
-    const ext_path = ".zig-cache/tmp/" ++ tmp.sub_path[0..tmp.sub_path.len];
+    for (TEST_ARCHIVES_ALL) |TEST_ARCHIVE| {
+        std.log.info("testing Io.Threaded.global_single_threaded extraction on {s}\n", .{TEST_ARCHIVE});
+        var tmp = std.testing.tmpDir(.{});
+        defer tmp.cleanup();
 
-    const st_io = Io.Threaded.global_single_threaded.io();
+        const ext_path = ".zig-cache/tmp/" ++ tmp.sub_path[0..tmp.sub_path.len];
 
-    var archive_file = try Io.Dir.cwd().openFile(st_io, TEST_ARCHIVE, .{});
-    defer archive_file.close(st_io);
+        var archive_file = Io.Dir.cwd().openFile(io, TEST_ARCHIVE, .{}) catch |err| switch (err) {
+            error.LzoUnsupported => if (build.zig_decomp or !build.allow_lzo) continue,
+            error.Lz4Unsupported => if (build.zig_decomp) continue,
+            else => return err,
+        };
+        defer archive_file.close(io);
 
-    var arc: Archive = try .init(alloc, st_io, archive_file, 0);
-    defer arc.deinit(st_io);
+        const st_io = Io.Threaded.global_single_threaded.io();
 
-    try arc.extract(alloc, st_io, ext_path, .default);
+        var arc: Archive = try .init(alloc, st_io, archive_file, 0);
+        defer arc.deinit(st_io);
 
-    try verifyExtraction(tmp);
+        try arc.extract(alloc, st_io, ext_path, .default);
+
+        try verifyExtraction(tmp);
+    }
 }
 
 fn verifyFile(tmp: std.testing.TmpDir, rel_path: []const u8, ext_loc: []const u8) !void {

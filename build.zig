@@ -6,12 +6,14 @@ pub fn build(b: *std.Build) !void {
     const allow_lzo = b.option(bool, "allow_lzo", "Compile with lzo support.") orelse false;
     const static = b.option(bool, "static", "Statically link libraries.") orelse false;
     const debug = b.option(bool, "debug", "Enable options to make debugging easier.") orelse false;
-    const version_string_option = b.option([]const u8, "version", "Version of the library/binary") orelse "0.0.0-testing";
+    var version_string_option = b.option([]const u8, "version", "Version of the library/binary") orelse "0.0.0-testing";
+    if (version_string_option.len > 1 and version_string_option[0] == 'v')
+        version_string_option = version_string_option[1..];
 
     const target = b.standardTargetOptions(.{});
     const optimize: std.lang.Optimize = if (debug) .debug else b.standardOptimizeOption(.{});
 
-    const version: std.SemanticVersion = try .parse(if (version_string_option[0] == 'v') version_string_option[1..] else version_string_option);
+    const version: std.SemanticVersion = try .parse(version_string_option);
 
     const build_config = b.addOptions();
     build_config.addOption(bool, "zig_decomp", zig_decomp);
