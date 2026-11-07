@@ -50,7 +50,7 @@ fn decompress(interface: *Decomp, io: Io, in: []u8, out: []u8) Decomp.Error!usiz
     stream.next_out = out.ptr;
     stream.avail_out = out.len;
 
-    var res = c.lzma_auto_decoder(&stream, 0, 0);
+    var res = c.lzma_stream_decoder(&stream, 10 * 1024 * 1024, 0);
     if (res != c.LZMA_OK) {
         std.debug.print("lzma error code: {}\n", .{res});
         return Decomp.Error.ReadFailed;
@@ -59,7 +59,7 @@ fn decompress(interface: *Decomp, io: Io, in: []u8, out: []u8) Decomp.Error!usiz
     while (res == c.LZMA_OK)
         res = c.lzma_code(&stream, c.LZMA_RUN);
 
-    if (res != c.LZMA_FINISH) {
+    if (res != c.LZMA_STREAM_END) {
         std.debug.print("lzma error code: {}\n", .{res});
         return Decomp.Error.ReadFailed;
     }

@@ -6,7 +6,7 @@ const c = @import("c");
 const Decomp = @import("../decomp.zig");
 const ResourceQueue = @import("../utils/resource_queue.zig").ResourceQueue;
 
-const Zstd = @This();
+const Zlib = @This();
 
 alloc: std.mem.Allocator,
 
@@ -18,14 +18,14 @@ interface: Decomp = .{
     },
 },
 
-pub fn init(alloc: std.mem.Allocator) !Zstd {
+pub fn init(alloc: std.mem.Allocator) !Zlib {
     return .{
         .alloc = alloc,
 
         .queue = try .init(alloc, try std.Thread.getCpuCount()),
     };
 }
-pub fn deinit(self: *Zstd, io: Io) void {
+pub fn deinit(self: *Zlib, io: Io) void {
     for (0.., self.queue.queue.items) |i, _| {
         var stream = self.queue.queue.items[i];
         if (stream != null)
@@ -35,15 +35,13 @@ pub fn deinit(self: *Zstd, io: Io) void {
 }
 
 fn decompress(interface: *Decomp, io: Io, in: []u8, out: []u8) Decomp.Error!usize {
-    const self: *Zstd = @fieldParentPtr("interface", interface);
+    const self: *Zlib = @fieldParentPtr("interface", interface);
 
-    var stream = blk: {
-        var stream = try self.queue.get(io);
-        if (stream == null)
-            break :blk c.z_stream{};
-        _ = c.inflateReset(&stream.?);
-        break :blk stream.?;
-    };
+    const get = try self.queue.get(io);
+    var stream = if (get == null)
+        c.z_stream{}
+    else
+        get.?;
     defer self.queue.put(io, stream);
 
     stream.next_in = in.ptr;
@@ -51,9 +49,11 @@ fn decompress(interface: *Decomp, io: Io, in: []u8, out: []u8) Decomp.Error!usiz
     stream.next_out = out.ptr;
     stream.avail_out = @truncate(out.len);
 
-    const res = c.inflate(&stream, c.Z_FULL_FLUSH);
+    var res = c.inflateInit(&stream);
+
+    res = c.inflate(&stream, c.Z_FINISH);
     if (res < 0) {
-        std.debug.print("zlib error code: {s}\n", .{c.zError(res)});
+        std.debug.print("zlib inflate error code: {s}\n", .{c.zError(res)});
         return Decomp.Error.ReadFailed;
     }
     return stream.total_out;

@@ -128,7 +128,17 @@ pub fn open(self: File, alloc: std.mem.Allocator, io: Io, filepath: []const u8) 
 
 /// Extract the given File to the location.
 pub fn extract(self: File, alloc: std.mem.Allocator, io: Io, ext_loc: []const u8, options: Options) !void {
-    // TODO: do some basic processing to check if ext_loc is a folder & if self is regular file and adjust accordingly.
+    const stat = Io.Dir.cwd().statFile(io, ext_loc, .{}) catch |err| switch (err) {
+        error.FileNotFound => return extractFn(alloc, io, self.data, self.super, self.decomp, self.inode, ext_loc, options),
+        else => return err,
+    };
+    if ((self.inode.header.type == .dir or self.inode.header.type == .ext_dir) and stat.kind == .directory)
+        return extractFn(alloc, io, self.data, self.super, self.decomp, self.inode, ext_loc, options);
 
-    return extractFn(alloc, io, self.data, self.super, self.decomp, self.inode, ext_loc, options);
+    if (stat.kind == .directory) {
+        const new_loc = try std.mem.concat(alloc, u8, &.{ std.mem.trim(u8, ext_loc, "/"), "/", self.name });
+        defer alloc.free(new_loc);
+
+        return extractFn(alloc, io, self.data, self.super, self.decomp, self.inode, new_loc, options);
+    } else if (!options.overwrite) return error.FileExists;
 }

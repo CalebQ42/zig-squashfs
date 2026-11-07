@@ -14,7 +14,12 @@ interface: Decomp = .{
 },
 
 fn decompress(_: *Decomp, _: Io, in: []u8, out: []u8) Decomp.Error!usize {
-    const res = c.LZ4_decompress_fast(in.ptr, out.ptr, @bitCast(@as(u32, @truncate(in.len))));
+    const res = c.LZ4_decompress_safe(
+        in.ptr,
+        out.ptr,
+        @bitCast(@as(u32, @truncate(in.len))),
+        @bitCast(@as(u32, @truncate(out.len))),
+    );
     if (res < 0) {
         std.debug.print("lz4 error code: {}\n", .{res});
         return Decomp.Error.ReadFailed;

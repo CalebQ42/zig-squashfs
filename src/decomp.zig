@@ -28,7 +28,7 @@ pub const Enum = enum(u16) {
 pub const Union = union(Enum) {
     gzip: if (build.zig_decomp) @import("decomp/zig_gzip.zig") else @import("decomp/c_gzip.zig"),
     lzma: if (build.zig_decomp) @import("decomp/zig_lzma.zig") else @import("decomp/c_lzma.zig"),
-    lzo: if (build.zig_decomp) void else @import("decomp/c_lzo.zig"),
+    lzo: if (build.zig_decomp or !build.allow_lzo) void else @import("decomp/c_lzo.zig"),
     xz: if (build.zig_decomp) @import("decomp/zig_xz.zig") else @import("decomp/c_xz.zig"),
     lz4: if (build.zig_decomp) void else @import("decomp/c_lz4.zig"),
     zstd: if (build.zig_decomp) @import("decomp/zig_zstd.zig") else @import("decomp/c_zstd.zig"),
