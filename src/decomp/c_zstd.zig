@@ -4,14 +4,13 @@ const Io = std.Io;
 const c = @import("c");
 
 const Decomp = @import("../decomp.zig");
+const ResourceQueue = @import("../utils/resource_queue.zig").ResourceQueue;
 
 const Zstd = @This();
 
 alloc: std.mem.Allocator,
 
-queue: std.ArrayListUnmanaged(?*c.ZSTD_DCtx),
-cond: Io.Condition,
-mut: Io.Mutex = .init,
+queue: ResourceQueue(*c.ZSTD_DCtx),
 
 interface: Decomp = .{
     .vtable = &.{
@@ -20,51 +19,31 @@ interface: Decomp = .{
 },
 
 pub fn init(alloc: std.mem.Allocator) !Zstd {
-    var queue: std.ArrayListUnmanaged(?*c.ZSTD_DCtx) = try .initCapacity(alloc, try std.Thread.getCpuCount());
     return .{
         .alloc = alloc,
 
-        .queue = queue,
+        .queue = try .init(alloc, try std.Thread.getCpuCount()),
     };
 }
 pub fn deinit(self: *Zstd, io: Io) void {
-    self.mut.lockUncancelable(io);
-
-    for (self.queue.items) |ctx| {
+    for (self.queue.queue.items) |ctx| {
         if (ctx != null)
             _ = c.ZSTD_freeDCtx(ctx);
     }
-    self.queue.deinit(self.alloc);
+    self.queue.deinit(self.alloc, io);
 }
 
 fn decompress(interface: *Decomp, io: Io, in: []u8, out: []u8) Decomp.Error!usize {
     const self: *Zstd = @fieldParentPtr("interface", interface);
 
     const ctx = blk: {
-        try self.mut.lock(io);
-
-        var pop = self.queue.pop();
-        while (pop == null) {
-            try self.cond.wait(io, &self.mut) catch |err| {
-                self.mut.unlock(io);
-                return err;
-            };
-            pop = self.queue.pop();
-        }
-        self.mut.unlock(io);
-
-        const ctx = pop.?;
+        const ctx = try self.queue.get(io);
         if (ctx == null)
             break :blk c.ZSTD_createDCtx().?;
         _ = c.ZSTD_DCtx_reset(ctx, c.ZSTD_reset_session_only);
         break :blk ctx.?;
     };
-    defer blk: {
-        self.mut.lock(io) catch break :blk;
-        defer self.mut.unlock(io);
-
-        self.queue.appendAssumeCapacity(ctx);
-    }
+    defer self.queue.put(io, ctx);
 
     const res = c.ZSTD_decompressDCtx(ctx, out.ptr, out.len, in.ptr, in.len);
     if (c.ZSTD_isError(res) > 0) {

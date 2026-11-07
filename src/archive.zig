@@ -52,7 +52,7 @@ pub fn root(self: *Archive, alloc: std.mem.Allocator, io: Io) !File {
             io,
             self.map.memory,
             self.super,
-            self.decomp.interface(),
+            try self.decomp.interface(),
             self.root_inode_ref.start,
             self.root_inode_ref.offset,
         ),
@@ -71,12 +71,12 @@ pub fn extract(self: *Archive, alloc: std.mem.Allocator, io: Io, ext_loc: []cons
         io,
         self.map.memory,
         self.super,
-        self.decomp.interface(),
+        try self.decomp.interface(),
         self.root_inode_ref.start,
         self.root_inode_ref.offset,
     );
 
-    return extractFn(alloc, io, self.map.memory, self.super, self.decomp.interface(), root_inode, ext_loc, options);
+    return extractFn(alloc, io, self.map.memory, self.super, try self.decomp.interface(), root_inode, ext_loc, options);
 }
 
 // Superblock
